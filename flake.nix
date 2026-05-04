@@ -71,8 +71,18 @@
         system:
         let
           pkgs = import nixpkgs { inherit system; };
-          piPackages = import ./modules/home/packages.nix {
-            inherit lib pkgs inputs;
+          b2n = inputs.bun2nix.packages.${system}.default;
+          lock = lib.fs.relativeTo ./locks;
+          claudeCode = inputs.llm-agents.packages.${system}.claude-code;
+          piPackages = lib.fs.importAttrs ./modules/home/packages {
+            inherit
+              lib
+              pkgs
+              inputs
+              b2n
+              lock
+              claudeCode
+              ;
           };
         in
         piPackages

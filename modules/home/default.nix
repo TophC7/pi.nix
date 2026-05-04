@@ -10,6 +10,9 @@
 let
   cfg = config.programs.pi;
   system = pkgs.stdenv.hostPlatform.system;
+  b2n = inputs.bun2nix.packages.${system}.default;
+  lock = lib.fs.relativeTo ../../locks;
+  claudeCode = inputs.llm-agents.packages.${system}.claude-code;
   extensionFiles = [
     "caveman.ts"
     "clear.ts"
@@ -18,8 +21,15 @@ let
     "pr.ts"
     "use-fish.ts"
   ];
-  piPackages = import ./packages.nix {
-    inherit lib pkgs inputs;
+  piPackages = lib.fs.importAttrs ./packages {
+    inherit
+      lib
+      pkgs
+      inputs
+      b2n
+      lock
+      claudeCode
+      ;
   };
 in
 {
@@ -51,31 +61,35 @@ in
       piPackages.rtk
     ];
 
-    home.file = builtins.listToAttrs (map (name: {
-      name = ".pi/agent/extensions/${name}";
-      value.source = ./extensions/${name};
-    }) extensionFiles) // {
-      ".pi/agent/settings.json".text = builtins.toJSON {
-        defaultProvider = cfg.provider;
-        defaultModel = cfg.model;
-        defaultThinkingLevel = "medium";
-        theme = "dark";
+    home.file =
+      builtins.listToAttrs (
+        map (name: {
+          name = ".pi/agent/extensions/${name}";
+          value.source = ./extensions/${name};
+        }) extensionFiles
+      )
+      // {
+        ".pi/agent/settings.json".text = builtins.toJSON {
+          defaultProvider = cfg.provider;
+          defaultModel = cfg.model;
+          defaultThinkingLevel = "medium";
+          theme = "dark";
 
-        extensions = map (name: "~/.pi/agent/extensions/${name}") extensionFiles;
+          extensions = map (name: "~/.pi/agent/extensions/${name}") extensionFiles;
 
-        packages = map toString [
-          inputs.pi-ask-user
-          inputs.pi-subagents
-          inputs.pi-simplify
-          inputs.pi-rtk-optimizer
-          piPackages.pi-terminal-theme
-          piPackages.pimagotchi
-          piPackages.pi-tool-display
-          piPackages.pi-claude-bridge
-          piPackages.pi-web-access
-          piPackages.context-mode
-        ];
+          packages = map toString [
+            inputs.pi-ask-user
+            inputs.pi-subagents
+            inputs.pi-simplify
+            inputs.pi-rtk-optimizer
+            piPackages.pi-terminal-theme
+            piPackages.pimagotchi
+            piPackages.pi-tool-display
+            piPackages.pi-claude-bridge
+            piPackages.pi-web-access
+            piPackages.context-mode
+          ];
+        };
       };
-    };
   };
 }
