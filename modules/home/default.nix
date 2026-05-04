@@ -9,6 +9,7 @@
 }:
 let
   cfg = config.programs.pi;
+  system = pkgs.stdenv.hostPlatform.system;
   piPackages = import ./packages.nix {
     inherit lib pkgs inputs;
   };
@@ -16,6 +17,12 @@ in
 {
   options.programs.pi = {
     enable = lib.mkEnableOption "Pi coding agent configuration";
+
+    package = lib.mkOption {
+      type = lib.types.package;
+      default = inputs.llm-agents.packages.${system}.pi;
+      description = "Pi coding agent package to install.";
+    };
 
     provider = lib.mkOption {
       type = lib.types.str;
@@ -31,6 +38,8 @@ in
   };
 
   config = lib.mkIf cfg.enable {
+    home.packages = [ cfg.package ];
+
     home.file = {
       ".pi/agent/extensions/caveman.ts".source = ./extensions/caveman.ts;
       ".pi/agent/extensions/clear.ts".source = ./extensions/clear.ts;

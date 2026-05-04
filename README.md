@@ -1,6 +1,6 @@
 # pi.nix
 
-Home Manager module for Pi coding agent config, local extensions, and third-party Pi packages.
+Home Manager module for Pi coding agent package, config, local extensions, and third-party Pi packages.
 
 ## Use
 
@@ -25,6 +25,8 @@ Import module in Home Manager:
   };
 }
 ```
+
+`programs.pi.package` defaults to `pi-nix`'s pinned `llm-agents` Pi package.
 
 ## NPM isolation
 
