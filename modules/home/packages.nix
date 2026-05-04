@@ -8,6 +8,66 @@ let
   lock = lib.fs.relativeTo ../../locks;
 in
 {
+  pi-terminal-theme = pkgs.stdenv.mkDerivation rec {
+    pname = "pi-terminal-theme";
+    version = "0.1.3";
+
+    src = pkgs.fetchurl {
+      url = "https://registry.npmjs.org/pi-terminal-theme/-/pi-terminal-theme-${version}.tgz";
+      hash = "sha512-nbTHJNvL0KheWX/zsoW+6+9Sh1YO6j98aIDQjfSXh0j8qAbMAtIMZeSC2FeboAk+81MAlcXEx6SMKS7x9cCDZg==";
+    };
+
+    sourceRoot = "package";
+    dontBuild = true;
+
+    installPhase = ''
+      runHook preInstall
+      mkdir -p $out
+      cp -R . $out/
+      runHook postInstall
+    '';
+  };
+
+  pimagotchi = pkgs.stdenv.mkDerivation rec {
+    pname = "pimagotchi";
+    version = "1.1.3";
+
+    src = pkgs.fetchurl {
+      url = "https://registry.npmjs.org/@studiosunnyfield/pimagotchi/-/pimagotchi-${version}.tgz";
+      hash = "sha512-Bbl8gY9sBkXABYtXr0DPdZtn0dP5Iz4rBFPHu7ym/xOwANG5IKdKZkvxK8NUuBZpegVQI8eAZFnBwDxxuPj3cA==";
+    };
+
+    sourceRoot = "package";
+    dontBuild = true;
+
+    installPhase = ''
+      runHook preInstall
+      mkdir -p $out
+      cp -R . $out/
+      runHook postInstall
+    '';
+  };
+
+  pi-tool-display = pkgs.stdenv.mkDerivation rec {
+    pname = "pi-tool-display";
+    version = "0.3.6";
+
+    src = pkgs.fetchurl {
+      url = "https://registry.npmjs.org/pi-tool-display/-/pi-tool-display-${version}.tgz";
+      hash = "sha512-yW43rSj2Yah0hZIAYXEClAeBxPq3gwUW/kbGMy5RG9ri5ndo3EIBTL9zDEjxYT3y1mzpFVhLnW6CQVCMNwUOHA==";
+    };
+
+    sourceRoot = "package";
+    dontBuild = true;
+
+    installPhase = ''
+      runHook preInstall
+      mkdir -p $out
+      cp -R . $out/
+      runHook postInstall
+    '';
+  };
+
   pi-claude-bridge = pkgs.buildNpmPackage rec {
     pname = "pi-claude-bridge";
     version = "0.3.1";

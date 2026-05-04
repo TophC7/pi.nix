@@ -67,6 +67,9 @@ in
           inputs.pi-subagents
           inputs.pi-simplify
           inputs.pi-rtk-optimizer
+          piPackages.pi-terminal-theme
+          piPackages.pimagotchi
+          piPackages.pi-tool-display
           piPackages.pi-claude-bridge
           piPackages.pi-web-access
           piPackages.context-mode
