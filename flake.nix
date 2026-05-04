@@ -16,12 +16,30 @@
     # ---------------------------------------------------------
     # Pi Package Inputs
     # ---------------------------------------------------------
-    pi-ask-user = { url = "github:edlsh/pi-ask-user"; flake = false; };
-    pi-subagents = { url = "github:nicobailon/pi-subagents"; flake = false; };
-    pi-web-access = { url = "github:nicobailon/pi-web-access"; flake = false; };
-    pi-simplify = { url = "github:geminixiang/pi-simplify"; flake = false; };
-    pi-rtk-optimizer = { url = "github:MasuRii/pi-rtk-optimizer"; flake = false; };
-    context-mode = { url = "github:mksglu/context-mode"; flake = false; };
+    pi-ask-user = {
+      url = "github:edlsh/pi-ask-user";
+      flake = false;
+    };
+    pi-subagents = {
+      url = "github:nicobailon/pi-subagents";
+      flake = false;
+    };
+    pi-web-access = {
+      url = "github:nicobailon/pi-web-access";
+      flake = false;
+    };
+    pi-simplify = {
+      url = "github:geminixiang/pi-simplify";
+      flake = false;
+    };
+    pi-rtk-optimizer = {
+      url = "github:MasuRii/pi-rtk-optimizer";
+      flake = false;
+    };
+    context-mode = {
+      url = "github:mksglu/context-mode";
+      flake = false;
+    };
   };
 
   outputs =
@@ -37,14 +55,23 @@
     {
       homeManagerModules = {
         pi = import ./modules/home {
-          inherit lib;
-          flake = self;
-          inherit inputs;
+          inherit lib inputs;
         };
         default = self.homeManagerModules.pi;
       };
 
-      # If we ever need to expose packages (like compiled context-mode),
-      # we can use flake-utils or just nixpkgs.lib.genAttrs here later.
+      packages = nixpkgs.lib.genAttrs nixpkgs.lib.systems.flakeExposed (
+        system:
+        let
+          pkgs = import nixpkgs { inherit system; };
+          piPackages = import ./modules/home/packages.nix {
+            inherit lib pkgs inputs;
+          };
+        in
+        piPackages
+        // {
+          default = piPackages.pi-web-access;
+        }
+      );
     };
 }
