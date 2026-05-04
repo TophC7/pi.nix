@@ -21,6 +21,9 @@ let
     "pr.ts"
     "use-fish.ts"
   ];
+  extensionPaths = (map (name: "~/.pi/agent/extensions/${name}") extensionFiles) ++ [
+    "~/.pi/agent/extensions/spec/index.ts"
+  ];
   piPackages = lib.fs.importAttrs ./packages {
     inherit
       lib
@@ -59,6 +62,9 @@ in
     home.packages = [
       cfg.package
       piPackages.rtk
+      piPackages.trekker
+      piPackages.trekker-dashboard
+      pkgs.pandoc
     ];
 
     home.file =
@@ -69,13 +75,14 @@ in
         }) extensionFiles
       )
       // {
+        ".pi/agent/extensions/spec".source = ./extensions/spec;
         ".pi/agent/settings.json".text = builtins.toJSON {
           defaultProvider = cfg.provider;
           defaultModel = cfg.model;
           defaultThinkingLevel = "medium";
           theme = "dark";
 
-          extensions = map (name: "~/.pi/agent/extensions/${name}") extensionFiles;
+          extensions = extensionPaths;
 
           packages = map toString [
             inputs.pi-ask-user
@@ -88,6 +95,7 @@ in
             piPackages.pi-claude-bridge
             piPackages.pi-web-access
             piPackages.context-mode
+            piPackages.pi-markdown-preview
           ];
         };
       };
