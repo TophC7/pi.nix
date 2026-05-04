@@ -1,57 +1,40 @@
-import { Type } from "typebox";
-import {
-	truncateTail,
-	DEFAULT_MAX_BYTES,
-	DEFAULT_MAX_LINES,
-} from "@mariozechner/pi-coding-agent";
+import { createLocalBashOperations } from "@mariozechner/pi-coding-agent";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 
+const FISH_PROMPT = [
+	"Shell policy: bash tool is backed by fish.",
+	"Use valid fish syntax only. Do not use bash-only syntax like heredocs, [[ ... ]], VAR=value command, or $?.",
+	"Use `set -gx NAME value`, `$status`, `$argv`, `begin; ...; end`, and fish command substitutions.",
+].join("\n");
+
+function quoteForPosixShell(value: string): string {
+	return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+function fishCommand(command: string): string {
+	return `fish -lc ${quoteForPosixShell(command)}`;
+}
+
 export default function (pi: ExtensionAPI) {
-	pi.registerTool({
-		name: "bash", // We override the built-in tool by using the exact same name
-		label: "Fish Shell",
-		description:
-			"Execute a fish shell command in the current working directory. Returns stdout and stderr. You MUST use valid fish syntax, NOT bash syntax.",
-		parameters: Type.Object({
-			command: Type.String({ description: "Fish command to execute" }),
-			timeout: Type.Optional(
-				Type.Number({ description: "Timeout in seconds" }),
-			),
-		}),
+	pi.on("before_agent_start", (event) => ({
+		systemPrompt: `${event.systemPrompt}\n\n${FISH_PROMPT}`,
+	}));
 
-		async execute(_toolCallId, params, signal, _onUpdate, _ctx) {
-			const timeoutMs = params.timeout ? params.timeout * 1000 : undefined;
+	pi.on("tool_call", (event) => {
+		if (event.toolName !== "bash") return;
+		const input = event.input as { command?: unknown };
+		if (typeof input.command !== "string") return;
+		input.command = fishCommand(input.command);
+	});
 
-			const result = await pi.exec("fish", ["-c", params.command], {
-				signal,
-				timeout: timeoutMs,
-			});
-
-			let rawOutput = "";
-			if (result.stdout) rawOutput += result.stdout;
-			if (result.stderr) rawOutput += (rawOutput ? "\n" : "") + result.stderr;
-			if (!rawOutput) rawOutput = "(No output)";
-			if (result.code !== 0) rawOutput += `\n(Exit code: ${result.code})`;
-
-			const truncation = truncateTail(rawOutput, {
-				maxLines: DEFAULT_MAX_LINES,
-				maxBytes: DEFAULT_MAX_BYTES,
-			});
-
-			let finalOutput = truncation.content;
-			if (truncation.truncated) {
-				finalOutput += `\n\n[Output truncated: kept last ${truncation.outputLines} lines]`;
-			}
-
-			return {
-				content: [{ type: "text", text: finalOutput }],
-				details: {
-					...result,
-					stdout: finalOutput,
-					stderr: "",
-					truncated: truncation.truncated,
+	pi.on("user_bash", () => {
+		const local = createLocalBashOperations();
+		return {
+			operations: {
+				exec(command, cwd, options) {
+					return local.exec(fishCommand(command), cwd, options);
 				},
-			};
-		},
+			},
+		};
 	});
 }
