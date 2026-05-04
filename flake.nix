@@ -18,6 +18,8 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
+    bun2nix.follows = "llm-agents/bun2nix";
+
     # ---------------------------------------------------------
     # Pi Package Inputs
     # ---------------------------------------------------------

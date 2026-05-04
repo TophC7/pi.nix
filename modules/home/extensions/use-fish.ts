@@ -19,10 +19,9 @@ export default function (pi: ExtensionAPI) {
 			),
 		}),
 
-		async execute(toolCallId, params, signal, onUpdate, ctx) {
+		async execute(_toolCallId, params, signal, _onUpdate, _ctx) {
 			const timeoutMs = params.timeout ? params.timeout * 1000 : undefined;
 
-			// Execute using fish -c
 			const result = await pi.exec("fish", ["-c", params.command], {
 				signal,
 				timeout: timeoutMs,
@@ -34,7 +33,6 @@ export default function (pi: ExtensionAPI) {
 			if (!rawOutput) rawOutput = "(No output)";
 			if (result.code !== 0) rawOutput += `\n(Exit code: ${result.code})`;
 
-			// We MUST truncate the output to prevent blowing up the LLM context window
 			const truncation = truncateTail(rawOutput, {
 				maxLines: DEFAULT_MAX_LINES,
 				maxBytes: DEFAULT_MAX_BYTES,
@@ -47,7 +45,12 @@ export default function (pi: ExtensionAPI) {
 
 			return {
 				content: [{ type: "text", text: finalOutput }],
-				details: result,
+				details: {
+					...result,
+					stdout: finalOutput,
+					stderr: "",
+					truncated: truncation.truncated,
+				},
 			};
 		},
 	});

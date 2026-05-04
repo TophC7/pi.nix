@@ -59,7 +59,10 @@ interface CavemanConfig {
 	showStatus: boolean;
 }
 
-const CONFIG_PATH = join(homedir(), ".pi", "agent", "caveman.json");
+const CONFIG_DIR = join(homedir(), ".pi", "agent");
+const CONFIG_PATH = join(CONFIG_DIR, "caveman.json");
+const CONFIG_DISPLAY_PATH = "~/.pi/agent/caveman.json";
+const CAVEMAN_LEVEL_ENTRY_TYPE = "caveman-level";
 const DEFAULT_CONFIG: CavemanConfig = {
 	defaultLevel: "full",
 	showStatus: true,
@@ -87,7 +90,7 @@ async function loadConfig(): Promise<CavemanConfig> {
 async function saveConfig(config: CavemanConfig): Promise<void> {
 	const snapshot = JSON.stringify(config, null, 2) + "\n";
 	saveConfigQueue = saveConfigQueue.then(async () => {
-		await mkdir(join(homedir(), ".pi", "agent"), { recursive: true });
+		await mkdir(CONFIG_DIR, { recursive: true });
 		await writeFile(CONFIG_PATH, snapshot, "utf8");
 	});
 	return saveConfigQueue;
@@ -247,21 +250,18 @@ export default function caveman(pi: ExtensionAPI) {
 	pi.on("session_start", async (_event, ctx) => {
 		await ensureConfigLoaded();
 
-		// Check for session-level override first (resuming a session)
 		let sessionLevel: Level | null = null;
 		for (const entry of ctx.sessionManager.getEntries()) {
-			if (entry.type === "custom" && entry.customType === "caveman-level") {
+			if (entry.type === "custom" && entry.customType === CAVEMAN_LEVEL_ENTRY_TYPE) {
 				sessionLevel = (entry.data as { level: Level })?.level ?? null;
 			}
 		}
 
 		if (sessionLevel !== null) {
-			// Resuming — use session state
 			level = sessionLevel;
 		} else if (config.defaultLevel !== "off") {
-			// New session — apply default from config
 			level = config.defaultLevel;
-			pi.appendEntry("caveman-level", { level });
+			pi.appendEntry(CAVEMAN_LEVEL_ENTRY_TYPE, { level });
 		}
 
 		syncStatus(ctx);
@@ -297,7 +297,6 @@ export default function caveman(pi: ExtensionAPI) {
 		handler: async (args, ctx) => {
 			const arg = args?.trim().toLowerCase();
 
-			// Open config dialog
 			if (arg === "config") {
 				await openConfig(ctx);
 				return;
@@ -317,7 +316,7 @@ export default function caveman(pi: ExtensionAPI) {
 				return;
 			}
 
-			pi.appendEntry("caveman-level", { level });
+			pi.appendEntry(CAVEMAN_LEVEL_ENTRY_TYPE, { level });
 			syncStatus(ctx);
 
 			ctx.ui.notify(
@@ -355,7 +354,7 @@ export default function caveman(pi: ExtensionAPI) {
 				new Text(theme.fg("accent", theme.bold(" Caveman Config")), 0, 0),
 			);
 			container.addChild(
-				new Text(theme.fg("dim", " Saved to ~/.pi/agent/caveman.json"), 0, 0),
+				new Text(theme.fg("dim", ` Saved to ${CONFIG_DISPLAY_PATH}`), 0, 0),
 			);
 			container.addChild(
 				new Text(
@@ -367,15 +366,28 @@ export default function caveman(pi: ExtensionAPI) {
 			container.addChild(new Text("", 0, 0));
 
 			const applySettingChange = (id: string, newValue: string) => {
+				const nextConfig = { ...config };
 				if (id === "defaultLevel" && LEVELS.includes(newValue as Level)) {
-					config.defaultLevel = newValue as Level;
+					nextConfig.defaultLevel = newValue as Level;
 				} else if (id === "showStatus") {
-					config.showStatus = newValue === "on";
+					nextConfig.showStatus = newValue === "on";
 				}
-				saveConfig(config);
+
+				if (
+					nextConfig.defaultLevel === config.defaultLevel &&
+					nextConfig.showStatus === config.showStatus
+				) {
+					return;
+				}
+
+				config = nextConfig;
+				void saveConfig(config).catch((error) => {
+					ctx.ui.notify(`Failed to save caveman config: ${error}`, "error");
+				});
 				syncStatus(ctx);
 			};
 
+			let selectedIndex = 0;
 			const settingsList = new SettingsList(
 				items,
 				Math.min(items.length + 2, 10),
@@ -394,9 +406,6 @@ export default function caveman(pi: ExtensionAPI) {
 			);
 
 			const cycleSelectedValue = (direction: -1 | 1) => {
-				const selectedIndex = (
-					settingsList as unknown as { selectedIndex: number }
-				).selectedIndex;
 				const item = items[selectedIndex];
 				if (!item?.values?.length) return;
 
@@ -415,7 +424,12 @@ export default function caveman(pi: ExtensionAPI) {
 				handleInput: (data: string) => {
 					if (data === "j") data = "\u001b[B";
 					else if (data === "k") data = "\u001b[A";
-					else if (data === "h") {
+
+					if (data === "\u001b[B") {
+						selectedIndex = Math.min(selectedIndex + 1, items.length - 1);
+					} else if (data === "\u001b[A") {
+						selectedIndex = Math.max(selectedIndex - 1, 0);
+					} else if (data === "h") {
 						cycleSelectedValue(-1);
 						_tui.requestRender();
 						return;

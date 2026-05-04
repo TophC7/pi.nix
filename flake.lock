@@ -462,6 +462,10 @@
     },
     "root": {
       "inputs": {
+        "bun2nix": [
+          "llm-agents",
+          "bun2nix"
+        ],
         "context-mode": "context-mode",
         "home-manager": "home-manager",
         "llm-agents": "llm-agents",
