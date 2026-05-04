@@ -1,17 +1,28 @@
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import type {
 	ExtensionAPI,
 	ExtensionCommandContext,
 } from "@mariozechner/pi-coding-agent";
 import type { Api, Model } from "@mariozechner/pi-ai";
+import { selectModelFromMenu, selectThinkingFromMenu } from "./model-picker";
 
 const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
 type ThinkingLevel = (typeof THINKING_LEVELS)[number];
 
-interface ParsedOptions {
+interface CommandConfig {
 	model?: string;
 	thinking?: ThinkingLevel;
-	help: boolean;
-	unknown: string[];
+}
+
+interface CommandsConfig {
+	commit?: CommandConfig;
+	pr?: CommandConfig;
+}
+
+interface ParsedCommand {
+	action: "run" | "model" | "thinking" | "reset" | "help";
+	unknown?: string;
 }
 
 interface RestoreState {
@@ -20,12 +31,13 @@ interface RestoreState {
 }
 
 const COMPLETIONS = [
-	{ value: "--model", label: "--model", description: "Run commit with model, provider/model or model id" },
-	{ value: "-m", label: "-m", description: "Alias for --model" },
-	{ value: "--thinking", label: "--thinking", description: "Run commit with thinking level" },
-	{ value: "-t", label: "-t", description: "Alias for --thinking" },
-	{ value: "--help", label: "--help", description: "Show usage" },
+	{ value: "model", label: "model", description: "Pick and save /commit model" },
+	{ value: "thinking", label: "thinking", description: "Pick and save /commit thinking level" },
+	{ value: "reset", label: "reset", description: "Clear saved /commit model config" },
+	{ value: "help", label: "help", description: "Show usage" },
 ] as const;
+
+const CONFIG_PATH = process.env.PI_COMMAND_MODELS_CONFIG ?? join(process.env.HOME ?? ".", ".pi", "agent", "command-models.json");
 
 const COMMIT_PROMPT = `Create a conventional commit from currently staged git changes.
 
@@ -53,51 +65,47 @@ Rules:
 - If commit fails, show error output and exact attempted commit message, then stop.
 - If commit succeeds, show commit hash and summary briefly.`;
 
-function parseOptions(args: string | undefined, defaultModel?: string, defaultThinking?: ThinkingLevel): ParsedOptions {
-	const options: ParsedOptions = {
-		model: defaultModel,
-		thinking: defaultThinking,
-		help: false,
-		unknown: [],
-	};
-	const tokens = args?.trim() ? args.trim().split(/\s+/) : [];
-
-	for (let i = 0; i < tokens.length; i++) {
-		const token = tokens[i]!;
-		if (token === "--help" || token === "-h") {
-			options.help = true;
-		} else if (token === "--model" || token === "-m") {
-			const value = tokens[++i];
-			if (value) options.model = value;
-			else options.unknown.push(`${token} requires value`);
-		} else if (token.startsWith("--model=")) {
-			options.model = token.slice("--model=".length);
-		} else if (token === "--thinking" || token === "-t") {
-			const value = tokens[++i];
-			if (isThinkingLevel(value)) options.thinking = value;
-			else options.unknown.push(`${token} requires one of ${THINKING_LEVELS.join(", ")}`);
-		} else if (token.startsWith("--thinking=")) {
-			const value = token.slice("--thinking=".length);
-			if (isThinkingLevel(value)) options.thinking = value;
-			else options.unknown.push(`${token} invalid`);
-		} else {
-			options.unknown.push(token);
-		}
-	}
-
-	return options;
+function parseCommand(args: string | undefined): ParsedCommand {
+	const value = args?.trim();
+	if (!value) return { action: "run" };
+	if (value === "model") return { action: "model" };
+	if (value === "thinking") return { action: "thinking" };
+	if (value === "reset") return { action: "reset" };
+	if (value === "help" || value === "--help" || value === "-h") return { action: "help" };
+	return { action: "run", unknown: value };
 }
 
 function isThinkingLevel(value: unknown): value is ThinkingLevel {
 	return typeof value === "string" && THINKING_LEVELS.includes(value as ThinkingLevel);
 }
 
-function stringFlag(value: boolean | string | undefined): string | undefined {
-	return typeof value === "string" && value.trim() ? value.trim() : undefined;
+function readConfig(): CommandsConfig {
+	if (!existsSync(CONFIG_PATH)) return {};
+	try {
+		const config = JSON.parse(readFileSync(CONFIG_PATH, "utf8")) as CommandsConfig;
+		return typeof config === "object" && config !== null ? config : {};
+	} catch {
+		return {};
+	}
 }
 
-function thinkingFlag(value: boolean | string | undefined): ThinkingLevel | undefined {
-	return isThinkingLevel(value) ? value : undefined;
+function writeConfig(config: CommandsConfig): void {
+	mkdirSync(dirname(CONFIG_PATH), { recursive: true });
+	writeFileSync(CONFIG_PATH, `${JSON.stringify(config, null, "\t")}\n`);
+}
+
+function getCommitConfig(): CommandConfig {
+	const config = readConfig().commit ?? {};
+	return {
+		model: typeof config.model === "string" && config.model.trim() ? config.model.trim() : undefined,
+		thinking: isThinkingLevel(config.thinking) ? config.thinking : undefined,
+	};
+}
+
+function saveCommitConfig(commit: CommandConfig): void {
+	const config = readConfig();
+	config.commit = commit;
+	writeConfig(config);
 }
 
 function resolveModel(ctx: ExtensionCommandContext, spec: string): Model<Api> | undefined | "ambiguous" {
@@ -128,21 +136,15 @@ function resolveModel(ctx: ExtensionCommandContext, spec: string): Model<Api> | 
 	return undefined;
 }
 
-async function applyOptions(pi: ExtensionAPI, ctx: ExtensionCommandContext, options: ParsedOptions): Promise<boolean> {
-	if (options.model) {
-		const model = resolveModel(ctx, options.model);
+async function applyConfig(pi: ExtensionAPI, ctx: ExtensionCommandContext, config: CommandConfig): Promise<boolean> {
+	if (config.model) {
+		const model = resolveModel(ctx, config.model);
 		if (model === "ambiguous") {
-			const matches = ctx.modelRegistry
-				.getAll()
-				.filter((candidate) => `${candidate.provider}/${candidate.id}`.includes(options.model!) || candidate.id.includes(options.model!))
-				.slice(0, 5)
-				.map((candidate) => `${candidate.provider}/${candidate.id}`)
-				.join(", ");
-			ctx.ui.notify(`Ambiguous model "${options.model}". Matches: ${matches}`, "error");
+			ctx.ui.notify(`Ambiguous /commit model in ${CONFIG_PATH}: ${config.model}`, "error");
 			return false;
 		}
 		if (!model) {
-			ctx.ui.notify(`Model not found: ${options.model}`, "error");
+			ctx.ui.notify(`Model not found in ${CONFIG_PATH}: ${config.model}`, "error");
 			return false;
 		}
 		const ok = await pi.setModel(model);
@@ -152,8 +154,8 @@ async function applyOptions(pi: ExtensionAPI, ctx: ExtensionCommandContext, opti
 		}
 	}
 
-	if (options.thinking) {
-		pi.setThinkingLevel(options.thinking);
+	if (config.thinking) {
+		pi.setThinkingLevel(config.thinking);
 	}
 
 	return true;
@@ -161,15 +163,6 @@ async function applyOptions(pi: ExtensionAPI, ctx: ExtensionCommandContext, opti
 
 export default function commitExtension(pi: ExtensionAPI) {
 	let pendingRestore: RestoreState | undefined;
-
-	pi.registerFlag("commit-model", {
-		description: "Default model for /commit, provider/model or model id",
-		type: "string",
-	});
-	pi.registerFlag("commit-thinking", {
-		description: "Default thinking level for /commit",
-		type: "string",
-	});
 
 	pi.on("agent_end", async (_event, ctx) => {
 		if (!pendingRestore) return;
@@ -181,34 +174,50 @@ export default function commitExtension(pi: ExtensionAPI) {
 	});
 
 	pi.registerCommand("commit", {
-		description: "Commit staged changes. Options: --model <provider/model> --thinking <level>",
+		description: "Commit staged changes. Use `/commit model` to pick saved model.",
 		getArgumentCompletions: (prefix: string) => {
 			const normalized = prefix.trim();
 			const items = COMPLETIONS.filter((item) => item.value.startsWith(normalized));
 			return items.length > 0 ? items : null;
 		},
 		handler: async (args, ctx) => {
-			const options = parseOptions(
-				args,
-				stringFlag(pi.getFlag("commit-model")),
-				thinkingFlag(pi.getFlag("commit-thinking")),
-			);
+			const command = parseCommand(args);
+			const config = getCommitConfig();
 
-			if (options.help) {
-				ctx.ui.notify("Usage: /commit [--model provider/model] [--thinking off|minimal|low|medium|high|xhigh]", "info");
+			if (command.action === "help") {
+				ctx.ui.notify(`Usage: /commit | /commit model | /commit thinking | /commit reset\nConfig: ${CONFIG_PATH}`, "info");
 				return;
 			}
-			if (options.unknown.length > 0) {
-				ctx.ui.notify(`Unknown /commit args: ${options.unknown.join(", ")}`, "error");
+			if (command.unknown) {
+				ctx.ui.notify(`Unknown /commit arg: ${command.unknown}. Use /commit help.`, "error");
+				return;
+			}
+			if (command.action === "model") {
+				const model = await selectModelFromMenu(ctx, "Pick /commit model:", config.model);
+				if (!model) return;
+				saveCommitConfig({ ...config, model });
+				ctx.ui.notify(`Saved /commit model: ${model}`, "info");
+				return;
+			}
+			if (command.action === "thinking") {
+				const thinking = await selectThinkingFromMenu(ctx, "Pick /commit thinking:", config.thinking);
+				if (!thinking) return;
+				saveCommitConfig({ ...config, thinking });
+				ctx.ui.notify(`Saved /commit thinking: ${thinking}`, "info");
+				return;
+			}
+			if (command.action === "reset") {
+				saveCommitConfig({});
+				ctx.ui.notify("Cleared /commit model config", "info");
 				return;
 			}
 
 			await ctx.waitForIdle();
-			const shouldRestore = Boolean(options.model || options.thinking);
+			const shouldRestore = Boolean(config.model || config.thinking);
 			if (shouldRestore) {
 				pendingRestore = { model: ctx.model, thinking: pi.getThinkingLevel() };
 			}
-			if (!(await applyOptions(pi, ctx, options))) {
+			if (!(await applyConfig(pi, ctx, config))) {
 				pendingRestore = undefined;
 				return;
 			}

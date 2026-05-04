@@ -14,6 +14,7 @@ let
     "caveman.ts"
     "clear.ts"
     "commit.ts"
+    "model-picker.ts"
     "pr.ts"
     "use-fish.ts"
   ];
