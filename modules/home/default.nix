@@ -13,6 +13,8 @@ let
   extensionFiles = [
     "caveman.ts"
     "clear.ts"
+    "commit.ts"
+    "pr.ts"
     "use-fish.ts"
   ];
   piPackages = import ./packages.nix {
