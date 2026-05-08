@@ -1,20 +1,14 @@
 import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { ExtensionAPI, ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { enterMode, exitMode, state } from "./mode.ts";
 import { parsePlanCommand, pickPlan } from "./plans.ts";
 import {
-	parseInterviewAnswers,
 	planFinalizePrompt,
-	planInterviewPrefill,
 	planRiskScoutTask,
 	planScoutTask,
-	planSynthesisTask,
-	specArchitectTask,
 	specFinalizePrompt,
-	specInterviewPrefill,
-	specReviewTask,
 	specVerifierTask,
 } from "./prompts.ts";
 import { extractInvariantChecks, extractIssueIds, extractManualChecks, extractRunChecks, readSpecFiles, replaceSyncBlock, resolveSpec } from "./spec-files.ts";
@@ -29,12 +23,6 @@ function writeStage(dir: string, name: string, content: string): string {
 	const path = join(dir, `${name}.md`);
 	writeFileSync(path, content, "utf8");
 	return path;
-}
-
-async function collectInterviewAnswers(ctx: ExtensionCommandContext, label: string, prefill: string): Promise<string | undefined> {
-	const raw = await ctx.ui.editor(label, prefill);
-	const answers = parseInterviewAnswers(raw);
-	return answers || undefined;
 }
 
 export function registerPlanCommands(pi: ExtensionAPI): void {
@@ -67,7 +55,7 @@ export function registerPlanCommands(pi: ExtensionAPI): void {
 			}
 			let description = args?.trim() ?? "";
 			if (!description) {
-				const entered = await ctx.ui.editor("/plan idea", "Describe the idea to harden before drafting:\n");
+				const entered = await ctx.ui.input("/plan idea", "Describe the idea to harden");
 				description = entered?.trim() ?? "";
 				if (!description) {
 					ctx.ui.notify("/plan cancelled: no idea provided.", "warning");
@@ -89,25 +77,8 @@ export function registerPlanCommands(pi: ExtensionAPI): void {
 				}, "/plan scout");
 				const findings = extractSubagentText(scoutResponse);
 				const findingsPath = writeStage(stageDir, "findings", findings);
-				const answers = await collectInterviewAnswers(ctx, "/plan interview answers", planInterviewPrefill(description, findings));
-				if (!answers) {
-					exitMode(pi, ctx);
-					ctx.ui.notify("/plan cancelled before draft synthesis.", "warning");
-					return;
-				}
-				const answersPath = writeStage(stageDir, "answers", answers);
-				const synthesisResponse = await runSubagent(pi, ctx, {
-					agent: "spec.plan-synthesizer",
-					task: planSynthesisTask(description, findings, answers),
-					context: "fresh",
-					clarify: false,
-					agentScope: "both",
-					output: false,
-				}, "/plan synthesize");
-				const draft = extractSubagentText(synthesisResponse);
-				const draftPath = writeStage(stageDir, "draft", draft);
-				ctx.ui.notify("Plan discovery/interview complete. Parent agent will harden and save draft.", "info");
-				pi.sendUserMessage(planFinalizePrompt({ description, findingsPath, answersPath, draftPath }));
+				ctx.ui.notify("Plan discovery complete. Parent agent will interview, synthesize, harden, and save.", "info");
+				pi.sendUserMessage(planFinalizePrompt({ description, findingsPath }));
 			} catch (error) {
 				exitMode(pi, ctx);
 				ctx.ui.notify(formatBridgeError(error), "error");
@@ -153,35 +124,8 @@ export function registerSpecCommands(pi: ExtensionAPI): void {
 				}, "/spec verify");
 				const verification = extractSubagentText(verifierResponse);
 				const verificationPath = writeStage(stageDir, "verification", verification);
-				const answers = await collectInterviewAnswers(ctx, "/spec:new decisions", specInterviewPrefill(planPath, verification));
-				if (!answers) {
-					exitMode(pi, ctx);
-					ctx.ui.notify("/spec:new cancelled before spec authoring.", "warning");
-					return;
-				}
-				const answersPath = writeStage(stageDir, "answers", answers);
-				const architectResponse = await runSubagent(pi, ctx, {
-					agent: "spec.spec-architect",
-					task: specArchitectTask(planPath, verification, answers),
-					context: "fresh",
-					clarify: false,
-					agentScope: "both",
-					output: false,
-				}, "/spec draft");
-				const draft = extractSubagentText(architectResponse);
-				const draftPath = writeStage(stageDir, "draft", draft);
-				const reviewResponse = await runSubagent(pi, ctx, {
-					agent: "spec.spec-reviewer",
-					task: specReviewTask(planPath, verification, answers, draft),
-					context: "fresh",
-					clarify: false,
-					agentScope: "both",
-					output: false,
-				}, "/spec review");
-				const review = extractSubagentText(reviewResponse);
-				const reviewPath = writeStage(stageDir, "review", review);
-				ctx.ui.notify("Spec verification/interview complete. Parent agent will request final approval before Sworm writes.", "info");
-				pi.sendUserMessage(specFinalizePrompt({ planPath, verificationPath, answersPath, draftPath, reviewPath }));
+				ctx.ui.notify("Spec verification complete. Parent agent will interview, draft, review, harden, and save.", "info");
+				pi.sendUserMessage(specFinalizePrompt({ planPath, verificationPath }));
 			} catch (error) {
 				exitMode(pi, ctx);
 				ctx.ui.notify(formatBridgeError(error), "error");
