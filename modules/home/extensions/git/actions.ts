@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 import type { ExtensionAPI, ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
 import type { Api, Model } from "@mariozechner/pi-ai";
 import { fuzzyFilter } from "@mariozechner/pi-tui";
+import { prepareManualHandoff, unsafeAutomaticHandoffReason } from "../workflow/handoff.ts";
 
 export type GitAction = "commit" | "pr";
 
@@ -114,6 +115,12 @@ async function applyGitActionConfig(pi: ExtensionAPI, ctx: ExtensionCommandConte
 	return true;
 }
 
+async function restoreGitActionConfig(pi: ExtensionAPI, restore: RestoreState | undefined): Promise<void> {
+	if (!restore) return;
+	if (restore.model) await pi.setModel(restore.model);
+	pi.setThinkingLevel(restore.thinking);
+}
+
 function buildPrompt(action: GitAction, basePrompt: string, userPrompt: string | undefined): string {
 	const trimmed = userPrompt?.trim();
 	if (!trimmed) return basePrompt;
@@ -163,5 +170,12 @@ export async function runGitAction(
 		return;
 	}
 
-	pi.sendUserMessage(buildPrompt(action, basePrompt, userPrompt));
+	const restore = pendingRestore;
+	prepareManualHandoff(ctx, {
+		label: `/${action}`,
+		command: buildPrompt(action, basePrompt, userPrompt),
+		reason: `${unsafeAutomaticHandoffReason()} Model/thinking config is not kept pending during manual handoff; re-run after accepting if a custom /git model is required.`,
+	});
+	pendingRestore = undefined;
+	await restoreGitActionConfig(pi, restore);
 }

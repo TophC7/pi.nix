@@ -307,6 +307,14 @@ export async function runSubagent(
 					reject(new Error(text));
 					return;
 				}
+				const failure = firstSubagentFailure(response);
+				if (failure) {
+					markRunFailure(state, failure);
+					requestRedraw();
+					scheduleStateCleanup();
+					reject(new Error(failure));
+					return;
+				}
 				const text = extractSubagentText(response);
 				if (!text) {
 					markRunFailure(state, `Subagent ${label} produced no output.`);
@@ -378,6 +386,16 @@ export function extractSubagentText(response: SubagentResponse): string {
 
 function isMatching(data: unknown, requestId: string): boolean {
 	return Boolean(data && typeof data === "object" && (data as { requestId?: unknown }).requestId === requestId);
+}
+
+function firstSubagentFailure(response: SubagentResponse): string | undefined {
+	const results = response.result?.details?.results;
+	if (!Array.isArray(results)) return undefined;
+	const failed = results.find((result) => result?.error || (typeof result?.exitCode === "number" && result.exitCode !== 0));
+	if (!failed) return undefined;
+	const agent = failed.agent ?? "subagent";
+	const reason = failed.error || (typeof failed.exitCode === "number" ? `exit code ${failed.exitCode}` : "failed");
+	return `${agent} failed: ${reason}`;
 }
 
 function textFromContent(content: unknown): string {

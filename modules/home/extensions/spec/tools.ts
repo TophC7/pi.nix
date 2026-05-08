@@ -1,5 +1,6 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "typebox";
+import { prepareManualHandoff, unsafeAutomaticHandoffReason } from "../workflow/handoff.ts";
 import { saveFile } from "./files.ts";
 import { requireSwormBridge } from "./issues.ts";
 import { exitMode } from "./mode.ts";
@@ -40,8 +41,13 @@ export function registerSpecWorkflowTools(pi: ExtensionAPI): void {
 				ctx.ui.notify(text, "error");
 				return { content: [{ type: "text" as const, text }], details: { path: params.path, error: "sworm_bridge_unavailable" }, isError: true };
 			}
-			pi.sendUserMessage(`/spec:new ${params.path}`);
-			return { content: [{ type: "text", text: `Promoting ${params.path} via /spec:new. Plan-authoring mode will exit; spec-authoring will take over.` }], details: { path: params.path } };
+			exitMode(pi, ctx);
+			const text = prepareManualHandoff(ctx, {
+				label: "promote_plan",
+				command: `/spec:new ${params.path}`,
+				reason: unsafeAutomaticHandoffReason(),
+			});
+			return { content: [{ type: "text", text }], details: { path: params.path, manualHandoff: true } };
 		},
 	});
 

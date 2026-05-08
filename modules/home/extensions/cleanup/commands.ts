@@ -2,6 +2,9 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import { prepareManualHandoff, unsafeAutomaticHandoffReason } from "../workflow/handoff.ts";
+import { getWorkflowProfile } from "../workflow/profiles.ts";
+import { missingRequiredToolNames } from "../workflow/tools.ts";
 import {
 	cleanupApplyPrompt,
 	cleanupEfficiencyTask,
@@ -27,6 +30,11 @@ export function registerCleanupCommands(pi: ExtensionAPI): void {
 		handler: async (args, ctx) => {
 			await ctx.waitForIdle();
 			const focus = args?.trim() || undefined;
+			const missingTools = missingRequiredToolNames(getWorkflowProfile("cleanup"), pi.getAllTools().map((tool) => tool.name));
+			if (missingTools.length > 0) {
+				ctx.ui.notify(`/cleanup missing required tool(s): ${missingTools.join(", ")}. Failing closed.`, "error");
+				return;
+			}
 
 			const repoCheck = await pi.exec("git", ["rev-parse", "--git-dir"], { cwd: ctx.cwd, signal: ctx.signal });
 			if ((repoCheck.code ?? 1) !== 0) {
@@ -62,11 +70,16 @@ export function registerCleanupCommands(pi: ExtensionAPI): void {
 				}, "/cleanup scouts");
 				const findings = extractSubagentText(response);
 				const findingsPath = writeStage(stageDir, "findings", findings);
-				ctx.ui.notify("/cleanup: scouts complete. Parent agent will apply fixes.", "info");
-				pi.sendUserMessage(cleanupApplyPrompt({ diffPath, findingsPath, focus }));
+				ctx.ui.notify("/cleanup: scouts complete. Manual handoff prepared for parent agent to apply fixes.", "info");
+				prepareManualHandoff(ctx, {
+					label: "/cleanup apply",
+					command: cleanupApplyPrompt({ diffPath, findingsPath, focus }),
+					reason: unsafeAutomaticHandoffReason(),
+				});
 			} catch (error) {
 				const message = error instanceof Error ? error.message : String(error);
 				ctx.ui.notify(`/cleanup error: ${message}`, "error");
+				throw error;
 			}
 		},
 	});
@@ -75,8 +88,12 @@ export function registerCleanupCommands(pi: ExtensionAPI): void {
 		description: "Delete only obvious junk (console.log, debugger, unused imports, empty catches).",
 		handler: async (_args, ctx) => {
 			await ctx.waitForIdle();
-			ctx.ui.notify("/cleanup:quick: removing obvious junk only.", "info");
-			pi.sendUserMessage(cleanupQuickPrompt());
+			ctx.ui.notify("/cleanup:quick: manual handoff prepared for obvious junk removal.", "info");
+			prepareManualHandoff(ctx, {
+				label: "/cleanup:quick",
+				command: cleanupQuickPrompt(),
+				reason: unsafeAutomaticHandoffReason(),
+			});
 		},
 	});
 }

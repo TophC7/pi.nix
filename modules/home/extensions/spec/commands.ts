@@ -2,6 +2,7 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } fro
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI, ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
+import { prepareManualHandoff, unsafeAutomaticHandoffReason } from "../workflow/handoff.ts";
 import { enterMode, exitMode, state } from "./mode.ts";
 import { isPlanDraftPath, parsePlanCommand, pickPlan } from "./plans.ts";
 import {
@@ -48,14 +49,23 @@ export function registerPlanCommands(pi: ExtensionAPI): void {
 			if (command === "open") {
 				const draft = await pickPlan(ctx, "Open plan draft:");
 				if (!draft) return;
-				pi.sendUserMessage(`/preview ${draft.path}`);
+				prepareManualHandoff(ctx, {
+					label: "/plan open",
+					command: `/preview ${draft.path}`,
+					reason: unsafeAutomaticHandoffReason(),
+				});
 				return;
 			}
 			if (command === "promote") {
 				const draft = await pickPlan(ctx, "Promote plan draft:");
 				if (!draft) return;
 				if (!(await requireBridgeOrExit(pi, ctx, "/plan promote"))) return;
-				pi.sendUserMessage(`/spec:new ${draft.path}`);
+				exitMode(pi, ctx);
+				prepareManualHandoff(ctx, {
+					label: "/plan promote",
+					command: `/spec:new ${draft.path}`,
+					reason: unsafeAutomaticHandoffReason(),
+				});
 				return;
 			}
 			if (command === "help") {
@@ -86,8 +96,12 @@ export function registerPlanCommands(pi: ExtensionAPI): void {
 				}, "/plan scout");
 				const findings = extractSubagentText(scoutResponse);
 				const findingsPath = writeStage(stageDir, "findings", findings);
-				ctx.ui.notify("Plan discovery complete. Parent agent will interview, synthesize, harden, and save.", "info");
-				pi.sendUserMessage(planFinalizePrompt({ description, findingsPath }));
+				ctx.ui.notify("Plan discovery complete. Manual handoff prepared for parent agent interview, synthesis, hardening, and save.", "info");
+				prepareManualHandoff(ctx, {
+					label: "/plan finalize",
+					command: planFinalizePrompt({ description, findingsPath }),
+					reason: unsafeAutomaticHandoffReason(),
+				});
 			} catch (error) {
 				exitMode(pi, ctx);
 				ctx.ui.notify(formatBridgeError(error), "error");
@@ -106,7 +120,11 @@ export function registerSpecCommands(pi: ExtensionAPI): void {
 			if (!planPath) {
 				const choice = await ctx.ui.select("/spec:new needs a plan draft", ["select existing plan", "create new /plan", "cancel"]);
 				if (choice === "create new /plan") {
-					pi.sendUserMessage("/plan");
+					prepareManualHandoff(ctx, {
+						label: "/spec:new",
+						command: "/plan",
+						reason: unsafeAutomaticHandoffReason(),
+					});
 					return;
 				}
 				if (choice !== "select existing plan") return;
@@ -132,8 +150,12 @@ export function registerSpecCommands(pi: ExtensionAPI): void {
 				}, "/spec verify");
 				const verification = extractSubagentText(verifierResponse);
 				const verificationPath = writeStage(stageDir, "verification", verification);
-				ctx.ui.notify("Spec verification complete. Parent agent will interview, draft, review, harden, and save.", "info");
-				pi.sendUserMessage(specFinalizePrompt({ planPath, verificationPath }));
+				ctx.ui.notify("Spec verification complete. Manual handoff prepared for parent agent interview, draft, review, hardening, and save.", "info");
+				prepareManualHandoff(ctx, {
+					label: "/spec:new finalize",
+					command: specFinalizePrompt({ planPath, verificationPath }),
+					reason: unsafeAutomaticHandoffReason(),
+				});
 			} catch (error) {
 				exitMode(pi, ctx);
 				ctx.ui.notify(formatBridgeError(error), "error");
@@ -151,7 +173,11 @@ export function registerSpecCommands(pi: ExtensionAPI): void {
 			try {
 				const swormState = await loadSpecSwormState(spec);
 				enterMode(pi, ctx, "spec-working");
-				pi.sendUserMessage(specWorkPrompt(spec, swormState));
+				prepareManualHandoff(ctx, {
+					label: "/spec:work",
+					command: specWorkPrompt(spec, swormState),
+					reason: unsafeAutomaticHandoffReason(),
+				});
 			} catch (error) {
 				exitMode(pi, ctx);
 				ctx.ui.notify(formatBridgeError(error), "error");
