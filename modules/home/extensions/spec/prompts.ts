@@ -74,6 +74,9 @@ Mode rules:
 7. If AskClaude fails, ask_user for a recovery choice: retry, model/config adjustment, manual Claude prompt, waiver, or abort.
 8. Save with save_plan_draft to .sworm/plans/${date}-<slug>.md.
 9. After saving, ask_user: promote now, keep draft only, or revise.
+   - On "promote now": call the promote_plan tool with the path returned by save_plan_draft. That tool hands the plan off to /spec:new, exits plan-authoring mode, and unlocks Sworm tools in spec-authoring. Do not attempt Sworm writes from this mode.
+   - On "keep draft only": stop. Tell the user the saved path and that they can promote later with \`/plan promote\` or \`/spec:new <path>\`.
+   - On "revise": ask what to change, update with save_plan_draft, then re-ask this question.
 
 Required frontmatter:
 ---

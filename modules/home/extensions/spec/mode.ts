@@ -9,6 +9,7 @@ const INSPECTION_TOOLS = [
 	"bash",
 	"ask_user",
 	"AskClaude",
+	"subagent",
 	"web_search",
 	"code_search",
 	"fetch_content",
@@ -45,6 +46,7 @@ const SWORM_TOOLS = [
 const PLAN_AUTHORING_TOOLS = [
 	...INSPECTION_TOOLS,
 	"save_plan_draft",
+	"promote_plan",
 ];
 
 const SPEC_AUTHORING_TOOLS = [

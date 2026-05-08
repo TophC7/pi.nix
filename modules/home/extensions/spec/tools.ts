@@ -21,6 +21,22 @@ export function registerSpecWorkflowTools(pi: ExtensionAPI): void {
 	});
 
 	pi.registerTool({
+		name: "promote_plan",
+		label: "Promote Plan to Spec",
+		description: "Hand off a saved .sworm/plans/<file>.md to /spec:new. Exits plan-authoring mode and triggers spec-authoring (which is where Sworm issue creation runs). Use only after save_plan_draft has succeeded and the user has chosen to promote.",
+		parameters: Type.Object({
+			path: Type.String({ description: "Path returned by save_plan_draft, e.g. .sworm/plans/2026-05-07-my-plan.md" }),
+		}),
+		async execute(_toolCallId, params) {
+			if (!/^\.sworm\/plans\/\d{4}-\d{2}-\d{2}-[a-z0-9][a-z0-9-]*\.md$/.test(params.path)) {
+				throw new Error("promote_plan path must match .sworm/plans/YYYY-MM-DD-<slug>.md");
+			}
+			pi.sendUserMessage(`/spec:new ${params.path}`);
+			return { content: [{ type: "text", text: `Promoting ${params.path} via /spec:new. Plan-authoring mode will exit; spec-authoring will take over.` }], details: { path: params.path } };
+		},
+	});
+
+	pi.registerTool({
 		name: "save_spec",
 		label: "Save Spec",
 		description: "Save AskClaude-hardened spec markdown under .sworm/spec/<name>/ only.",

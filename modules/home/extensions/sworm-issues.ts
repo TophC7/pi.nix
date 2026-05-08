@@ -82,9 +82,19 @@ export function swormUnavailableText(): string {
 	return "Sworm issue bridge unavailable. Open this project in Sworm and launch Pi from Sworm.";
 }
 
+export function swormEnvMissingText(): string {
+	const missing = [
+		process.env.SWORM_PROJECT_ID ? null : "SWORM_PROJECT_ID",
+		process.env.SWORM_ISSUES_SOCKET ? null : "SWORM_ISSUES_SOCKET",
+		process.env.SWORM_ISSUES_TOKEN ? null : "SWORM_ISSUES_TOKEN",
+	].filter((name): name is string => name !== null);
+	const which = missing.length ? missing.join(", ") : "all SWORM_* env vars";
+	return `Sworm bridge env missing (${which}). Pi was launched outside the Sworm project launcher; reopen this project in Sworm and start Pi from there.`;
+}
+
 export function callBridge<T = unknown>(method: string, params: Record<string, unknown> = {}): Promise<T> {
 	const env = readBridgeEnv();
-	if (!env) return Promise.reject(new SwormBridgeError("unavailable", swormUnavailableText()));
+	if (!env) return Promise.reject(new SwormBridgeError("env_missing", swormEnvMissingText()));
 
 	return new Promise((resolve, reject) => {
 		const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;

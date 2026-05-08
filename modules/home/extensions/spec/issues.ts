@@ -1,5 +1,5 @@
 import type { ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
-import { callBridge, readBridgeEnv, SwormBridgeError, swormUnavailableText } from "../sworm-issues.ts";
+import { callBridge, readBridgeEnv, SwormBridgeError, swormEnvMissingText } from "../sworm-issues.ts";
 import type { IssueSummary } from "../sworm-issues.ts";
 import { extractEpicIds, readSpecFiles } from "./spec-files.ts";
 import type { SpecInfo, TaskSummary } from "./types.ts";
@@ -43,7 +43,7 @@ export type SpecSwormState = {
 
 export async function requireSwormBridge(ctx: ExtensionCommandContext): Promise<boolean> {
 	if (!readBridgeEnv()) {
-		ctx.ui.notify(swormUnavailableText(), "error");
+		ctx.ui.notify(swormEnvMissingText(), "error");
 		return false;
 	}
 	try {
