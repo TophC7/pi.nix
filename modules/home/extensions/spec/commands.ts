@@ -1,9 +1,9 @@
 import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
 import { enterMode, exitMode, state } from "./mode.ts";
-import { parsePlanCommand, pickPlan } from "./plans.ts";
+import { isPlanDraftPath, parsePlanCommand, pickPlan } from "./plans.ts";
 import {
 	planFinalizePrompt,
 	planRiskScoutTask,
@@ -12,7 +12,7 @@ import {
 	specVerifierTask,
 } from "./prompts.ts";
 import { extractInvariantChecks, extractIssueIds, extractManualChecks, extractRunChecks, readSpecFiles, replaceSyncBlock, resolveSpec } from "./spec-files.ts";
-import { bridgeInfo, ensureSpecPrefixes, formatBridgeError, formatCounts, formatState, loadSpecSwormState, requireSwormBridge, resolveSpecEpicId, specWorkPrompt } from "./issues.ts";
+import { bridgeInfo, formatBridgeError, formatCounts, formatState, loadSpecSwormState, requireSwormBridge, resolveSpecEpicId, specWorkPrompt } from "./issues.ts";
 import { extractSubagentText, runSubagent } from "./subagent-runner.ts";
 
 function makeStageDir(prefix: string): string {
@@ -23,6 +23,14 @@ function writeStage(dir: string, name: string, content: string): string {
 	const path = join(dir, `${name}.md`);
 	writeFileSync(path, content, "utf8");
 	return path;
+}
+
+async function requireBridgeOrExit(pi: ExtensionAPI, ctx: ExtensionCommandContext, action: string): Promise<boolean> {
+	if (await requireSwormBridge(ctx)) return true;
+	const exited = state.mode !== "idle";
+	if (exited) exitMode(pi, ctx);
+	ctx.ui.notify(`${action} failed: Sworm issue bridge unavailable.${exited ? " Workflow mode exited." : ""}`, "error");
+	return false;
 }
 
 export function registerPlanCommands(pi: ExtensionAPI): void {
@@ -46,6 +54,7 @@ export function registerPlanCommands(pi: ExtensionAPI): void {
 			if (command === "promote") {
 				const draft = await pickPlan(ctx, "Promote plan draft:");
 				if (!draft) return;
+				if (!(await requireBridgeOrExit(pi, ctx, "/plan promote"))) return;
 				pi.sendUserMessage(`/spec:new ${draft.path}`);
 				return;
 			}
@@ -92,8 +101,7 @@ export function registerSpecCommands(pi: ExtensionAPI): void {
 		description: "Create durable Sworm-backed spec from selected plan draft.",
 		handler: async (args, ctx) => {
 			await ctx.waitForIdle();
-			if (!(await requireSwormBridge(ctx))) return;
-			await ensureSpecPrefixes().catch((error) => ctx.ui.notify(formatBridgeError(error), "warning"));
+			if (!(await requireBridgeOrExit(pi, ctx, "/spec:new"))) return;
 			let planPath = args?.trim() ?? "";
 			if (!planPath) {
 				const choice = await ctx.ui.select("/spec:new needs a plan draft", ["select existing plan", "create new /plan", "cancel"]);
@@ -106,8 +114,8 @@ export function registerSpecCommands(pi: ExtensionAPI): void {
 				if (!draft) return;
 				planPath = draft.path;
 			}
-			if (!planPath.startsWith(".sworm/plans/") || !existsSync(planPath)) {
-				ctx.ui.notify(`Plan draft not found or outside .sworm/plans/: ${planPath}`, "error");
+			if (!isPlanDraftPath(planPath) || !existsSync(planPath)) {
+				ctx.ui.notify(`Plan draft not found or invalid .sworm/plans/YYYY-MM-DD-<slug>.md path: ${planPath}`, "error");
 				return;
 			}
 			enterMode(pi, ctx, "spec-authoring");
@@ -140,11 +148,12 @@ export function registerSpecCommands(pi: ExtensionAPI): void {
 			if (!(await requireSwormBridge(ctx))) return;
 			const spec = await resolveSpec(ctx, args);
 			if (!spec) return;
-			enterMode(pi, ctx, "spec-working");
 			try {
 				const swormState = await loadSpecSwormState(spec);
+				enterMode(pi, ctx, "spec-working");
 				pi.sendUserMessage(specWorkPrompt(spec, swormState));
 			} catch (error) {
+				exitMode(pi, ctx);
 				ctx.ui.notify(formatBridgeError(error), "error");
 			}
 		},

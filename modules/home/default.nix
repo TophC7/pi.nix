@@ -127,6 +127,8 @@ in
       // packageExtensionLinks
       // agentFileLinks
       // {
+        # Pi auto-loads AGENTS.md from the agent dir as global context.
+        ".pi/agent/AGENTS.md".source = ./SOUL.md;
         ".pi/agent/settings.json".text = builtins.toJSON {
           defaultProvider = cfg.provider;
           defaultModel = cfg.model;

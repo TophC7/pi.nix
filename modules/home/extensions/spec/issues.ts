@@ -1,4 +1,6 @@
-import type { ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
+import { realpathSync } from "node:fs";
+import { resolve } from "node:path";
+import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { callBridge, readBridgeEnv, SwormBridgeError, swormEnvMissingText } from "../sworm-issues.ts";
 import type { IssueSummary } from "../sworm-issues.ts";
 import { extractEpicIds, readSpecFiles } from "./spec-files.ts";
@@ -28,6 +30,7 @@ export type SwormComment = {
 export type SwormBridgeInfo = {
 	protocol_version?: number;
 	project_id?: string;
+	project_path?: string;
 	capabilities?: string[];
 	methods?: string[];
 };
@@ -41,13 +44,27 @@ export type SpecSwormState = {
 	summary: TaskSummary;
 };
 
-export async function requireSwormBridge(ctx: ExtensionCommandContext): Promise<boolean> {
-	if (!readBridgeEnv()) {
+export async function requireSwormBridge(ctx: ExtensionContext): Promise<boolean> {
+	const env = readBridgeEnv();
+	if (!env) {
 		ctx.ui.notify(swormEnvMissingText(), "error");
 		return false;
 	}
 	try {
-		await callBridge("bridge.info");
+		const info = await callBridge<SwormBridgeInfo>("bridge.info");
+		if (info.protocol_version !== 1) {
+			throw new SwormBridgeError("protocol_mismatch", `Sworm issue bridge protocol mismatch: expected 1, got ${info.protocol_version ?? "unknown"}`);
+		}
+		if (!info.project_path) {
+			throw new SwormBridgeError("protocol_mismatch", "Sworm issue bridge did not return project_path; restart Sworm and Pi.");
+		}
+		const cwd = canonicalPath(ctx.cwd);
+		const envPath = canonicalPath(env.projectPath);
+		const bridgePath = canonicalPath(info.project_path);
+		if (cwd !== envPath || cwd !== bridgePath) {
+			ctx.ui.notify(`Sworm bridge project mismatch. cwd=${cwd}; env=${envPath}; bridge=${bridgePath}`, "error");
+			return false;
+		}
 		return true;
 	} catch (error) {
 		ctx.ui.notify(formatBridgeError(error), "error");
@@ -144,12 +161,12 @@ export function formatBridgeError(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
 }
 
-export async function ensureSpecPrefixes(): Promise<void> {
-	await Promise.all([
-		callBridge("config.set", { key: "epic_prefix", value: "EPIC" }),
-		callBridge("config.set", { key: "issue_prefix", value: "ISSUE" }),
-		callBridge("config.set", { key: "comment_prefix", value: "NOTE" }),
-	]);
+function canonicalPath(path: string): string {
+	try {
+		return realpathSync.native(path);
+	} catch {
+		return resolve(path);
+	}
 }
 
 function firstLine(text: string): string {

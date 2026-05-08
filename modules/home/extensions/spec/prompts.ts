@@ -134,15 +134,15 @@ Resolve checkpoints in order; do not skip:
 3. Call the subagent tool to run spec.spec-architect with a task that includes plan path, verification contents, and the interview answers. Returns an unsaved spec draft. Treat as canonical; do not rewrite stylistically.
 4. Call the subagent tool to run spec.spec-reviewer with the plan path, verification, answers, and architect draft. Returns review findings.
 5. Resolve every blocker in the review findings; if any new critical ambiguity remains, ask_user before continuing.
-6. Generate the candidate spec text in memory with placeholder EPIC/ISSUE IDs.
+6. Generate the candidate spec text in memory with provisional task keys, not saved placeholder Sworm IDs.
 7. Call isolated AskClaude to harden the candidate spec end-to-end.
 8. If AskClaude fails, ask_user for a recovery choice: retry, model/config adjustment, manual Claude prompt, waiver, or abort.
 9. ask_user for explicit final approval. Sworm writes are durable.
-10. Save spec files with save_spec under .sworm/spec/<name>/. Include Current State markers (todo.md for phased/ticketed; SPEC.md for light) and frontmatter recording AskClaude hardening or waiver.
+10. Set Sworm prefixes with sworm_config_set: epic_prefix=EPIC, issue_prefix=ISSUE, comment_prefix=NOTE.
 11. Create one Sworm EPIC for the spec.
 12. Create one top-level ISSUE per §T row using EPIC/ISSUE/NOTE prefixes only.
 13. Mirror §T dependencies with sworm_dependency_add.
-14. Round-trip Sworm ISSUE IDs back into §T tables and re-save with save_spec. Add sworm_epic_id to frontmatter.
+14. Round-trip Sworm EPIC/ISSUE IDs into the spec text and save spec files once with save_spec under .sworm/spec/<name>/. Include Current State markers (todo.md for phased/ticketed; SPEC.md for light), sworm_epic_id frontmatter, and AskClaude hardening or waiver metadata.
 15. Re-save plan frontmatter with promoted_to and promoted_at via save_plan_draft.
 
 Required shape files:

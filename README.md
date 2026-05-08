@@ -31,9 +31,3 @@ Import module in Home Manager:
 ## NPM isolation
 
 No global npm install. Heavy packages build inside Nix:
-
-- `pi-claude-bridge`: `buildNpmPackage` from tagged source with upstream `package-lock.json`
-- `pi-web-access`: `buildNpmPackage` with locked `package-lock.json`
-- `context-mode`: `bun2nix` dependencies, then Bun-driven Nix build with no npm shellout
-
-Pi loads resulting store paths through `settings.json` `packages`, so dependencies stay package-local. The module also installs `rtk` for `pi-rtk-optimizer` command rewrites.

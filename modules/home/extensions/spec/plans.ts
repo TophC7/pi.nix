@@ -4,6 +4,12 @@ import type { ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
 import type { PlanDraft } from "./types.ts";
 import { readFrontmatterValue } from "./files.ts";
 
+export const PLAN_DRAFT_PATH_RE = /^\.sworm\/plans\/\d{4}-\d{2}-\d{2}-[a-z0-9][a-z0-9-]*\.md$/;
+
+export function isPlanDraftPath(path: string): boolean {
+	return PLAN_DRAFT_PATH_RE.test(path);
+}
+
 export function parsePlanCommand(args: string | undefined): "help" | "exit" | "start" | "open" | "promote" {
 	const trimmed = args?.trim() ?? "";
 	if (trimmed === "help" || trimmed === "--help" || trimmed === "-h") return "help";

@@ -1,3 +1,5 @@
+import { realpathSync } from "node:fs";
+import { resolve } from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "typebox";
 import net from "node:net";
@@ -12,9 +14,18 @@ type BridgeResponse<T = unknown> =
 
 export type BridgeEnv = {
 	projectId: string;
+	projectPath: string;
 	socketPath: string;
 	token: string;
 	protocolVersion: string;
+};
+
+export type BridgeInfo = {
+	protocol_version?: number;
+	project_id?: string;
+	project_path?: string;
+	capabilities?: string[];
+	methods?: string[];
 };
 
 export type IssueSummary = {
@@ -67,11 +78,12 @@ export class SwormBridgeError extends Error {
 
 export function readBridgeEnv(): BridgeEnv | null {
 	const projectId = process.env.SWORM_PROJECT_ID;
+	const projectPath = process.env.SWORM_PROJECT_PATH;
 	const socketPath = process.env.SWORM_ISSUES_SOCKET;
 	const token = process.env.SWORM_ISSUES_TOKEN;
 	const protocolVersion = process.env.SWORM_ISSUES_PROTOCOL_VERSION ?? "1";
-	if (!projectId || !socketPath || !token) return null;
-	return { projectId, socketPath, token, protocolVersion };
+	if (!projectId || !projectPath || !socketPath || !token) return null;
+	return { projectId, projectPath, socketPath, token, protocolVersion };
 }
 
 export function swormAgentId(): string {
@@ -79,22 +91,31 @@ export function swormAgentId(): string {
 }
 
 export function swormUnavailableText(): string {
-	return "Sworm issue bridge unavailable. Open this project in Sworm and launch Pi from Sworm.";
+	return "Sworm issue bridge unavailable. Open this project in Sworm and start a Pi provider session.";
 }
 
 export function swormEnvMissingText(): string {
 	const missing = [
 		process.env.SWORM_PROJECT_ID ? null : "SWORM_PROJECT_ID",
+		process.env.SWORM_PROJECT_PATH ? null : "SWORM_PROJECT_PATH",
 		process.env.SWORM_ISSUES_SOCKET ? null : "SWORM_ISSUES_SOCKET",
 		process.env.SWORM_ISSUES_TOKEN ? null : "SWORM_ISSUES_TOKEN",
 	].filter((name): name is string => name !== null);
 	const which = missing.length ? missing.join(", ") : "all SWORM_* env vars";
-	return `Sworm bridge env missing (${which}). Pi was launched outside the Sworm project launcher; reopen this project in Sworm and start Pi from there.`;
+	return `Sworm bridge env missing (${which}). /spec:new is Sworm-only; open this project in Sworm and start a Pi provider session.`;
 }
 
 export function callBridge<T = unknown>(method: string, params: Record<string, unknown> = {}): Promise<T> {
 	const env = readBridgeEnv();
 	if (!env) return Promise.reject(new SwormBridgeError("env_missing", swormEnvMissingText()));
+	if (env.protocolVersion !== "1") {
+		return Promise.reject(new SwormBridgeError("protocol_mismatch", `Sworm issue bridge protocol mismatch: expected 1, got ${env.protocolVersion}`));
+	}
+	const cwd = canonicalPath(process.cwd());
+	const projectPath = canonicalPath(env.projectPath);
+	if (cwd !== projectPath) {
+		return Promise.reject(new SwormBridgeError("project_mismatch", `Sworm bridge project mismatch: cwd=${cwd}; env=${projectPath}`));
+	}
 
 	return new Promise((resolve, reject) => {
 		const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -222,6 +243,14 @@ function formatIssueDetail(detail: { issue: IssueSummary; comments?: CommentSumm
 
 function firstLine(text: string): string {
 	return text.split("\n")[0]?.trim() || "";
+}
+
+function canonicalPath(path: string): string {
+	try {
+		return realpathSync.native(path);
+	} catch {
+		return resolve(path);
+	}
 }
 
 async function bestEffortCall<T>(method: string, params: Record<string, unknown> = {}, fallback: T): Promise<T> {
@@ -559,6 +588,13 @@ export default function swormIssuesExtension(pi: ExtensionAPI) {
 	pi.on("before_agent_start", async (event) => {
 		const env = readBridgeEnv();
 		if (!env) return undefined;
+		let info: BridgeInfo;
+		try {
+			info = await callBridge<BridgeInfo>("bridge.info");
+		} catch {
+			return undefined;
+		}
+		if (info.protocol_version !== 1) return undefined;
 		const [epics, ready, inProgress] = await Promise.all([
 			bestEffortCall<EpicSummary[]>("epic.list", {}, []),
 			bestEffortCall<IssueSummary[]>("issue.ready", { filters: { limit: 5 } }, []),
@@ -573,7 +609,7 @@ export default function swormIssuesExtension(pi: ExtensionAPI) {
 				event.systemPrompt +
 				`
 
-Sworm issue memory is available for project ${env.projectId}.
+Sworm issue memory is available for project ${info.project_id ?? env.projectId}.
 Use sworm_* tools for durable epics, issues, comments, dependencies, config, blockers, and completion summaries.
 ID prefixes: EPIC / ISSUE / NOTE.
 Active Sworm issues assigned to current agent:

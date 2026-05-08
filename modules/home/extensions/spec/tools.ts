@@ -1,6 +1,9 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "typebox";
 import { saveFile } from "./files.ts";
+import { requireSwormBridge } from "./issues.ts";
+import { exitMode } from "./mode.ts";
+import { isPlanDraftPath } from "./plans.ts";
 
 export function registerSpecWorkflowTools(pi: ExtensionAPI): void {
 	pi.registerTool({
@@ -12,7 +15,7 @@ export function registerSpecWorkflowTools(pi: ExtensionAPI): void {
 			content: Type.String({ description: "Complete markdown plan with required frontmatter" }),
 		}),
 		async execute(_toolCallId, params) {
-			if (!/^\.sworm\/plans\/\d{4}-\d{2}-\d{2}-[a-z0-9][a-z0-9-]*\.md$/.test(params.path)) {
+			if (!isPlanDraftPath(params.path)) {
 				throw new Error("Plan path must match .sworm/plans/YYYY-MM-DD-<slug>.md");
 			}
 			const result = saveFile(".sworm/plans", params.path, params.content, true);
@@ -27,9 +30,15 @@ export function registerSpecWorkflowTools(pi: ExtensionAPI): void {
 		parameters: Type.Object({
 			path: Type.String({ description: "Path returned by save_plan_draft, e.g. .sworm/plans/2026-05-07-my-plan.md" }),
 		}),
-		async execute(_toolCallId, params) {
-			if (!/^\.sworm\/plans\/\d{4}-\d{2}-\d{2}-[a-z0-9][a-z0-9-]*\.md$/.test(params.path)) {
+		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+			if (!isPlanDraftPath(params.path)) {
 				throw new Error("promote_plan path must match .sworm/plans/YYYY-MM-DD-<slug>.md");
+			}
+			if (!(await requireSwormBridge(ctx))) {
+				exitMode(pi, ctx);
+				const text = `Promotion failed for ${params.path}: Sworm issue bridge unavailable. Plan mode exited.`;
+				ctx.ui.notify(text, "error");
+				return { content: [{ type: "text" as const, text }], details: { path: params.path, error: "sworm_bridge_unavailable" }, isError: true };
 			}
 			pi.sendUserMessage(`/spec:new ${params.path}`);
 			return { content: [{ type: "text", text: `Promoting ${params.path} via /spec:new. Plan-authoring mode will exit; spec-authoring will take over.` }], details: { path: params.path } };
