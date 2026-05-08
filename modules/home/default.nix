@@ -13,13 +13,18 @@ let
   b2n = inputs.bun2nix.packages.${system}.default;
   lock = lib.fs.relativeTo ../../locks;
   claudeCode = inputs.llm-agents.packages.${system}.claude-code;
-  # Single-file extensions and one directory extension (git/) loaded directly by path.
+  # Loadable top-level extensions. Runtime support modules live beside them
+  # so package-relative imports like ../workflow/recovery.ts resolve after Home Manager links.
   extensionSources = [
     "caveman.ts"
     "clear.ts"
     "sworm-issues.ts"
     "use-fish.ts"
     "git"
+  ];
+  supportSources = [
+    "subagent-runner.ts"
+    "workflow"
   ];
   # Multi-file extension packages: each owns extensions/<pkg>/index.ts and extensions/<pkg>/agents/*.md.
   # Adding a new package here auto-wires extension code, agent files, and the settings.json entry.
@@ -52,7 +57,7 @@ let
     map (name: {
       name = ".pi/agent/extensions/${name}";
       value.source = "${extensionBundle}/${name}";
-    }) extensionSources
+    }) (extensionSources ++ supportSources)
   );
   packageExtensionLinks = builtins.listToAttrs (
     map (pkg: {

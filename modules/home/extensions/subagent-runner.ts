@@ -1,6 +1,10 @@
 import { randomUUID } from "node:crypto";
 import type { ExtensionAPI, ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
 
+// Linked into ~/.pi/agent/extensions for sibling imports. Pi may auto-discover
+// top-level .ts files there, so expose a no-op extension entrypoint.
+export default function sharedSubagentRunnerExtension(): void {}
+
 const REQUEST_EVENT = "subagent:slash:request";
 const STARTED_EVENT = "subagent:slash:started";
 const RESPONSE_EVENT = "subagent:slash:response";
