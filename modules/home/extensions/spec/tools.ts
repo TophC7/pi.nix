@@ -21,24 +21,6 @@ export function registerSpecWorkflowTools(pi: ExtensionAPI): void {
 	});
 
 	pi.registerTool({
-		name: "trekker",
-		label: "Trekker",
-		description: "Run Trekker CLI from repo root for spec workflow state.",
-		parameters: Type.Object({
-			args: Type.Array(Type.String(), { description: "Trekker CLI arguments, excluding binary name" }),
-		}),
-		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
-			const result = await pi.exec("trekker", params.args, { cwd: ctx.cwd, signal });
-			const text = [result.stdout, result.stderr].filter(Boolean).join("\n");
-			return {
-				content: [{ type: "text", text: text || `trekker exited ${result.code ?? 0}` }],
-				details: { stdout: result.stdout, stderr: result.stderr, code: result.code },
-				isError: (result.code ?? 0) !== 0,
-			};
-		},
-	});
-
-	pi.registerTool({
 		name: "save_spec",
 		label: "Save Spec",
 		description: "Save AskClaude-hardened spec markdown under .sworm/spec/<name>/ only.",

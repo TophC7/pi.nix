@@ -1,11 +1,41 @@
-import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
 import { enterMode, exitMode, state } from "./mode.ts";
 import { parsePlanCommand, pickPlan } from "./plans.ts";
-import { planPrompt, specNewPrompt } from "./prompts.ts";
-import { extractInvariantChecks, extractManualChecks, extractRunChecks, readSpecFiles, replaceSyncBlock, resolveSpec } from "./spec-files.ts";
-import { collectSpecComments, collectSpecTaskOutput, formatCounts, processAlive, readDashboardMeta, runTrekker, summarizeTasks } from "./trekker.ts";
+import {
+	parseInterviewAnswers,
+	planFinalizePrompt,
+	planInterviewPrefill,
+	planRiskScoutTask,
+	planScoutTask,
+	planSynthesisTask,
+	specArchitectTask,
+	specFinalizePrompt,
+	specInterviewPrefill,
+	specReviewTask,
+	specVerifierTask,
+} from "./prompts.ts";
+import { extractInvariantChecks, extractIssueIds, extractManualChecks, extractRunChecks, readSpecFiles, replaceSyncBlock, resolveSpec } from "./spec-files.ts";
+import { bridgeInfo, ensureSpecPrefixes, formatBridgeError, formatCounts, formatState, loadSpecSwormState, requireSwormBridge, resolveSpecEpicId, specWorkPrompt } from "./issues.ts";
+import { extractSubagentText, runSubagent } from "./subagent-runner.ts";
+
+function makeStageDir(prefix: string): string {
+	return mkdtempSync(join(tmpdir(), `pi-${prefix}-`));
+}
+
+function writeStage(dir: string, name: string, content: string): string {
+	const path = join(dir, `${name}.md`);
+	writeFileSync(path, content, "utf8");
+	return path;
+}
+
+async function collectInterviewAnswers(ctx: ExtensionCommandContext, label: string, prefill: string): Promise<string | undefined> {
+	const raw = await ctx.ui.editor(label, prefill);
+	const answers = parseInterviewAnswers(raw);
+	return answers || undefined;
+}
 
 export function registerPlanCommands(pi: ExtensionAPI): void {
 	pi.registerCommand("plan", {
@@ -35,18 +65,64 @@ export function registerPlanCommands(pi: ExtensionAPI): void {
 				ctx.ui.notify("Usage: /plan <description> | /plan open | /plan promote | /plan exit", "info");
 				return;
 			}
+			let description = args?.trim() ?? "";
+			if (!description) {
+				const entered = await ctx.ui.editor("/plan idea", "Describe the idea to harden before drafting:\n");
+				description = entered?.trim() ?? "";
+				if (!description) {
+					ctx.ui.notify("/plan cancelled: no idea provided.", "warning");
+					return;
+				}
+			}
 			enterMode(pi, ctx, "plan-authoring");
-			ctx.ui.notify("Plan authoring mode active. save_plan_draft is only write path.", "info");
-			pi.sendUserMessage(planPrompt(args?.trim() ?? ""));
+			ctx.ui.notify("/plan: exploring with spec subagents before drafting.", "info");
+			const stageDir = makeStageDir("plan");
+			try {
+				const scoutResponse = await runSubagent(pi, ctx, {
+					tasks: [
+						{ agent: "spec.plan-scout", task: planScoutTask(description), output: false },
+						{ agent: "spec.plan-risk-scout", task: planRiskScoutTask(description), output: false },
+					],
+					context: "fresh",
+					clarify: false,
+					agentScope: "both",
+				}, "/plan scout");
+				const findings = extractSubagentText(scoutResponse);
+				const findingsPath = writeStage(stageDir, "findings", findings);
+				const answers = await collectInterviewAnswers(ctx, "/plan interview answers", planInterviewPrefill(description, findings));
+				if (!answers) {
+					exitMode(pi, ctx);
+					ctx.ui.notify("/plan cancelled before draft synthesis.", "warning");
+					return;
+				}
+				const answersPath = writeStage(stageDir, "answers", answers);
+				const synthesisResponse = await runSubagent(pi, ctx, {
+					agent: "spec.plan-synthesizer",
+					task: planSynthesisTask(description, findings, answers),
+					context: "fresh",
+					clarify: false,
+					agentScope: "both",
+					output: false,
+				}, "/plan synthesize");
+				const draft = extractSubagentText(synthesisResponse);
+				const draftPath = writeStage(stageDir, "draft", draft);
+				ctx.ui.notify("Plan discovery/interview complete. Parent agent will harden and save draft.", "info");
+				pi.sendUserMessage(planFinalizePrompt({ description, findingsPath, answersPath, draftPath }));
+			} catch (error) {
+				exitMode(pi, ctx);
+				ctx.ui.notify(formatBridgeError(error), "error");
+			}
 		},
 	});
 }
 
 export function registerSpecCommands(pi: ExtensionAPI): void {
 	pi.registerCommand("spec:new", {
-		description: "Create durable spec from selected plan draft.",
+		description: "Create durable Sworm-backed spec from selected plan draft.",
 		handler: async (args, ctx) => {
 			await ctx.waitForIdle();
+			if (!(await requireSwormBridge(ctx))) return;
+			await ensureSpecPrefixes().catch((error) => ctx.ui.notify(formatBridgeError(error), "warning"));
 			let planPath = args?.trim() ?? "";
 			if (!planPath) {
 				const choice = await ctx.ui.select("/spec:new needs a plan draft", ["select existing plan", "create new /plan", "cancel"]);
@@ -64,77 +140,105 @@ export function registerSpecCommands(pi: ExtensionAPI): void {
 				return;
 			}
 			enterMode(pi, ctx, "spec-authoring");
-			ctx.ui.notify("Spec authoring mode active. save_spec and trekker are durable write paths.", "info");
-			pi.sendUserMessage(specNewPrompt(planPath));
+			ctx.ui.notify("/spec:new: verifying plan with spec subagents before durable writes.", "info");
+			const stageDir = makeStageDir("spec");
+			try {
+				const verifierResponse = await runSubagent(pi, ctx, {
+					agent: "spec.spec-verifier",
+					task: specVerifierTask(planPath),
+					context: "fresh",
+					clarify: false,
+					agentScope: "both",
+					output: false,
+				}, "/spec verify");
+				const verification = extractSubagentText(verifierResponse);
+				const verificationPath = writeStage(stageDir, "verification", verification);
+				const answers = await collectInterviewAnswers(ctx, "/spec:new decisions", specInterviewPrefill(planPath, verification));
+				if (!answers) {
+					exitMode(pi, ctx);
+					ctx.ui.notify("/spec:new cancelled before spec authoring.", "warning");
+					return;
+				}
+				const answersPath = writeStage(stageDir, "answers", answers);
+				const architectResponse = await runSubagent(pi, ctx, {
+					agent: "spec.spec-architect",
+					task: specArchitectTask(planPath, verification, answers),
+					context: "fresh",
+					clarify: false,
+					agentScope: "both",
+					output: false,
+				}, "/spec draft");
+				const draft = extractSubagentText(architectResponse);
+				const draftPath = writeStage(stageDir, "draft", draft);
+				const reviewResponse = await runSubagent(pi, ctx, {
+					agent: "spec.spec-reviewer",
+					task: specReviewTask(planPath, verification, answers, draft),
+					context: "fresh",
+					clarify: false,
+					agentScope: "both",
+					output: false,
+				}, "/spec review");
+				const review = extractSubagentText(reviewResponse);
+				const reviewPath = writeStage(stageDir, "review", review);
+				ctx.ui.notify("Spec verification/interview complete. Parent agent will request final approval before Sworm writes.", "info");
+				pi.sendUserMessage(specFinalizePrompt({ planPath, verificationPath, answersPath, draftPath, reviewPath }));
+			} catch (error) {
+				exitMode(pi, ctx);
+				ctx.ui.notify(formatBridgeError(error), "error");
+			}
 		},
 	});
 
 	pi.registerCommand("spec:work", {
-		description: "Execute ready Trekker spec tasks continuously.",
+		description: "Execute ready Sworm spec issues continuously.",
 		handler: async (args, ctx) => {
 			await ctx.waitForIdle();
+			if (!(await requireSwormBridge(ctx))) return;
 			const spec = await resolveSpec(ctx, args);
 			if (!spec) return;
 			enterMode(pi, ctx, "spec-working");
-			const ready = await runTrekker(pi, ["ready", "--limit", "1"], ctx);
-			if (ready.code !== 0) {
-				ctx.ui.notify(`trekker ready failed:\n${ready.stderr || ready.stdout}`, "error");
-				return;
+			try {
+				const swormState = await loadSpecSwormState(spec);
+				pi.sendUserMessage(specWorkPrompt(spec, swormState));
+			} catch (error) {
+				ctx.ui.notify(formatBridgeError(error), "error");
 			}
-			pi.sendUserMessage(`Run /spec:work for ${spec.path}
-
-Spec shape: ${spec.shape}
-
-Rules:
-- Read every markdown file in ${spec.path} before editing.
-- Use Trekker ready state, not markdown order.
-- Claim first ready TASK by running: trekker task update <TASK-ID> -s in_progress.
-- Restore implementation discipline: inspect reuse before abstractions, avoid scope creep.
-- Run every runnable run: acceptance check for each completed task under Fish.
-- Record manual: checks as Trekker comments and final summary; manual checks do not block automated close.
-- Complete with: trekker comment add <TASK-ID> -a pi -c "Automated checks passed. Manual checks delegated: <list or none>." then trekker task update <TASK-ID> -s completed.
-- Continue ready queue until no ready task remains or true blocker appears.
-- On true blocker, add Trekker comment, update §B in relevant spec file, ask_user with recovery options, stop.
-
-Initial ready output:
-${ready.stdout || "No ready tasks."}`);
 		},
 	});
 
 	pi.registerCommand("spec:sync", {
-		description: "Sync spec Current State from Trekker.",
+		description: "Sync spec Current State from Sworm issues.",
 		handler: async (args, ctx) => {
 			await ctx.waitForIdle();
+			if (!(await requireSwormBridge(ctx))) return;
 			const spec = await resolveSpec(ctx, args);
 			if (!spec) return;
-			const before = readFileSync(spec.indexPath, "utf8");
-			const [epics, tasks, ready, comments] = await Promise.all([
-				runTrekker(pi, ["epic", "list", "--limit", "200"], ctx),
-				collectSpecTaskOutput(pi, spec, ctx),
-				runTrekker(pi, ["ready", "--limit", "20"], ctx),
-				collectSpecComments(pi, spec, ctx),
-			]);
-			const summary = summarizeTasks(spec, tasks, ready.stdout, comments);
-			const epicLine = epics.stdout.split("\n").find((line) => /SPEC-\d+/.test(line) && /Pi Spec Workflow|spec/i.test(line)) ?? "see Trekker";
-			const block = [
-				`**Last synced**: ${new Date().toISOString()}`,
-				`**Trekker epic**: ${epicLine}`,
-				`**Progress**: ${formatCounts(summary.counts)}`,
-				`**Ready next**: ${summary.readyLine}`,
-				`**Blockers**: ${summary.blockers.length ? summary.blockers.join("; ") : "none"}`,
-				`**Manual checks**: ${summary.manualChecks.length ? summary.manualChecks.join("; ") : "none recorded"}`,
-			].join("\n");
-			const after = replaceSyncBlock(before, block);
-			writeFileSync(spec.indexPath, after);
-			const changedOutside = before.replace(/<!-- spec-sync:start -->[\s\S]*?<!-- spec-sync:end -->/, "") !== after.replace(/<!-- spec-sync:start -->[\s\S]*?<!-- spec-sync:end -->/, "");
-			ctx.ui.notify(`Synced ${spec.indexPath}${changedOutside ? " (warning: outside marker changed)" : ""}`, changedOutside ? "error" : "info");
+			try {
+				const before = readFileSync(spec.indexPath, "utf8");
+				const swormState = await loadSpecSwormState(spec);
+				const block = [
+					`**Last synced**: ${new Date().toISOString()}`,
+					`**Sworm epic**: ${swormState.epic.id} · ${swormState.epic.title} (${swormState.epic.status})`,
+					`**Progress**: ${formatCounts(swormState.summary.counts)}`,
+					`**Ready next**: ${swormState.summary.readyLine}`,
+					`**Blockers**: ${swormState.summary.blockers.length ? swormState.summary.blockers.join("; ") : "none"}`,
+					`**Manual checks**: ${swormState.summary.manualChecks.length ? swormState.summary.manualChecks.join("; ") : "none recorded"}`,
+				].join("\n");
+				const after = replaceSyncBlock(before, block);
+				writeFileSync(spec.indexPath, after);
+				const changedOutside = before.replace(/<!-- spec-sync:start -->[\s\S]*?<!-- spec-sync:end -->/, "") !== after.replace(/<!-- spec-sync:start -->[\s\S]*?<!-- spec-sync:end -->/, "");
+				ctx.ui.notify(`Synced ${spec.indexPath}${changedOutside ? " (warning: outside marker changed)" : ""}`, changedOutside ? "error" : "info");
+			} catch (error) {
+				ctx.ui.notify(formatBridgeError(error), "error");
+			}
 		},
 	});
 
 	pi.registerCommand("spec:check", {
-		description: "Read-only spec drift report.",
+		description: "Read-only Sworm/spec drift report.",
 		handler: async (args, ctx) => {
 			await ctx.waitForIdle();
+			if (!(await requireSwormBridge(ctx))) return;
 			const spec = await resolveSpec(ctx, args);
 			if (!spec) return;
 			const before = readdirSync(spec.path).filter((name) => name.endsWith(".md")).map((name) => [join(spec.path, name), readFileSync(join(spec.path, name), "utf8")] as const);
@@ -148,22 +252,28 @@ ${ready.stdout || "No ready tasks."}`);
 				if ((result.code ?? 1) !== 0) failures.push(`${command}\n${result.stderr || result.stdout}`.trim());
 			}
 			const afterChanged = before.filter(([path, text]) => readFileSync(path, "utf8") !== text).map(([path]) => path);
-			const [tasks, ready, comments] = await Promise.all([
-				collectSpecTaskOutput(pi, spec, ctx),
-				runTrekker(pi, ["ready", "--limit", "20"], ctx),
-				collectSpecComments(pi, spec, ctx),
-			]);
-			const summary = summarizeTasks(spec, tasks, ready.stdout, comments);
+			if (afterChanged.length) failures.push(`/spec:check mutated files: ${afterChanged.join(", ")}`);
+			const epicId = resolveSpecEpicId(spec, content);
+			if (!epicId) failures.push("Missing Sworm EPIC id (frontmatter sworm_epic_id or EPIC-* in spec). ");
+			let swormState;
+			try {
+				swormState = await loadSpecSwormState(spec);
+				const knownIds = new Set(swormState.issues.map((issue) => issue.id));
+				const unknownIds = extractIssueIds(content).filter((id) => !knownIds.has(id));
+				if (unknownIds.length) failures.push(`Spec references unknown Sworm issues: ${unknownIds.join(", ")}`);
+			} catch (error) {
+				failures.push(formatBridgeError(error));
+			}
 			const bugs = content.split("\n").filter((line) => /^\|\s*B-/.test(line));
 			const missingIds = content.split("\n").filter((line) => /^\|\s*(pending|—)\s*\|/.test(line));
-			if (afterChanged.length) failures.push(`/spec:check mutated files: ${afterChanged.join(", ")}`);
-			if (missingIds.length) failures.push(`Missing Trekker IDs:\n${missingIds.join("\n")}`);
+			if (missingIds.length) failures.push(`Missing Sworm ISSUE ids:\n${missingIds.join("\n")}`);
 			const verdict = failures.length === 0 ? "PASS" : "FAIL";
 			ctx.ui.notify([
 				`/spec:check ${verdict}: ${spec.name}`,
 				`shape: ${spec.shape}`,
-				`tasks: ${formatCounts(summary.counts)}`,
-				`ready next: ${summary.readyLine}`,
+				`Sworm epic: ${swormState?.epic.id ?? epicId ?? "missing"}`,
+				`issues: ${swormState ? formatCounts(swormState.summary.counts) : "unavailable"}`,
+				`ready next: ${swormState?.summary.readyLine ?? "none"}`,
 				`run checks: ${runChecks.length}`,
 				`invariant checks: ${invariantChecks.length}`,
 				`manual checks not run: ${manualChecks.length}`,
@@ -174,31 +284,29 @@ ${ready.stdout || "No ready tasks."}`);
 	});
 
 	pi.registerCommand("spec:status", {
-		description: "Show spec workflow status.",
+		description: "Show Sworm spec workflow status.",
 		handler: async (args, ctx) => {
 			await ctx.waitForIdle();
 			const spec = await resolveSpec(ctx, args);
 			const askClaude = pi.getAllTools().some((tool) => tool.name === "AskClaude" || /claude/i.test(`${tool.name} ${tool.description ?? ""}`));
-			const trekker = await runTrekker(pi, ["--help"], ctx);
-			const [tasks, ready, comments] = spec && trekker.code === 0 ? await Promise.all([
-				collectSpecTaskOutput(pi, spec, ctx),
-				runTrekker(pi, ["ready", "--limit", "20"], ctx),
-				collectSpecComments(pi, spec, ctx),
-			]) : ["", { stdout: "", stderr: "", code: 1 }, ""] as const;
-			const summary = spec ? summarizeTasks(spec, tasks, ready.stdout, comments) : undefined;
-			const dashboardMeta = readDashboardMeta(".sworm/trekker/dashboard.json");
-			const dashboard = dashboardMeta.url && dashboardMeta.pid && processAlive(dashboardMeta.pid) ? `${dashboardMeta.url} (pid ${dashboardMeta.pid})` : "not running";
+			let infoText = "unavailable";
+			let stateText = "No active spec.";
+			let ok = false;
+			try {
+				const info = await bridgeInfo();
+				infoText = JSON.stringify(info);
+				ok = true;
+				if (spec) stateText = formatState(await loadSpecSwormState(spec));
+			} catch (error) {
+				infoText = formatBridgeError(error);
+			}
 			ctx.ui.notify([
 				`Mode: ${state.mode}`,
 				`Active spec: ${spec ? `${spec.name} [${spec.shape}] · ${spec.path}` : "none"}`,
 				`AskClaude: ${askClaude ? "available" : "missing"}`,
-				`Trekker helper: ${trekker.code === 0 ? "ok" : "failed"}`,
-				`Tasks: ${summary ? formatCounts(summary.counts) : "unavailable"}`,
-				`Ready next: ${summary?.readyLine ?? "none"}`,
-				`Blockers: ${summary?.blockers.length ? summary.blockers.join("; ") : "none"}`,
-				`Manual checks: ${summary?.manualChecks.length ? summary.manualChecks.join("; ") : "none recorded"}`,
-				`Dashboard: ${dashboard}`,
-			].join("\n"), trekker.code === 0 ? "info" : "error");
+				`Sworm bridge: ${infoText}`,
+				stateText,
+			].join("\n"), ok ? "info" : "error");
 		},
 	});
 
@@ -207,7 +315,7 @@ ${ready.stdout || "No ready tasks."}`);
 		handler: async (_args, ctx) => {
 			await ctx.waitForIdle();
 			exitMode(pi, ctx);
-			ctx.ui.notify("Spec workflow mode exited. Dashboard untouched; use /trekker stop for dashboard.", "info");
+			ctx.ui.notify("Spec workflow mode exited.", "info");
 		},
 	});
 }

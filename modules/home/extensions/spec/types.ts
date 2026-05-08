@@ -25,6 +25,7 @@ export interface SpecInfo {
 	indexPath: string;
 	shape: "light" | "phased" | "ticketed";
 	title: string;
+	swormEpicId?: string;
 }
 
 export interface TaskSummary {
@@ -32,16 +33,4 @@ export interface TaskSummary {
 	readyLine: string;
 	blockers: string[];
 	manualChecks: string[];
-}
-
-export interface TrekkerResult {
-	stdout: string;
-	stderr: string;
-	code: number;
-}
-
-export interface DashboardMeta {
-	pid?: number;
-	url?: string;
-	port?: number;
 }

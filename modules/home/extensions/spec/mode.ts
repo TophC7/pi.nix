@@ -15,11 +15,43 @@ const INSPECTION_TOOLS = [
 	"get_search_content",
 ];
 
-const AUTHORING_TOOLS = [
+const SWORM_TOOLS = [
+	"sworm_bridge_info",
+	"sworm_epic_create",
+	"sworm_epic_list",
+	"sworm_epic_show",
+	"sworm_epic_update",
+	"sworm_epic_delete",
+	"sworm_issue_list",
+	"sworm_issue_ready",
+	"sworm_issue_search",
+	"sworm_issue_show",
+	"sworm_issue_create",
+	"sworm_issue_update",
+	"sworm_issue_delete",
+	"sworm_issue_claim",
+	"sworm_comment_add",
+	"sworm_comment_list",
+	"sworm_comment_update",
+	"sworm_comment_delete",
+	"sworm_dependency_add",
+	"sworm_dependency_remove",
+	"sworm_dependency_list",
+	"sworm_config_list",
+	"sworm_config_get",
+	"sworm_config_set",
+];
+
+const PLAN_AUTHORING_TOOLS = [
+	...INSPECTION_TOOLS,
+	"save_plan_draft",
+];
+
+const SPEC_AUTHORING_TOOLS = [
 	...INSPECTION_TOOLS,
 	"save_plan_draft",
 	"save_spec",
-	"trekker",
+	...SWORM_TOOLS,
 ];
 
 const MUTATING_BASH = [
@@ -59,7 +91,8 @@ export function enterMode(pi: ExtensionAPI, ctx: ExtensionContext, mode: Mode): 
 		state.snapshot = pi.getActiveTools().map((tool) => tool.name);
 	}
 	state.mode = mode;
-	const tools = mode === "spec-working" ? (state.snapshot ?? pi.getAllTools().map((tool) => tool.name)) : availableToolNames(pi, AUTHORING_TOOLS);
+	const authoringTools = mode === "plan-authoring" ? PLAN_AUTHORING_TOOLS : SPEC_AUTHORING_TOOLS;
+	const tools = mode === "spec-working" ? (state.snapshot ?? pi.getAllTools().map((tool) => tool.name)) : availableToolNames(pi, authoringTools);
 	pi.setActiveTools(tools);
 	setWorkflowStatus(ctx, mode);
 }

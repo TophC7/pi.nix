@@ -3,7 +3,6 @@ import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { maybeBlockAuthoringToolCall, setWorkflowStatus, state } from "./mode.ts";
 import { registerPlanCommands, registerSpecCommands } from "./commands.ts";
 import { registerSpecWorkflowTools } from "./tools.ts";
-import { registerTrekkerCommand } from "./trekker.ts";
 
 export default function specWorkflowExtension(pi: ExtensionAPI) {
 	registerSpecWorkflowTools(pi);
@@ -16,8 +15,6 @@ export default function specWorkflowExtension(pi: ExtensionAPI) {
 
 	registerPlanCommands(pi);
 	registerSpecCommands(pi);
-	registerTrekkerCommand(pi);
-
 	pi.on("resources_discover", () => {
 		if (!existsSync(".sworm")) return;
 		return {};

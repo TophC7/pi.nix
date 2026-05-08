@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
+import { readFrontmatterValue } from "./files.ts";
 import type { SpecInfo } from "./types.ts";
 
 export function listSpecs(): SpecInfo[] {
@@ -18,7 +19,8 @@ export function listSpecs(): SpecInfo[] {
 			const shape = existsSync(lightIndex) ? "light" : files.some((file) => file.startsWith("ticket-")) ? "ticketed" : "phased";
 			const content = readFileSync(indexPath, "utf8");
 			const title = content.match(/^#\s+(.+)$/m)?.[1] ?? entry.name;
-			return { name: entry.name, path: specPath, indexPath, shape, title } satisfies SpecInfo;
+			const swormEpicId = readFrontmatterValue(content, "sworm_epic_id") || readFrontmatterValue(content, "epic_id") || undefined;
+			return { name: entry.name, path: specPath, indexPath, shape, title, swormEpicId } satisfies SpecInfo;
 		})
 		.filter((spec): spec is SpecInfo => Boolean(spec));
 }
@@ -80,6 +82,14 @@ export function extractInvariantChecks(content: string): string[] {
 		if (command) checks.add(command);
 	}
 	return [...checks];
+}
+
+export function extractIssueIds(content: string): string[] {
+	return [...new Set([...content.matchAll(/\bISSUE-\d+\b/g)].map((match) => match[0]))];
+}
+
+export function extractEpicIds(content: string): string[] {
+	return [...new Set([...content.matchAll(/\bEPIC-\d+\b/g)].map((match) => match[0]))];
 }
 
 export function replaceSyncBlock(content: string, block: string): string {
