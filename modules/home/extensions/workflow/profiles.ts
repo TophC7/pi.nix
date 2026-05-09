@@ -58,7 +58,7 @@ export const AUTHORING_BASH_RULES: readonly WorkflowBashRule[] = [
 	{ id: "cp", pattern: /\bcp\b/, reason: "writes files" },
 	{ id: "mkdir", pattern: /\bmkdir\b/, reason: "creates directories" },
 	{ id: "touch", pattern: /\btouch\b/, reason: "creates or mutates files" },
-	{ id: "git-mutator", pattern: /\bgit\s+(add|commit|push|reset|checkout|switch|merge|rebase|clean|stash|restore)\b/, reason: "mutates git state or working tree" },
+	{ id: "git-mutator", pattern: /\bgit\s+(add|commit|push|reset|checkout|switch|merge|rebase|clean|stash|restore|apply|am|pull)\b/, reason: "mutates git state or working tree" },
 	{ id: "redirect", pattern: />|>>|\d>/, reason: "writes command output to files" },
 	{ id: "xargs", pattern: /\|\s*xargs\b/, reason: "can fan out mutation commands" },
 	{ id: "package-mutator", pattern: /\b(npm|pnpm|yarn|bun)\s+(install|add|remove|update)\b/, reason: "mutates dependencies" },
@@ -69,7 +69,10 @@ export const REVIEW_BASH_RULES: readonly WorkflowBashRule[] = [
 	{ id: "sed-in-place", pattern: /\bsed\b[^\n]*(?:\s--in-place(?:[=\s]|$)|\s-i(?:\S*|\s|$))/, reason: "edits files in place" },
 	{ id: "tee", pattern: /\btee\b/, reason: "writes stdin to files" },
 	{ id: "chmod-chown", pattern: /\b(chmod|chown|truncate)\b/, reason: "mutates file metadata or contents" },
+	{ id: "path-mutator", pattern: /\b(dd\b[^\n]*\bof=|install\b|ln\b|rsync\b|patch\b)/, reason: "mutates paths or applies patches" },
+	{ id: "git-ref-mutator", pattern: /\bgit\s+(?:branch\b[^\n]*(?:\s-d\b|\s-D\b|--delete|\s-m\b|--move)|tag\b[^\n]*(?:\s-d\b|--delete)|worktree\s+(?:add|remove|move|repair)|submodule\s+update)\b/, reason: "mutates git refs, worktrees, or submodules" },
 	{ id: "python-writes", pattern: /\bpython[\d.]*\s+-c\b[^\n]*(write|open\([^)]*,\s*[\"']w|Path\([^)]*\)\.write_)/, reason: "inline Python can write files" },
+	{ id: "inline-script-writes", pattern: /\b(node|deno|bun|perl|ruby|php)\s+(?:-e|-p|--eval)\b[^\n]*(writeFile|appendFile|createWriteStream|openSync|File\.(?:write|open)|IO\.write|\.write\()/, reason: "inline script can write files" },
 ] as const;
 
 const AUTHORING_SAFETY: WorkflowSafetyPolicy = {

@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { maybeBlockAuthoringToolCall, setWorkflowStatus, state } from "./mode.ts";
 import { registerPlanCommands, registerSpecCommands } from "./commands.ts";
+import { registerPlanReviewCommand } from "./review-command.ts";
 import { registerSpecWorkflowTools } from "./tools.ts";
 import { recoverStaleWorkflow } from "../workflow/recovery.ts";
 import { MODES, type Mode } from "./types.ts";
@@ -28,6 +29,7 @@ export default function specWorkflowExtension(pi: ExtensionAPI) {
 	pi.on("tool_call", maybeBlockAuthoringToolCall);
 
 	registerPlanCommands(pi);
+	registerPlanReviewCommand(pi);
 	registerSpecCommands(pi);
 	pi.on("resources_discover", () => {
 		if (!existsSync(".sworm")) return;

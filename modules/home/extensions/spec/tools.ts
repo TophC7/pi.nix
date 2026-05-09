@@ -5,6 +5,7 @@ import { saveFile } from "./files.ts";
 import { requireSwormBridge } from "./issues.ts";
 import { exitMode } from "./mode.ts";
 import { isPlanDraftPath } from "./plans.ts";
+import { validateReviewPlanDraft } from "./review-plan-validator.ts";
 
 export function registerSpecWorkflowTools(pi: ExtensionAPI): void {
 	pi.registerTool({
@@ -18,6 +19,10 @@ export function registerSpecWorkflowTools(pi: ExtensionAPI): void {
 		async execute(_toolCallId, params) {
 			if (!isPlanDraftPath(params.path)) {
 				throw new Error("Plan path must match .sworm/plans/YYYY-MM-DD-<slug>.md");
+			}
+			const reviewValidation = validateReviewPlanDraft(params.content);
+			if (!reviewValidation.valid) {
+				throw new Error(`Invalid review plan draft:\n${reviewValidation.errors.join("\n")}`);
 			}
 			const result = saveFile(".sworm/plans", params.path, params.content, true);
 			return { content: [{ type: "text", text: `Saved ${result.path} (${result.bytes} bytes).` }], details: result };

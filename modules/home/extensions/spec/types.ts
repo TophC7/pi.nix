@@ -1,4 +1,4 @@
-export const MODES = ["idle", "plan-authoring", "spec-authoring", "spec-working"] as const;
+export const MODES = ["idle", "plan-authoring", "spec-authoring", "spec-working", "plan-review-authoring"] as const;
 
 export type Mode = (typeof MODES)[number];
 

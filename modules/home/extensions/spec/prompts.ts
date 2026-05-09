@@ -94,16 +94,69 @@ promoted_at:
 Required sections: Goal, Findings, Options considered, Recommended approach, Risks, Open questions resolved, Critical files, Promotion notes.`;
 }
 
+export interface ReviewFinalizeArgs {
+	target: string;
+	reportPath: string;
+	planDraftPath: string;
+}
+
+export function reviewFinalizePrompt(args: ReviewFinalizeArgs): string {
+	const date = localDate();
+	return `Finalize /plan:review for: ${args.target}
+
+Review agents and synthesis already ran. You now own hardening, save, and optional promotion.
+
+Inputs (read these files once; do not re-run review unless user asks):
+- Review report: ${args.reportPath}
+- Plan-compatible draft: ${args.planDraftPath}
+
+Mode rules:
+1. Do not edit implementation files. Do not create Sworm issue state.
+2. Read both inputs.
+3. If the report has no findings, ask_user before saving. Empty review plans are opt-in only.
+4. Call isolated AskClaude to harden the review plan: verify schema, severity, evidence, duplicate merge, promotion mapping, and missing context.
+5. If AskClaude fails, ask_user for a recovery choice: retry, model/config adjustment, manual Claude prompt, waiver, or abort.
+6. Save with save_plan_draft to .sworm/plans/${date}-<slug>.md only after AskClaude pass or explicit waiver metadata is present.
+7. After saving, ask_user: promote now, keep draft only, or revise.
+   - On "promote now": call promote_plan with the saved path.
+   - On "keep draft only": stop and report saved path.
+   - On "revise": update the draft, re-harden if material, save again, then re-ask.
+
+Required review-plan frontmatter before save:
+---
+title: <title>
+created: ${date}
+status: draft
+review_plan: true
+hardened_by: <AskClaude | waiver>
+hardened_status: <passed | waived>
+hardened_at: <${date} when AskClaude passed, blank or ${date} when waived>
+waiver_reason: <blank for AskClaude pass; required non-empty text for waiver>
+promoted_to:
+promoted_at:
+---
+
+Accepted hardening metadata shapes:
+- AskClaude pass: \`hardened_by: AskClaude\`, \`hardened_status: passed\`, \`hardened_at: ${date}\`, blank \`waiver_reason\`.
+- Explicit waiver: \`hardened_by: waiver\`, \`hardened_status: waived\`, non-empty \`waiver_reason\`.
+
+Required sections: Goal, Review findings, Required work, Suggestions, Promotion notes.
+Review cards must keep severity in {Blocking, Required, Suggestion}, valid scope names, location, Problem, Evidence, Fix direction, and Spec promotion note. Suggestions must remain Advisory unless explicit opt-in metadata promotes them.`;
+}
+
 export function specVerifierTask(planPath: string): string {
 	return `Verify plan draft before /spec:new.
 
 Plan path: ${planPath}
 
-Read the plan and inspect relevant repo files. Return:
+Read the plan and inspect relevant repo files. If frontmatter contains \`review_plan: true\`, also verify review-card mapping: Blocking/Required findings become required spec work; Suggestions stay advisory unless explicit opt-in metadata promotes them.
+
+Return:
 - plan assumptions with evidence or gaps;
 - recommended spec shape: light, phased, or ticketed, with rationale;
 - likely task boundaries and dependencies;
 - acceptance/validation gates;
+- review-plan mapping notes when applicable;
 - risky durable decisions before Sworm issue creation;
 - questions the user must answer before spec authoring.
 
@@ -135,6 +188,9 @@ Resolve checkpoints in order; do not skip:
 4. Call the subagent tool to run spec.spec-reviewer with the plan path, verification, answers, and architect draft. Returns review findings.
 5. Resolve every blocker in the review findings; if any new critical ambiguity remains, ask_user before continuing.
 6. Generate the candidate spec text in memory with provisional task keys, not saved placeholder Sworm IDs.
+   - For \`review_plan: true\` plans, convert every Blocking and Required review card into required §T work with acceptance tied to the card's evidence/fix direction.
+   - Keep Suggestions advisory by default in Risks, Notes, or Non-goals; create §T work for a Suggestion only when its Spec promotion note contains explicit opt-in metadata.
+   - Preserve severity and scope in task descriptions or implementation notes so review provenance survives promotion.
 7. Call isolated AskClaude to harden the candidate spec end-to-end.
 8. If AskClaude fails, ask_user for a recovery choice: retry, model/config adjustment, manual Claude prompt, waiver, or abort.
 9. ask_user for explicit final approval. Sworm writes are durable.

@@ -1,6 +1,4 @@
-import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import type { ExtensionAPI, ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
 import { prepareManualHandoff, unsafeAutomaticHandoffReason } from "../workflow/handoff.ts";
 import { enterMode, exitMode, state } from "./mode.ts";
@@ -14,17 +12,8 @@ import {
 } from "./prompts.ts";
 import { extractInvariantChecks, extractIssueIds, extractManualChecks, extractRunChecks, readSpecFiles, replaceSyncBlock, resolveSpec } from "./spec-files.ts";
 import { bridgeInfo, formatBridgeError, formatCounts, formatState, loadSpecSwormState, requireSwormBridge, resolveSpecEpicId, specWorkPrompt } from "./issues.ts";
+import { makeStageDir, writeStage } from "./stage.ts";
 import { extractSubagentText, runSubagent } from "./subagent-runner.ts";
-
-function makeStageDir(prefix: string): string {
-	return mkdtempSync(join(tmpdir(), `pi-${prefix}-`));
-}
-
-function writeStage(dir: string, name: string, content: string): string {
-	const path = join(dir, `${name}.md`);
-	writeFileSync(path, content, "utf8");
-	return path;
-}
 
 async function requireBridgeOrExit(pi: ExtensionAPI, ctx: ExtensionCommandContext, action: string): Promise<boolean> {
 	if (await requireSwormBridge(ctx)) return true;
