@@ -31,19 +31,23 @@ let
   extensionPackages = [
     "spec"
     "cleanup"
+    "subagents"
   ];
   extensionBundle = pkgs.runCommand "pi-local-extensions" { } ''
     mkdir -p $out
     cp -R ${./extensions}/. $out/
   '';
-  # pi-subagents recurses into real directories but treats symlinked directories
-  # as opaque entries, so ~/.pi/agent/agents/<pkg>/ must be a real directory of
-  # symlinked .md files. Auto-discover the file list from the source tree.
+  # Package-aware agent discovery expects ~/.pi/agent/agents/<pkg>/ to be a real
+  # directory of symlinked .md files. Auto-discover file lists from source trees.
   packageAgentFiles =
     pkg:
-    builtins.filter (name: lib.hasSuffix ".md" name) (
-      builtins.attrNames (builtins.readDir (./extensions + "/${pkg}/agents"))
-    );
+    let
+      agentsDir = ./extensions + "/${pkg}/agents";
+    in
+    if builtins.pathExists agentsDir then
+      builtins.filter (name: lib.hasSuffix ".md" name) (builtins.attrNames (builtins.readDir agentsDir))
+    else
+      [ ];
   packageAgentEntries =
     pkg:
     builtins.listToAttrs (
@@ -80,11 +84,6 @@ let
   };
   packageEntries = [
     (toString inputs.pi-ask-user)
-    {
-      source = toString inputs.pi-subagents;
-      prompts = [ ];
-      skills = [ ];
-    }
     (toString inputs.pi-simplify)
     (toString inputs.pi-rtk-optimizer)
     (toString piPackages.pi-terminal-theme)
@@ -141,10 +140,6 @@ in
           theme = "dark";
 
           extensions = extensionPaths;
-
-          subagents = {
-            disableBuiltins = true;
-          };
 
           packages = packageEntries;
         };

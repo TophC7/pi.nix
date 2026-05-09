@@ -47,12 +47,12 @@ export function registerSpecWorkflowTools(pi: ExtensionAPI): void {
 				return { content: [{ type: "text" as const, text }], details: { path: params.path, error: "sworm_bridge_unavailable" }, isError: true };
 			}
 			exitMode(pi, ctx);
-			const text = prepareManualHandoff(ctx, {
+			const handoff = await prepareManualHandoff(ctx, {
 				label: "promote_plan",
 				command: `/spec:new ${params.path}`,
 				reason: unsafeAutomaticHandoffReason(),
-			});
-			return { content: [{ type: "text", text }], details: { path: params.path, manualHandoff: true } };
+			}, { pi });
+			return { content: [{ type: "text", text: handoff.notice }], details: { path: params.path, manualHandoff: true, outcome: handoff.outcome } };
 		},
 	});
 

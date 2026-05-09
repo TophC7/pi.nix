@@ -1,3 +1,4 @@
+import { classifyHardeningMetadata } from "./review-hardening.ts";
 import { REVIEW_CARD_FIELD_LABELS, isReviewCardHeaderLine, parseReviewCardField, parseReviewCardHeader } from "./review-schema.ts";
 
 export interface ReviewPlanValidationOptions {
@@ -25,15 +26,8 @@ export function validateReviewPlanDraft(content: string, options: ReviewPlanVali
 
 function validateHardening(content: string, options: ReviewPlanValidationOptions, errors: string[]): void {
 	if (options.requireHardening === false) return;
-	const frontmatter = content.match(/^---\n([\s\S]*?)\n---\n/);
-	if (!frontmatter) {
-		errors.push("Missing YAML frontmatter.");
-		return;
-	}
-	const metadata = frontmatter[1] ?? "";
-	const hasAskClaude = /hardened_by:\s*AskClaude/.test(metadata) && /hardened_status:\s*passed/.test(metadata);
-	const hasWaiver = /hardened_by:\s*waiver/.test(metadata) && /hardened_status:\s*waived/.test(metadata) && /waiver_reason:\s*\S/.test(metadata);
-	if (!hasAskClaude && !hasWaiver) errors.push("Review plan requires AskClaude pass metadata or explicit waiver metadata.");
+	const result = classifyHardeningMetadata(content);
+	if (result.status === "missing") errors.push(...result.errors);
 }
 
 function validateSections(content: string, errors: string[]): void {

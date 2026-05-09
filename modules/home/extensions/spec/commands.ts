@@ -1,4 +1,6 @@
-import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import type { ExtensionAPI, ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
 import { prepareManualHandoff, unsafeAutomaticHandoffReason } from "../workflow/handoff.ts";
 import { enterMode, exitMode, state } from "./mode.ts";
@@ -23,6 +25,44 @@ async function requireBridgeOrExit(pi: ExtensionAPI, ctx: ExtensionCommandContex
 	return false;
 }
 
+interface TreeSnapshot {
+	statusLines: string[];
+	trackedHashes: Map<string, string>;
+}
+
+async function snapshotTrackedTree(pi: ExtensionAPI, ctx: ExtensionCommandContext): Promise<TreeSnapshot> {
+	const status = await pi.exec("git", ["status", "--porcelain=v1", "-uall"], { cwd: ctx.cwd, signal: ctx.signal });
+	const statusLines = (status.stdout ?? "").split("\n").filter(Boolean).sort();
+	const trackedList = await pi.exec("git", ["ls-files", "-z"], { cwd: ctx.cwd, signal: ctx.signal });
+	const trackedPaths = (trackedList.stdout ?? "").split("\0").filter(Boolean);
+	const hashes = new Map<string, string>();
+	for (const rel of trackedPaths) {
+		try {
+			const buf = readFileSync(join(ctx.cwd, rel));
+			hashes.set(rel, createHash("sha1").update(buf).digest("hex"));
+		} catch {
+			// File may have been removed between ls-files and read; status diff catches it.
+		}
+	}
+	return { statusLines, trackedHashes: hashes };
+}
+
+function diffTreeSnapshots(before: TreeSnapshot, after: TreeSnapshot): string[] {
+	const drift: string[] = [];
+	const beforeStatus = new Set(before.statusLines);
+	const afterStatus = new Set(after.statusLines);
+	for (const line of after.statusLines) if (!beforeStatus.has(line)) drift.push(`status added: ${line}`);
+	for (const line of before.statusLines) if (!afterStatus.has(line)) drift.push(`status cleared: ${line}`);
+	for (const [path, afterHash] of after.trackedHashes) {
+		const beforeHash = before.trackedHashes.get(path);
+		if (beforeHash && beforeHash !== afterHash) drift.push(`tracked file content changed: ${path}`);
+	}
+	for (const path of before.trackedHashes.keys()) {
+		if (!after.trackedHashes.has(path)) drift.push(`tracked file removed: ${path}`);
+	}
+	return drift;
+}
+
 export function registerPlanCommands(pi: ExtensionAPI): void {
 	pi.registerCommand("plan", {
 		description: "Draft read-only plan. Args: open, promote, exit.",
@@ -38,11 +78,11 @@ export function registerPlanCommands(pi: ExtensionAPI): void {
 			if (command === "open") {
 				const draft = await pickPlan(ctx, "Open plan draft:");
 				if (!draft) return;
-				prepareManualHandoff(ctx, {
+				await prepareManualHandoff(ctx, {
 					label: "/plan open",
 					command: `/preview ${draft.path}`,
 					reason: unsafeAutomaticHandoffReason(),
-				});
+				}, { pi });
 				return;
 			}
 			if (command === "promote") {
@@ -50,11 +90,11 @@ export function registerPlanCommands(pi: ExtensionAPI): void {
 				if (!draft) return;
 				if (!(await requireBridgeOrExit(pi, ctx, "/plan promote"))) return;
 				exitMode(pi, ctx);
-				prepareManualHandoff(ctx, {
+				await prepareManualHandoff(ctx, {
 					label: "/plan promote",
 					command: `/spec:new ${draft.path}`,
 					reason: unsafeAutomaticHandoffReason(),
-				});
+				}, { pi });
 				return;
 			}
 			if (command === "help") {
@@ -76,21 +116,20 @@ export function registerPlanCommands(pi: ExtensionAPI): void {
 			try {
 				const scoutResponse = await runSubagent(pi, ctx, {
 					tasks: [
-						{ agent: "spec.plan-scout", task: planScoutTask(description), output: false },
-						{ agent: "spec.plan-risk-scout", task: planRiskScoutTask(description), output: false },
+						{ agent: "spec.plan-scout", task: planScoutTask(description) },
+						{ agent: "spec.plan-risk-scout", task: planRiskScoutTask(description) },
 					],
 					context: "fresh",
-					clarify: false,
 					agentScope: "both",
 				}, "/plan scout");
 				const findings = extractSubagentText(scoutResponse);
 				const findingsPath = writeStage(stageDir, "findings", findings);
 				ctx.ui.notify("Plan discovery complete. Manual handoff prepared for parent agent interview, synthesis, hardening, and save.", "info");
-				prepareManualHandoff(ctx, {
+				await prepareManualHandoff(ctx, {
 					label: "/plan finalize",
 					command: planFinalizePrompt({ description, findingsPath }),
 					reason: unsafeAutomaticHandoffReason(),
-				});
+				}, { pi });
 			} catch (error) {
 				exitMode(pi, ctx);
 				ctx.ui.notify(formatBridgeError(error), "error");
@@ -109,11 +148,11 @@ export function registerSpecCommands(pi: ExtensionAPI): void {
 			if (!planPath) {
 				const choice = await ctx.ui.select("/spec:new needs a plan draft", ["select existing plan", "create new /plan", "cancel"]);
 				if (choice === "create new /plan") {
-					prepareManualHandoff(ctx, {
+					await prepareManualHandoff(ctx, {
 						label: "/spec:new",
 						command: "/plan",
 						reason: unsafeAutomaticHandoffReason(),
-					});
+					}, { pi });
 					return;
 				}
 				if (choice !== "select existing plan") return;
@@ -133,18 +172,16 @@ export function registerSpecCommands(pi: ExtensionAPI): void {
 					agent: "spec.spec-verifier",
 					task: specVerifierTask(planPath),
 					context: "fresh",
-					clarify: false,
 					agentScope: "both",
-					output: false,
 				}, "/spec verify");
 				const verification = extractSubagentText(verifierResponse);
 				const verificationPath = writeStage(stageDir, "verification", verification);
 				ctx.ui.notify("Spec verification complete. Manual handoff prepared for parent agent interview, draft, review, hardening, and save.", "info");
-				prepareManualHandoff(ctx, {
+				await prepareManualHandoff(ctx, {
 					label: "/spec:new finalize",
 					command: specFinalizePrompt({ planPath, verificationPath }),
 					reason: unsafeAutomaticHandoffReason(),
-				});
+				}, { pi });
 			} catch (error) {
 				exitMode(pi, ctx);
 				ctx.ui.notify(formatBridgeError(error), "error");
@@ -162,11 +199,11 @@ export function registerSpecCommands(pi: ExtensionAPI): void {
 			try {
 				const swormState = await loadSpecSwormState(spec);
 				enterMode(pi, ctx, "spec-working");
-				prepareManualHandoff(ctx, {
+				await prepareManualHandoff(ctx, {
 					label: "/spec:work",
 					command: specWorkPrompt(spec, swormState),
 					reason: unsafeAutomaticHandoffReason(),
-				});
+				}, { pi });
 			} catch (error) {
 				exitMode(pi, ctx);
 				ctx.ui.notify(formatBridgeError(error), "error");
@@ -209,7 +246,7 @@ export function registerSpecCommands(pi: ExtensionAPI): void {
 			if (!(await requireSwormBridge(ctx))) return;
 			const spec = await resolveSpec(ctx, args);
 			if (!spec) return;
-			const before = readdirSync(spec.path).filter((name) => name.endsWith(".md")).map((name) => [join(spec.path, name), readFileSync(join(spec.path, name), "utf8")] as const);
+			const beforeTree = await snapshotTrackedTree(pi, ctx);
 			const content = readSpecFiles(spec);
 			const runChecks = extractRunChecks(content);
 			const manualChecks = extractManualChecks(content);
@@ -219,8 +256,9 @@ export function registerSpecCommands(pi: ExtensionAPI): void {
 				const result = await pi.exec("fish", ["-lc", command], { cwd: ctx.cwd, signal: ctx.signal, timeout: 120000 });
 				if ((result.code ?? 1) !== 0) failures.push(`${command}\n${result.stderr || result.stdout}`.trim());
 			}
-			const afterChanged = before.filter(([path, text]) => readFileSync(path, "utf8") !== text).map(([path]) => path);
-			if (afterChanged.length) failures.push(`/spec:check mutated files: ${afterChanged.join(", ")}`);
+			const afterTree = await snapshotTrackedTree(pi, ctx);
+			const treeDrift = diffTreeSnapshots(beforeTree, afterTree);
+			if (treeDrift.length) failures.push(`/spec:check produced repository mutations:\n- ${treeDrift.join("\n- ")}`);
 			const epicId = resolveSpecEpicId(spec, content);
 			if (!epicId) failures.push("Missing Sworm EPIC id (frontmatter sworm_epic_id or EPIC-* in spec). ");
 			let swormState;

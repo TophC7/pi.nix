@@ -1,14 +1,7 @@
-/**
- * pi-caveman — why use many token when few do trick
- *
- * A pi extension that cuts ~75% of output tokens while keeping full technical
- * accuracy. Based on https://github.com/JuliusBrussee/caveman
- *
- * Commands:
- *   /caveman [level]  Toggle caveman mode or set intensity
- *   /caveman stop     Disable caveman mode (aliases: off, quit)
- *   /caveman config   Open settings dialog (default level, status bar toggle)
- */
+// Pi extension: appends a "caveman mode" instruction block to the agent system
+// prompt to bias output toward terse fragments. Compression is qualitative —
+// intensity is selectable; no measured output-size guarantee.
+// Based on https://github.com/JuliusBrussee/caveman.
 
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -24,10 +17,6 @@ import {
 	SettingsList,
 	Text,
 } from "@mariozechner/pi-tui";
-
-// ---------------------------------------------------------------------------
-// Levels
-// ---------------------------------------------------------------------------
 
 const LEVELS = ["off", "lite", "full", "ultra", "micro"] as const;
 const STOP_ALIASES = new Set(["off", "stop", "quit"]);
@@ -47,10 +36,6 @@ const CAVEMAN_COMMAND_OPTIONS = [
 	{ value: "quit", label: "quit", description: "Disable caveman mode" },
 	{ value: "config", label: "config", description: "Open settings dialog" },
 ] as const;
-
-// ---------------------------------------------------------------------------
-// Persistent config (survives across sessions)
-// ---------------------------------------------------------------------------
 
 interface CavemanConfig {
 	/** Level to apply on new sessions. "off" means don't auto-enable. */
@@ -96,10 +81,6 @@ async function saveConfig(config: CavemanConfig): Promise<void> {
 	return saveConfigQueue;
 }
 
-// ---------------------------------------------------------------------------
-// Animated status bar — campfire with 256-color fire palette
-// ---------------------------------------------------------------------------
-
 interface Animation {
 	frames: string[];
 	label: string;
@@ -131,10 +112,6 @@ const ANIMATIONS: Record<Exclude<Level, "off">, Animation> = {
 	ultra: { frames: FIRE_FRAMES, label: "ULTRA", interval: 100 },
 	micro: { frames: FIRE_FRAMES, label: "MICRO", interval: 120 },
 };
-
-// ---------------------------------------------------------------------------
-// System prompt fragments
-// ---------------------------------------------------------------------------
 
 const BASE = `\
 IMPORTANT: You are in CAVEMAN MODE. Respond terse like smart caveman. \
@@ -177,10 +154,6 @@ Auto-clarity: drop caveman for security warnings, irreversible action confirmati
 or when user is confused. Resume after.
 Boundaries: write normal code. Only compress explanations. "stop caveman" or "normal mode" reverts.`;
 
-// ---------------------------------------------------------------------------
-// Extension
-// ---------------------------------------------------------------------------
-
 export default function caveman(pi: ExtensionAPI) {
 	let level: Level = "off";
 	let config: CavemanConfig = { ...DEFAULT_CONFIG };
@@ -200,8 +173,6 @@ export default function caveman(pi: ExtensionAPI) {
 		}
 		await configLoadPromise;
 	};
-
-	// -- Animation helpers --
 
 	function stopAnimation() {
 		if (timer) {
@@ -245,8 +216,6 @@ export default function caveman(pi: ExtensionAPI) {
 		timer = setInterval(renderFrame, anim.interval);
 	}
 
-	// -- Restore state on session load --
-
 	pi.on("session_start", async (_event, ctx) => {
 		await ensureConfigLoaded();
 
@@ -281,8 +250,6 @@ export default function caveman(pi: ExtensionAPI) {
 		stopAnimation();
 		isActive = false;
 	});
-
-	// -- /caveman command --
 
 	pi.registerCommand("caveman", {
 		description:
@@ -327,8 +294,6 @@ export default function caveman(pi: ExtensionAPI) {
 			);
 		},
 	});
-
-	// -- /caveman config: interactive SettingsList --
 
 	async function openConfig(ctx: ExtensionContext) {
 		await ensureConfigLoaded();
@@ -449,8 +414,6 @@ export default function caveman(pi: ExtensionAPI) {
 			};
 		});
 	}
-
-	// -- Inject caveman rules into system prompt --
 
 	pi.on("before_agent_start", async (event) => {
 		await ensureConfigLoaded();

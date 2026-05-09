@@ -1,16 +1,13 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, normalize, relative } from "node:path";
 import { resolveInside } from "./paths.ts";
+import { classifyHardeningMetadata } from "./review-hardening.ts";
 import type { SaveResult } from "./types.ts";
 
 function requireMetadata(content: string): void {
-	const frontmatter = content.match(/^---\n([\s\S]*?)\n---\n/);
-	if (!frontmatter) throw new Error("Missing YAML frontmatter.");
-	const metadata = frontmatter[1] ?? "";
-	const hasAskClaude = /hardened_by:\s*AskClaude/.test(metadata) && /hardened_status:\s*passed/.test(metadata);
-	const hasWaiver = /hardened_by:\s*waiver/.test(metadata) && /hardened_status:\s*waived/.test(metadata) && /waiver_reason:\s*\S/.test(metadata);
-	if (!hasAskClaude && !hasWaiver) {
-		throw new Error("Missing AskClaude hardening metadata or explicit waiver.");
+	const result = classifyHardeningMetadata(content);
+	if (result.status === "missing") {
+		throw new Error(result.errors[0] ?? "Missing AskClaude hardening metadata or explicit waiver.");
 	}
 }
 

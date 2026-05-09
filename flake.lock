@@ -428,22 +428,6 @@
         "type": "github"
       }
     },
-    "pi-subagents": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1777786589,
-        "narHash": "sha256-534OtNSO5/YBM3/407wFMf8dwfImw1e38251mnEn63Y=",
-        "owner": "nicobailon",
-        "repo": "pi-subagents",
-        "rev": "3ee17de53d1a430b71519889741569c3991f99b7",
-        "type": "github"
-      },
-      "original": {
-        "owner": "nicobailon",
-        "repo": "pi-subagents",
-        "type": "github"
-      }
-    },
     "pi-web-access": {
       "flake": false,
       "locked": {
@@ -477,7 +461,6 @@
         "pi-ask-user": "pi-ask-user",
         "pi-rtk-optimizer": "pi-rtk-optimizer",
         "pi-simplify": "pi-simplify",
-        "pi-subagents": "pi-subagents",
         "pi-web-access": "pi-web-access"
       }
     },

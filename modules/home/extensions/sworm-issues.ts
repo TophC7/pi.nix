@@ -5,7 +5,20 @@ import { Type } from "typebox";
 import net from "node:net";
 
 const REQUEST_TIMEOUT_MS = 8000;
+const STARTUP_SNAPSHOT_TTL_MS = 30_000;
+const STARTUP_SNAPSHOT_BUDGET_MS = 1500;
 let currentAgentId = process.env.SWORM_PI_MODEL ?? "pi";
+
+interface StartupSnapshot {
+	info: BridgeInfo;
+	epics: EpicSummary[];
+	ready: IssueSummary[];
+	inProgress: IssueSummary[];
+	fetchedAt: number;
+}
+
+let snapshotCache: StartupSnapshot | undefined;
+let snapshotInflight: Promise<StartupSnapshot | undefined> | undefined;
 
 export type BridgeError = { code: string; message: string };
 type BridgeResponse<T = unknown> =
@@ -588,18 +601,9 @@ export default function swormIssuesExtension(pi: ExtensionAPI) {
 	pi.on("before_agent_start", async (event) => {
 		const env = readBridgeEnv();
 		if (!env) return undefined;
-		let info: BridgeInfo;
-		try {
-			info = await callBridge<BridgeInfo>("bridge.info");
-		} catch {
-			return undefined;
-		}
-		if (info.protocol_version !== 1) return undefined;
-		const [epics, ready, inProgress] = await Promise.all([
-			bestEffortCall<EpicSummary[]>("epic.list", {}, []),
-			bestEffortCall<IssueSummary[]>("issue.ready", { filters: { limit: 5 } }, []),
-			bestEffortCall<IssueSummary[]>("issue.list", { filters: { status: "in_progress", limit: 20 } }, []),
-		]);
+		const snapshot = await getStartupSnapshot();
+		if (!snapshot) return undefined;
+		const { info, epics, ready, inProgress } = snapshot;
 		const mine = inProgress.filter((issue) => issue.assigneeId === swormAgentId());
 		const readyText = ready.length ? ready.map(formatIssueLine).join("\n") : "No ready Sworm issues.";
 		const activeText = mine.length ? mine.map(formatIssueLine).join("\n") : "No active Sworm issues assigned to this agent.";
@@ -621,4 +625,40 @@ ${epicText}
 `,
 		};
 	});
+}
+
+async function getStartupSnapshot(): Promise<StartupSnapshot | undefined> {
+	const now = Date.now();
+	if (snapshotCache && now - snapshotCache.fetchedAt < STARTUP_SNAPSHOT_TTL_MS) return snapshotCache;
+	if (!snapshotInflight) {
+		snapshotInflight = fetchStartupSnapshot()
+			.then((snapshot) => {
+				if (snapshot) snapshotCache = snapshot;
+				return snapshot;
+			})
+			.finally(() => {
+				snapshotInflight = undefined;
+			});
+	}
+	const winner = await Promise.race([
+		snapshotInflight,
+		new Promise<StartupSnapshot | undefined>((resolve) => setTimeout(() => resolve(snapshotCache), STARTUP_SNAPSHOT_BUDGET_MS)),
+	]);
+	return winner;
+}
+
+async function fetchStartupSnapshot(): Promise<StartupSnapshot | undefined> {
+	let info: BridgeInfo;
+	try {
+		info = await callBridge<BridgeInfo>("bridge.info");
+	} catch {
+		return undefined;
+	}
+	if (info.protocol_version !== 1) return undefined;
+	const [epics, ready, inProgress] = await Promise.all([
+		bestEffortCall<EpicSummary[]>("epic.list", {}, []),
+		bestEffortCall<IssueSummary[]>("issue.ready", { filters: { limit: 5 } }, []),
+		bestEffortCall<IssueSummary[]>("issue.list", { filters: { status: "in_progress", limit: 20 } }, []),
+	]);
+	return { info, epics, ready, inProgress, fetchedAt: Date.now() };
 }

@@ -27,10 +27,6 @@
       url = "github:edlsh/pi-ask-user";
       flake = false;
     };
-    pi-subagents = {
-      url = "github:nicobailon/pi-subagents";
-      flake = false;
-    };
     pi-web-access = {
       url = "github:nicobailon/pi-web-access";
       flake = false;

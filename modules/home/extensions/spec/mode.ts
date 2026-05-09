@@ -1,6 +1,6 @@
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { workflowController } from "../workflow/controller.ts";
-import { getWorkflowProfile } from "../workflow/profiles.ts";
+import { getWorkflowProfile, SAFE_DEFAULT_TOOLS } from "../workflow/profiles.ts";
 import { restoreWorkflowTools } from "../workflow/tools.ts";
 import type { WorkflowProfile } from "../workflow/types.ts";
 import type { Mode, ModeState } from "./types.ts";
@@ -36,14 +36,24 @@ export function exitMode(pi: ExtensionAPI, ctx: ExtensionContext): void {
 	try {
 		if (workflowController.activeRun) {
 			workflowController.exit(pi, ctx);
-		} else if (state.snapshot) {
-			restoreWorkflowTools(pi, { previousActiveTools: state.snapshot });
-			setWorkflowStatus(ctx, "idle");
+			return;
+		}
+		const targetTools = state.snapshot ?? safeDefaultToolsAvailable(pi);
+		try {
+			restoreWorkflowTools(pi, { previousActiveTools: targetTools });
+		} catch (error) {
+			ctx.ui.notify(`Workflow exit fallback restore failed: ${error instanceof Error ? error.message : String(error)}`, "warning");
 		}
 	} finally {
+		setWorkflowStatus(ctx, "idle");
 		state.mode = "idle";
 		state.snapshot = undefined;
 	}
+}
+
+function safeDefaultToolsAvailable(pi: ExtensionAPI): readonly string[] {
+	const all = new Set(pi.getAllTools().map((tool) => tool.name));
+	return SAFE_DEFAULT_TOOLS.filter((name) => all.has(name));
 }
 
 export function maybeBlockAuthoringToolCall(event: { toolName?: string; input?: unknown }) {

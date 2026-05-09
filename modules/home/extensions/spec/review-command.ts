@@ -19,9 +19,51 @@ function parseReviewArgs(args: string | undefined): "help" | "exit" | string {
 
 async function captureTarget(ctx: ExtensionCommandContext, initialTarget: string): Promise<string | undefined> {
 	if (initialTarget) return initialTarget;
+	if (typeof ctx.ui.select === "function") {
+		const choice = await ctx.ui.select("/plan:review — pick a target kind", [
+			"working-tree",
+			"staged",
+			"range <base>..<head>",
+			"branch <name> [base]",
+			"paths <path...>",
+			"paste",
+			"freeform <path>",
+			"freeform grammar",
+			"cancel",
+		]);
+		if (!choice || choice === "cancel") return undefined;
+		return await collectGuidedTarget(ctx, choice);
+	}
 	const entered = await ctx.ui.input("/plan:review target", "Review target (example: working-tree)");
 	const target = entered?.trim() ?? "";
 	return target || undefined;
+}
+
+async function collectGuidedTarget(ctx: ExtensionCommandContext, choice: string): Promise<string | undefined> {
+	if (choice === "working-tree" || choice === "staged" || choice === "paste") return choice;
+	if (choice.startsWith("range")) {
+		const value = (await ctx.ui.input("range", "Enter <base>..<head>"))?.trim();
+		return value ? `range ${value}` : undefined;
+	}
+	if (choice.startsWith("branch")) {
+		const name = (await ctx.ui.input("branch", "Branch name"))?.trim();
+		if (!name) return undefined;
+		const base = (await ctx.ui.input("branch base (optional)", "Base ref or empty"))?.trim() ?? "";
+		return base ? `branch ${name} ${base}` : `branch ${name}`;
+	}
+	if (choice.startsWith("paths")) {
+		const value = (await ctx.ui.input("paths", "Space-separated paths"))?.trim();
+		return value ? `paths ${value}` : undefined;
+	}
+	if (choice.startsWith("freeform <")) {
+		const value = (await ctx.ui.input("freeform", "Path to context file"))?.trim();
+		return value ? `freeform ${value}` : undefined;
+	}
+	if (choice === "freeform grammar") {
+		const entered = (await ctx.ui.input("freeform grammar", "Full target string"))?.trim();
+		return entered || undefined;
+	}
+	return undefined;
 }
 
 async function parseReviewTargetWithPasteBody(ctx: ExtensionCommandContext, targetText: string): Promise<ReturnType<typeof parseReviewTarget>> {
@@ -69,11 +111,21 @@ export function registerPlanReviewCommand(pi: ExtensionAPI): void {
 					ctx.ui.notify("/plan:review cancelled: no target provided.", "warning");
 					return;
 				}
-				const parsed = await parseReviewTargetWithPasteBody(ctx, targetText);
+				let parsed = await parseReviewTargetWithPasteBody(ctx, targetText);
 				if (!parsed.ok) {
-					exitMode(pi, ctx);
-					ctx.ui.notify(`/plan:review invalid target: ${parsed.error}`, "error");
-					return;
+					ctx.ui.notify(`/plan:review target parse failed: ${parsed.error}. Falling back to guided picker.`, "warning");
+					const retryText = await captureTarget(ctx, "");
+					if (!retryText) {
+						exitMode(pi, ctx);
+						ctx.ui.notify("/plan:review cancelled.", "warning");
+						return;
+					}
+					parsed = await parseReviewTargetWithPasteBody(ctx, retryText);
+					if (!parsed.ok) {
+						exitMode(pi, ctx);
+						ctx.ui.notify(`/plan:review invalid target: ${parsed.error}`, "error");
+						return;
+					}
 				}
 				const stageDir = makeStageDir("plan-review");
 				const context = await captureReviewContext(pi, ctx, parsed.target);
@@ -84,10 +136,8 @@ export function registerPlanReviewCommand(pi: ExtensionAPI): void {
 					tasks: REVIEW_AGENT_REGISTRY.map(({ agent, scope }) => ({
 						agent,
 						task: reviewAgentTask(scope, parsed.target, contextPath),
-						output: false,
 					})),
 					context: "fresh",
-					clarify: false,
 					agentScope: "both",
 				}, "/plan:review agents");
 				const rawFindings = extractSubagentText(response);
@@ -96,16 +146,19 @@ export function registerPlanReviewCommand(pi: ExtensionAPI): void {
 				const draftValidation = validateReviewPlanDraft(synthesis.planDraft, { requireHardening: false });
 				if (!draftValidation.valid) throw new Error(`Generated review plan draft failed validation:\n${draftValidation.errors.join("\n")}`);
 				const reportPath = writeStage(stageDir, "report", synthesis.report);
+				if (synthesis.quarantined.length > 0) {
+					ctx.ui.notify(`/plan:review quarantined ${synthesis.quarantined.length} malformed card(s); see Quarantined cards section in ${reportPath}.`, "warning");
+				}
 				if (synthesis.findings.length === 0) {
 					const choice = await ctx.ui.select("/plan:review found no issues", ["report only", "create empty plan draft"]);
 					if (choice === "create empty plan draft") {
 						const planDraftPath = writeStage(stageDir, "plan-draft", synthesis.planDraft);
 						ctx.ui.notify(`/plan:review agents complete with no findings. Report: ${reportPath}. Empty draft created by user opt-in: ${planDraftPath}.`, "info");
-						prepareManualHandoff(ctx, {
+						await prepareManualHandoff(ctx, {
 							label: "/plan:review finalize",
 							command: reviewFinalizePrompt({ target: formatReviewTarget(parsed.target), reportPath, planDraftPath }),
 							reason: unsafeAutomaticHandoffReason(),
-						});
+						}, { pi });
 					} else {
 						ctx.ui.notify(`/plan:review agents complete with no findings. Report: ${reportPath}. No plan draft created.`, "info");
 						exitMode(pi, ctx);
@@ -114,11 +167,11 @@ export function registerPlanReviewCommand(pi: ExtensionAPI): void {
 				}
 				const planDraftPath = writeStage(stageDir, "plan-draft", synthesis.planDraft);
 				ctx.ui.notify(`/plan:review agents complete. Raw findings: ${findingsPath}. Report: ${reportPath}. Plan-compatible draft: ${planDraftPath}. Manual handoff prepared for hardening and save.`, "info");
-				prepareManualHandoff(ctx, {
+				await prepareManualHandoff(ctx, {
 					label: "/plan:review finalize",
 					command: reviewFinalizePrompt({ target: formatReviewTarget(parsed.target), reportPath, planDraftPath }),
 					reason: unsafeAutomaticHandoffReason(),
-				});
+				}, { pi });
 			} catch (error) {
 				exitMode(pi, ctx);
 				const message = error instanceof Error ? error.message : String(error);

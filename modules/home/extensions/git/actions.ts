@@ -171,11 +171,11 @@ export async function runGitAction(
 	}
 
 	const restore = pendingRestore;
-	prepareManualHandoff(ctx, {
+	await prepareManualHandoff(ctx, {
 		label: `/${action}`,
 		command: buildPrompt(action, basePrompt, userPrompt),
 		reason: `${unsafeAutomaticHandoffReason()} Model/thinking config is not kept pending during manual handoff; re-run after accepting if a custom /git model is required.`,
-	});
+	}, { pi });
 	pendingRestore = undefined;
 	await restoreGitActionConfig(pi, restore);
 }

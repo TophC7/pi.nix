@@ -20,27 +20,46 @@ export interface SynthesizedReviewFinding {
 	specPromotionNote: string;
 }
 
+export interface QuarantinedReviewCard {
+	rawHeader: string;
+	reasons: string[];
+}
+
 export interface ReviewSynthesis {
 	findings: SynthesizedReviewFinding[];
+	quarantined: QuarantinedReviewCard[];
 	report: string;
 	planDraft: string;
 }
 
 export function synthesizeReview(rawFindings: string, target: ReviewTarget): ReviewSynthesis {
-	const findings = dedupeFindings(parseReviewCards(rawFindings)).sort(compareFindings);
+	const parsed = parseReviewCards(rawFindings);
+	const findings = dedupeFindings(parsed.findings).sort(compareFindings);
 	return {
 		findings,
-		report: renderReport(findings, target),
+		quarantined: parsed.quarantined,
+		report: renderReport(findings, parsed.quarantined, target),
 		planDraft: renderPlanDraft(findings, target),
 	};
 }
 
-function parseReviewCards(raw: string): SynthesizedReviewFinding[] {
+interface ParseResult {
+	findings: SynthesizedReviewFinding[];
+	quarantined: QuarantinedReviewCard[];
+}
+
+function parseReviewCards(raw: string): ParseResult {
 	const lines = raw.split("\n");
-	const cards: SynthesizedReviewFinding[] = [];
+	const findings: SynthesizedReviewFinding[] = [];
+	const quarantined: QuarantinedReviewCard[] = [];
 	for (let index = 0; index < lines.length; index++) {
-		const parsedHeader = parseReviewCardHeader(lines[index] ?? "");
-		if (!parsedHeader.ok) continue;
+		const headerLine = lines[index] ?? "";
+		if (!isReviewCardHeaderLine(headerLine)) continue;
+		const parsedHeader = parseReviewCardHeader(headerLine);
+		if (!parsedHeader.ok) {
+			quarantined.push({ rawHeader: headerLine.trim(), reasons: parsedHeader.errors });
+			continue;
+		}
 		const { severity, scope, location } = parsedHeader.header;
 		const fields: Partial<Record<"problem" | "evidence" | "fixDirection" | "specPromotionNote", string>> = {};
 		for (index++; index < lines.length; index++) {
@@ -52,17 +71,33 @@ function parseReviewCards(raw: string): SynthesizedReviewFinding[] {
 			const field = parseReviewCardField(line);
 			if (field) fields[field.key] = field.value;
 		}
-		cards.push({
+		const missing = missingRequiredFields(fields);
+		if (missing.length > 0) {
+			quarantined.push({
+				rawHeader: headerLine.trim(),
+				reasons: missing.map((field) => `missing ${field}`),
+			});
+			continue;
+		}
+		findings.push({
 			severity,
 			scope,
 			location,
-			problem: fields.problem || "Unspecified problem.",
-			evidence: fields.evidence || "Evidence not provided by review agent.",
-			fixDirection: fields.fixDirection || "Define concrete fix before promotion.",
+			problem: fields.problem!,
+			evidence: fields.evidence!,
+			fixDirection: fields.fixDirection!,
 			specPromotionNote: fields.specPromotionNote || defaultPromotionNote(severity),
 		});
 	}
-	return cards;
+	return { findings, quarantined };
+}
+
+function missingRequiredFields(fields: Partial<Record<"problem" | "evidence" | "fixDirection" | "specPromotionNote", string>>): string[] {
+	const missing: string[] = [];
+	if (!fields.problem) missing.push("Problem");
+	if (!fields.evidence) missing.push("Evidence");
+	if (!fields.fixDirection) missing.push("Fix direction");
+	return missing;
 }
 
 function dedupeFindings(findings: SynthesizedReviewFinding[]): SynthesizedReviewFinding[] {
@@ -96,7 +131,7 @@ function compareFindings(a: SynthesizedReviewFinding, b: SynthesizedReviewFindin
 	return REVIEW_SEVERITY_RANK[a.severity] - REVIEW_SEVERITY_RANK[b.severity] || a.location.localeCompare(b.location);
 }
 
-function renderReport(findings: SynthesizedReviewFinding[], target: ReviewTarget): string {
+function renderReport(findings: SynthesizedReviewFinding[], quarantined: QuarantinedReviewCard[], target: ReviewTarget): string {
 	const verdict = findings.some((finding) => finding.severity === "Blocking" || finding.severity === "Required") ? "Request Changes" : "Approve";
 	return [
 		"# /plan:review report",
@@ -107,13 +142,21 @@ function renderReport(findings: SynthesizedReviewFinding[], target: ReviewTarget
 		"## Findings",
 		findings.length ? renderCards(findings) : "No findings.",
 		"",
+		"## Quarantined cards",
+		quarantined.length ? renderQuarantined(quarantined) : "None.",
+		"",
 		"## Open Questions / Assumptions",
 		"- Review agents may have used bounded/truncated context; verify truncation notes before promotion.",
+		quarantined.length ? `- ${quarantined.length} malformed card(s) quarantined; rerun the affected agents or repair the schema before promotion.` : "",
 		"",
 		"## Verdict",
 		verdict,
 		"",
-	].join("\n");
+	].filter((line) => line !== "").join("\n");
+}
+
+function renderQuarantined(quarantined: QuarantinedReviewCard[]): string {
+	return quarantined.map((card, index) => `- #${index + 1} ${card.rawHeader || "<missing header>"} — ${card.reasons.join("; ")}`).join("\n");
 }
 
 function renderPlanDraft(findings: SynthesizedReviewFinding[], target: ReviewTarget): string {
