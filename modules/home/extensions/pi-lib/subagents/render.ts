@@ -4,7 +4,7 @@
 // driven by runner.ts) and renderSubagentToolResult (model-invoked tool flow).
 
 import type { Theme } from "@mariozechner/pi-coding-agent";
-import { Container, Markdown, Spacer, Text, type Component } from "@mariozechner/pi-tui";
+import { Box, Container, Markdown, Spacer, Text, type Component } from "@mariozechner/pi-tui";
 import {
 	combineSubagentUsage,
 	type SubagentRunRequest,
@@ -54,10 +54,46 @@ interface ToolRenderContextLike {
  * when only `runId` is on the message details.
  */
 export function createSubagentMessageRenderer(liveRuns: ReadonlyMap<string, Renderable>) {
-	return (message: { details?: unknown; content?: unknown }, options: { expanded: boolean }, theme: Theme): Component => {
-		const run = extractRun(message.details, liveRuns);
-		if (run) return renderSubagentRun(run, { expanded: options.expanded }, theme);
-		return placeholder(theme, "Subagent run details unavailable.");
+	return (message: { details?: unknown; content?: unknown }, options: { expanded: boolean }, theme: Theme): Component =>
+		new LiveSubagentMessage(message.details, liveRuns, options.expanded, theme);
+}
+
+/**
+ * CustomMessageComponent only rebuilds custom renderer output when expansion
+ * changes or invalidate() fires. Keep this wrapper dynamic so liveRuns updates
+ * and clock-based spinner frames render on ordinary requestRender() calls.
+ */
+class LiveSubagentMessage implements Component {
+	constructor(
+		private readonly details: unknown,
+		private readonly liveRuns: ReadonlyMap<string, Renderable>,
+		private readonly expanded: boolean,
+		private readonly theme: Theme,
+	) {}
+
+	render(width: number): string[] {
+		const run = extractRun(this.details, this.liveRuns);
+		const innerWidth = Math.max(20, width - 2);
+		const child = run
+			? renderSubagentRun(run, { expanded: this.expanded, width: innerWidth }, this.theme)
+			: placeholder(this.theme, "Subagent run details unavailable.");
+		const box = new Box(1, 0, liveFeedBackground(this.theme));
+		box.addChild(child);
+		return box.render(width);
+	}
+
+	invalidate(): void {
+		// render() is intentionally fresh each frame.
+	}
+}
+
+function liveFeedBackground(theme: Theme): (text: string) => string {
+	return (text: string) => {
+		try {
+			return theme.bg("customMessageBg", text);
+		} catch {
+			return text;
+		}
 	};
 }
 
@@ -113,7 +149,7 @@ function stopAnimation(context: ToolRenderContextLike): void {
 // SECTION: TOP-LEVEL DISPATCH //
 
 export function renderSubagentRun(run: Renderable, options: RenderOptions, theme: Theme): Component {
-	const width = (options.width ?? termWidth()) - 4;
+	const width = Math.max(20, options.width ?? termWidth() - 4);
 	if (run.mode === "single" && run.slots.length === 1) {
 		return options.expanded
 			? renderSingleExpanded(run, run.slots[0]!, theme, width)
@@ -297,8 +333,14 @@ function slotStats(theme: Theme, slot: SubagentSlotResult): string {
 	if (slot.toolCount > 0) parts.push(formatToolUseStat(slot.toolCount));
 	const tokens = slot.usage.inputTokens + slot.usage.outputTokens;
 	if (tokens > 0) parts.push(formatTokenStat(tokens));
-	if (slot.duration.elapsedMs > 0) parts.push(formatDuration(slot.duration.elapsedMs));
+	const elapsedMs = slotElapsedMs(slot);
+	if (elapsedMs > 0) parts.push(formatDuration(elapsedMs));
 	return statJoin(theme, parts);
+}
+
+function slotElapsedMs(slot: SubagentSlotResult): number {
+	if (slot.status === "running") return Math.max(0, Date.now() - slot.duration.startedAt);
+	return slot.duration.elapsedMs;
 }
 
 // SECTION: ACTIVITY DERIVATION //
@@ -345,8 +387,8 @@ function totalToolCount(run: Renderable): number {
 }
 
 function aggregateElapsed(run: Renderable): number {
-	if (run.mode === "chain") return run.slots.reduce((acc, slot) => acc + slot.duration.elapsedMs, 0);
-	return run.slots.reduce((acc, slot) => Math.max(acc, slot.duration.elapsedMs), 0);
+	if (run.mode === "chain") return run.slots.reduce((acc, slot) => acc + slotElapsedMs(slot), 0);
+	return run.slots.reduce((acc, slot) => Math.max(acc, slotElapsedMs(slot)), 0);
 }
 
 function formatUsageLine(usage: SubagentUsage, model?: string): string {

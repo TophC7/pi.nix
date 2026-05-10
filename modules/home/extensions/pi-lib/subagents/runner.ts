@@ -4,9 +4,10 @@ import type { ExtensionAPI, ExtensionCommandContext } from "@mariozechner/pi-cod
 import { discoverAgents } from "./discovery.ts";
 import { runSubagents } from "./engine.ts";
 import { buildCappedParentFacingText } from "./output.ts";
+import { SUBAGENT_ANIMATION_MS } from "./render-helpers.ts";
 import { createSubagentMessageRenderer, SUBAGENT_RUN_MESSAGE_TYPE } from "./render.ts";
 import { buildRunRequest, normalizeSubagentRequest } from "./request.ts";
-import { combineSubagentUsage, mapEngineEventToLiveLog, type SubagentRenderable, type SubagentRunRequest, type SubagentRunResult, type SubagentRunUpdate } from "./types.ts";
+import { combineSubagentUsage, mapEngineEventToLiveLog, type SubagentRunRequest, type SubagentRunResult, type SubagentRunState, type SubagentRunUpdate } from "./types.ts";
 
 const TERMINAL_STATE_TTL_MS = 5 * 60_000;
 
@@ -30,7 +31,10 @@ export type SubagentResponse = {
 	errorText?: string;
 };
 
+type SubagentRenderable = SubagentRunState | SubagentRunResult;
+
 const liveRuns = new Map<string, SubagentRenderable>();
+const liveRunAnimationTimers = new Map<string, ReturnType<typeof setInterval>>();
 let rendererRegistered = false;
 
 function ensureRendererRegistered(pi: ExtensionAPI): void {
@@ -40,6 +44,34 @@ function ensureRendererRegistered(pi: ExtensionAPI): void {
 }
 
 const REDRAW_THROTTLE_MS = 60;
+
+function runHasRunningSlot(run: SubagentRenderable | undefined): boolean {
+	return Boolean(run && "slots" in run && run.slots.some((slot) => slot.status === "running"));
+}
+
+function syncLiveRunAnimation(runId: string, requestRedraw: () => void): void {
+	if (!runHasRunningSlot(liveRuns.get(runId))) {
+		stopLiveRunAnimation(runId);
+		return;
+	}
+	if (liveRunAnimationTimers.has(runId)) return;
+	const timer = setInterval(() => {
+		if (!runHasRunningSlot(liveRuns.get(runId))) {
+			stopLiveRunAnimation(runId);
+			return;
+		}
+		requestRedraw();
+	}, SUBAGENT_ANIMATION_MS);
+	(timer as { unref?: () => void }).unref?.();
+	liveRunAnimationTimers.set(runId, timer);
+}
+
+function stopLiveRunAnimation(runId: string): void {
+	const timer = liveRunAnimationTimers.get(runId);
+	if (!timer) return;
+	clearInterval(timer);
+	liveRunAnimationTimers.delete(runId);
+}
 
 function throttledRedraw(ctx: ExtensionCommandContext): () => void {
 	let pending = false;
@@ -77,7 +109,10 @@ export async function runSubagent(
 
 	ctx.ui.setStatus(statusKey, `${label}: starting`);
 	const scheduleStateCleanup = () => {
-		const timeout = setTimeout(() => liveRuns.delete(request.id), TERMINAL_STATE_TTL_MS);
+		const timeout = setTimeout(() => {
+			stopLiveRunAnimation(request.id);
+			liveRuns.delete(request.id);
+		}, TERMINAL_STATE_TTL_MS);
 		(timeout as { unref?: () => void }).unref?.();
 	};
 	const requestRedraw = throttledRedraw(ctx);
@@ -120,6 +155,7 @@ export async function runSubagent(
 		}
 		return toSubagentResponse(result);
 	} finally {
+		stopLiveRunAnimation(request.id);
 		ctx.ui.setStatus(statusKey, undefined);
 	}
 }
@@ -134,19 +170,23 @@ function handleRunUpdate(
 	if (update.type === "run-start") {
 		liveRuns.set(update.state.id, update.state);
 		ctx.ui.setStatus(statusKey, `${label}: running`);
+		syncLiveRunAnimation(update.state.id, requestRedraw);
 	} else if (update.type === "slot-update") {
 		const run = liveRuns.get(update.runId);
 		const runningSlot = "slots" in (run ?? {}) ? run?.slots.find((slot) => slot.status === "running") : undefined;
 		ctx.ui.setStatus(statusKey, runningSlot?.currentTool ? `${label}: ${runningSlot.currentTool}` : `${label}: running`);
+		syncLiveRunAnimation(update.runId, requestRedraw);
 	} else if (update.type === "event") {
 		const run = liveRuns.get(update.runId);
 		if (run && "events" in run && !run.events.includes(update.event)) run.events.push(update.event);
 		const live = mapEngineEventToLiveLog(update.event).at(-1);
 		if (live?.kind === "tool_start") ctx.ui.setStatus(statusKey, `${label}: ${live.toolName}`);
 		else if (live?.kind === "turn_start") ctx.ui.setStatus(statusKey, `${label}: turn ${live.turn}`);
+		syncLiveRunAnimation(update.runId, requestRedraw);
 	} else if (update.type === "run-end") {
 		liveRuns.set(update.result.id, update.result);
 		ctx.ui.setStatus(statusKey, `${label}: ${update.result.status}`);
+		stopLiveRunAnimation(update.result.id);
 	}
 	requestRedraw();
 }
