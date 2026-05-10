@@ -13,65 +13,38 @@ let
   b2n = inputs.bun2nix.packages.${system}.default;
   lock = lib.fs.relativeTo ../../locks;
   claudeCode = inputs.llm-agents.packages.${system}.claude-code;
-  # Loadable top-level extensions. Runtime support modules live beside them
-  # so package-relative imports like ../workflow/recovery.ts resolve after Home Manager links.
-  extensionSources = [
-    "caveman.ts"
-    "clear.ts"
-    "sworm-issues.ts"
-    "use-fish.ts"
-    "git"
-  ];
-  supportSources = [
-    "subagent-runner.ts"
-    "workflow"
-  ];
-  # Multi-file extension packages: each owns extensions/<pkg>/index.ts and extensions/<pkg>/agents/*.md.
-  # Adding a new package here auto-wires extension code, agent files, and the settings.json entry.
-  extensionPackages = [
-    "spec"
-    "cleanup"
-    "subagents"
-  ];
-  extensionBundle = pkgs.runCommand "pi-local-extensions" { } ''
-    mkdir -p $out
-    cp -R ${./extensions}/. $out/
-  '';
-  # Package-aware agent discovery expects ~/.pi/agent/agents/<pkg>/ to be a real
-  # directory of symlinked .md files. Auto-discover file lists from source trees.
-  packageAgentFiles =
-    pkg:
-    let
-      agentsDir = ./extensions + "/${pkg}/agents";
-    in
-    if builtins.pathExists agentsDir then
-      builtins.filter (name: lib.hasSuffix ".md" name) (builtins.attrNames (builtins.readDir agentsDir))
-    else
-      [ ];
-  packageAgentEntries =
-    pkg:
-    builtins.listToAttrs (
-      map (file: {
-        name = ".pi/agent/agents/${pkg}/${file}";
-        value.source = "${extensionBundle}/${pkg}/agents/${file}";
-      }) (packageAgentFiles pkg)
-    );
-  agentFileLinks = lib.foldl' (acc: pkg: acc // packageAgentEntries pkg) { } extensionPackages;
-  topLevelExtensionLinks = builtins.listToAttrs (
-    map (name: {
-      name = ".pi/agent/extensions/${name}";
-      value.source = "${extensionBundle}/${name}";
-    }) (extensionSources ++ supportSources)
-  );
-  packageExtensionLinks = builtins.listToAttrs (
-    map (pkg: {
-      name = ".pi/agent/extensions/${pkg}";
-      value.source = "${extensionBundle}/${pkg}";
-    }) extensionPackages
-  );
-  extensionPaths =
-    (map (name: "~/.pi/agent/extensions/${name}") extensionSources)
-    ++ (map (pkg: "~/.pi/agent/extensions/${pkg}/index.ts") extensionPackages);
+  localPackageDeclarations = {
+    caveman.source = ./extensions/caveman.ts;
+    clear.source = ./extensions/clear.ts;
+    sworm-issues.source = ./extensions/sworm-issues.ts;
+    use-fish.source = ./extensions/use-fish.ts;
+
+    # Directory-shaped extension: Pi settings intentionally point at the
+    # directory, not git/index.ts.
+    git.source = ./extensions/git;
+
+    # Runtime support modules are linked beside extension packages but are not
+    # registered as extension entrypoints.
+    pi-lib = {
+      source = ./extensions/pi-lib;
+      supportOnly = true;
+      agentsDir = null;
+    };
+
+    # Multi-file extension packages: each owns index.ts and optional agents/*.md.
+    spec = {
+      source = ./extensions/spec;
+      entry = "index.ts";
+    };
+    cleanup = {
+      source = ./extensions/cleanup;
+      entry = "index.ts";
+    };
+    subagents = {
+      source = ./extensions/subagents;
+      entry = "index.ts";
+    };
+  };
   piPackages = lib.fs.importAttrs ./packages {
     inherit
       lib
@@ -82,21 +55,23 @@ let
       claudeCode
       ;
   };
-  packageEntries = [
-    (toString inputs.pi-ask-user)
-    (toString inputs.pi-simplify)
-    (toString inputs.pi-rtk-optimizer)
-    (toString piPackages.pi-terminal-theme)
-    (toString piPackages.pimagotchi)
-    (toString piPackages.pi-tool-display)
-    (toString piPackages.pi-desktop-notify)
-    (toString piPackages.pi-claude-bridge)
-    (toString piPackages.pi-web-access)
-    (toString piPackages.context-mode)
-    (toString piPackages.pi-markdown-preview)
+  externalPackageDeclarations = [
+    { name = "ask-user"; package = inputs.pi-ask-user; }
+    { name = "simplify"; package = inputs.pi-simplify; }
+    { name = "rtk-optimizer"; package = inputs.pi-rtk-optimizer; }
+    { name = "pi-terminal-theme"; package = piPackages.pi-terminal-theme; }
+    { name = "pimagotchi"; package = piPackages.pimagotchi; }
+    { name = "pi-tool-display"; package = piPackages.pi-tool-display; }
+    { name = "pi-desktop-notify"; package = piPackages.pi-desktop-notify; }
+    { name = "pi-claude-bridge"; package = piPackages.pi-claude-bridge; }
+    { name = "pi-web-access"; package = piPackages.pi-web-access; }
+    { name = "context-mode"; package = piPackages.context-mode; }
+    { name = "token"; package = piPackages.pi-token-burden; }
   ];
 in
 {
+  imports = [ ./lib/pi-extension-system.nix ];
+
   options.programs.pi = {
     enable = lib.mkEnableOption "Pi coding agent configuration";
 
@@ -120,6 +95,9 @@ in
   };
 
   config = lib.mkIf cfg.enable {
+    programs.pi.packages = localPackageDeclarations;
+    programs.pi.externalPackages = externalPackageDeclarations;
+
     home.packages = [
       cfg.package
       piPackages.rtk
@@ -127,9 +105,7 @@ in
     ];
 
     home.file =
-      topLevelExtensionLinks
-      // packageExtensionLinks
-      // agentFileLinks
+      cfg.extensionSystem.homeFiles
       // {
         # Pi auto-loads AGENTS.md from the agent dir as global context.
         ".pi/agent/AGENTS.md".source = ./SOUL.md;
@@ -139,9 +115,9 @@ in
           defaultThinkingLevel = "high";
           theme = "dark";
 
-          extensions = extensionPaths;
+          extensions = cfg.extensionSystem.extensionPaths;
 
-          packages = packageEntries;
+          packages = cfg.extensionSystem.packageEntries;
         };
       };
   };

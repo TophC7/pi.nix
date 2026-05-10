@@ -1,11 +1,19 @@
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { Type } from "typebox";
-import { prepareManualHandoff, unsafeAutomaticHandoffReason } from "../workflow/handoff.ts";
+import { deferToAgentEnd, fireAndForgetHandoffReason, handoff } from "@pi/lib/handoff";
 import { saveFile } from "./files.ts";
 import { requireSwormBridge } from "./issues.ts";
+import { runSpecNew } from "./commands.ts";
 import { exitMode } from "./mode.ts";
 import { isPlanDraftPath } from "./plans.ts";
 import { validateReviewPlanDraft } from "./review-plan-validator.ts";
+
+function asCommandContext(ctx: ExtensionContext): ExtensionCommandContext {
+	return {
+		...ctx,
+		waitForIdle: async () => undefined,
+	} as ExtensionCommandContext;
+}
 
 export function registerSpecWorkflowTools(pi: ExtensionAPI): void {
 	pi.registerTool({
@@ -47,12 +55,17 @@ export function registerSpecWorkflowTools(pi: ExtensionAPI): void {
 				return { content: [{ type: "text" as const, text }], details: { path: params.path, error: "sworm_bridge_unavailable" }, isError: true };
 			}
 			exitMode(pi, ctx);
-			const handoff = await prepareManualHandoff(ctx, {
+			const outcome = await handoff({
+				pi,
+				ctx,
 				label: "promote_plan",
 				command: `/spec:new ${params.path}`,
-				reason: unsafeAutomaticHandoffReason(),
-			}, { pi });
-			return { content: [{ type: "text", text: handoff.notice }], details: { path: params.path, manualHandoff: true, outcome: handoff.outcome } };
+				helper: async () => deferToAgentEnd(pi, (nextCtx) => runSpecNew(pi, asCommandContext(nextCtx), params.path)),
+				policy: "confirm",
+				reason: fireAndForgetHandoffReason(),
+			});
+			const text = `promote_plan handoff ${outcome.kind} for ${params.path}.`;
+			return { content: [{ type: "text", text }], details: { path: params.path, outcome } };
 		},
 	});
 

@@ -1,16 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import type { ExtensionAPI, ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
-import { discoverAgents } from "./subagents/discovery.ts";
-import { runSubagents } from "./subagents/engine.ts";
-import { buildCappedParentFacingText } from "./subagents/output.ts";
-import { createSubagentMessageRenderer, SUBAGENT_RUN_MESSAGE_TYPE } from "./subagents/renderer.ts";
-import { buildRunRequest, normalizeSubagentRequest } from "./subagents/request.ts";
-import { combineSubagentUsage, type SubagentRenderable, type SubagentRunRequest, type SubagentRunResult, type SubagentRunUpdate } from "./subagents/types.ts";
-
-// Linked into ~/.pi/agent/extensions for sibling imports. Pi may auto-discover
-// top-level .ts files there, so expose a no-op extension entrypoint.
-export default function sharedSubagentRunnerExtension(): void {}
+import { discoverAgents } from "./discovery.ts";
+import { runSubagents } from "./engine.ts";
+import { buildCappedParentFacingText } from "./output.ts";
+import { createSubagentMessageRenderer, SUBAGENT_RUN_MESSAGE_TYPE } from "./renderer.ts";
+import { buildRunRequest, normalizeSubagentRequest } from "./request.ts";
+import { combineSubagentUsage, mapEngineEventToLiveLog, type SubagentRenderable, type SubagentRunRequest, type SubagentRunResult, type SubagentRunUpdate } from "./types.ts";
 
 const TERMINAL_STATE_TTL_MS = 5 * 60_000;
 
@@ -99,7 +95,7 @@ export async function runSubagent(
 		const agents = discoverAgents({
 			cwd: ctx.cwd,
 			agentScope: normalization.request.agentScope,
-			localPackagesDir: fileURLToPath(new URL(".", import.meta.url)),
+			localPackagesDir: fileURLToPath(new URL("../..", import.meta.url)),
 		});
 		let result = await runSubagents(request, {
 			agents,
@@ -142,6 +138,12 @@ function handleRunUpdate(
 		const run = liveRuns.get(update.runId);
 		const runningSlot = "slots" in (run ?? {}) ? run?.slots.find((slot) => slot.status === "running") : undefined;
 		ctx.ui.setStatus(statusKey, runningSlot?.currentTool ? `${label}: ${runningSlot.currentTool}` : `${label}: running`);
+	} else if (update.type === "event") {
+		const run = liveRuns.get(update.runId);
+		if (run && "events" in run && !run.events.includes(update.event)) run.events.push(update.event);
+		const live = mapEngineEventToLiveLog(update.event).at(-1);
+		if (live?.kind === "tool_start") ctx.ui.setStatus(statusKey, `${label}: ${live.toolName}`);
+		else if (live?.kind === "turn_start") ctx.ui.setStatus(statusKey, `${label}: turn ${live.turn}`);
 	} else if (update.type === "run-end") {
 		liveRuns.set(update.result.id, update.result);
 		ctx.ui.setStatus(statusKey, `${label}: ${update.result.status}`);

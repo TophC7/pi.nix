@@ -1,10 +1,10 @@
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { SAFE_DEFAULT_TOOLS, getWorkflowProfile } from "./profiles.ts";
 import type { WorkflowId, WorkflowProfile } from "./types.ts";
-import type { WorkflowControllerStatus, WorkflowMarker } from "./controller.ts";
-import { restoreWorkflowTools } from "./tools.ts";
+import type { WorkflowMarker } from "./controller.ts";
+import { activeToolNamesForProfile, restoreWorkflowTools } from "./tools.ts";
 
-export type WorkflowRecoveryAction = "none" | "restored_previous" | "safe_reset" | "failed";
+export type WorkflowRecoveryAction = "none" | "migrated_awaiting_confirmation" | "restored_previous" | "safe_reset" | "failed";
 
 export interface WorkflowRecoveryResult {
 	readonly action: WorkflowRecoveryAction;
@@ -24,6 +24,8 @@ export function recoverStaleWorkflow(pi: ExtensionAPI, ctx: ExtensionContext, ma
 	if (!marker || marker.status === "idle") return { action: "none" };
 
 	const profile = tryProfile(marker.profileId);
+	if (marker.status === "handoff_pending") return migrateHandoffPending(pi, ctx, marker, profile, markerType);
+
 	const allToolNames = new Set(pi.getAllTools().map((tool) => tool.name));
 	const previousTools = marker.previousActiveTools?.filter((name) => allToolNames.has(name));
 	const canRestorePrevious = Boolean(previousTools && previousTools.length === marker.previousActiveTools?.length);
@@ -41,6 +43,55 @@ export function recoverStaleWorkflow(pi: ExtensionAPI, ctx: ExtensionContext, ma
 		ctx.ui.notify(`Workflow recovery failed for ${marker.profileId}: ${message}`, "error");
 		return { action: "failed", marker, error: message };
 	}
+}
+
+function migrateHandoffPending(
+	pi: ExtensionAPI,
+	ctx: ExtensionContext,
+	marker: WorkflowMarker,
+	profile: WorkflowProfile | undefined,
+	markerType: string,
+): WorkflowRecoveryResult {
+	try {
+		const activeTools = restoreAwaitingConfirmationTools(pi, marker, profile);
+		if (profile) renderAwaitingConfirmation(ctx, profile);
+		const migrated: WorkflowMarker = {
+			...marker,
+			status: "awaiting_confirmation",
+			activeTools,
+			reason: "migrated_from_handoff_pending",
+			timestamp: new Date().toISOString(),
+		};
+		pi.appendEntry(markerType, migrated);
+		ctx.ui.notify("Resumed workflow with migrated status; original continuation was not re-fired", "info");
+		return { action: "migrated_awaiting_confirmation", marker: migrated, activeTools };
+	} catch (error) {
+		const message = formatError(error);
+		ctx.ui.notify(`Workflow handoff_pending migration failed for ${marker.profileId}: ${message}`, "error");
+		return { action: "failed", marker, error: message };
+	}
+}
+
+function restoreAwaitingConfirmationTools(
+	pi: ExtensionAPI,
+	marker: WorkflowMarker,
+	profile: WorkflowProfile | undefined,
+): readonly string[] {
+	const allToolNames = pi.getAllTools().map((tool) => tool.name);
+	const all = new Set(allToolNames);
+	const markerTools = marker.activeTools?.filter((name) => all.has(name));
+	const targetTools = markerTools && markerTools.length === marker.activeTools?.length
+		? markerTools
+		: profile
+			? activeToolNamesForProfile(profile, allToolNames)
+			: SAFE_DEFAULT_TOOLS.filter((name) => all.has(name));
+	pi.setActiveTools(targetTools);
+	return pi.getActiveTools();
+}
+
+function renderAwaitingConfirmation(ctx: ExtensionContext, profile: WorkflowProfile): void {
+	ctx.ui.setStatus(profile.statusKey, `${profile.id}:awaiting_confirmation`);
+	ctx.ui.setWidget(profile.statusKey, [`Pi workflow: ${profile.label}`, "Status: awaiting_confirmation"]);
 }
 
 export function latestWorkflowMarker(ctx: ExtensionContext, markerType = "pi-workflow-state"): WorkflowMarker | undefined {
@@ -62,10 +113,13 @@ function isWorkflowMarker(value: unknown): value is WorkflowMarker {
 		&& typeof marker.timestamp === "string";
 }
 
-function isWorkflowStatus(value: unknown): value is WorkflowControllerStatus {
+function isWorkflowStatus(value: unknown): value is WorkflowMarker["status"] {
 	return value === "idle"
 		|| value === "entering"
 		|| value === "active"
+		|| value === "awaiting_confirmation"
+		|| value === "continuation_queued"
+		|| value === "manual_pending"
 		|| value === "handoff_pending"
 		|| value === "exiting"
 		|| value === "failed_resetting";

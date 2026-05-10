@@ -1,5 +1,5 @@
 import type { ExtensionAPI, ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
-import { prepareManualHandoff, unsafeAutomaticHandoffReason } from "../workflow/handoff.ts";
+import { fireAndForgetHandoffReason, handoff } from "@pi/lib/handoff";
 import { enterMode, exitMode } from "./mode.ts";
 import { reviewFinalizePrompt } from "./prompts.ts";
 import { captureReviewContext } from "./review-context.ts";
@@ -8,7 +8,7 @@ import { validateReviewPlanDraft } from "./review-plan-validator.ts";
 import { synthesizeReview } from "./review-synthesis.ts";
 import { formatReviewTarget, parseReviewTarget, REVIEW_TARGET_USAGE, type ReviewTarget } from "./review-targets.ts";
 import { makeStageDir, writeStage } from "./stage.ts";
-import { extractSubagentText, runSubagent } from "./subagent-runner.ts";
+import { extractSubagentText, runSubagent } from "@pi/lib/subagents";
 
 function parseReviewArgs(args: string | undefined): "help" | "exit" | string {
 	const trimmed = args?.trim() ?? "";
@@ -84,99 +84,107 @@ function reviewAgentTask(scope: ReviewScope, target: ReviewTarget, contextPath: 
 	].join("\n");
 }
 
+export async function runPlanReview(pi: ExtensionAPI, ctx: ExtensionCommandContext, args?: string): Promise<void> {
+	await ctx.waitForIdle();
+	const command = parseReviewArgs(args);
+	if (command === "help") {
+		ctx.ui.notify(`Usage: /plan:review <target> where target is ${REVIEW_TARGET_USAGE}. Use /plan:review exit to restore tools.`, "info");
+		return;
+	}
+	if (command === "exit") {
+		exitMode(pi, ctx);
+		ctx.ui.notify("Plan review mode exited.", "info");
+		return;
+	}
+
+	enterMode(pi, ctx, "plan-review-authoring");
+	try {
+		const targetText = await captureTarget(ctx, command);
+		if (!targetText) {
+			exitMode(pi, ctx);
+			ctx.ui.notify("/plan:review cancelled: no target provided.", "warning");
+			return;
+		}
+		let parsed = await parseReviewTargetWithPasteBody(ctx, targetText);
+		if (!parsed.ok) {
+			ctx.ui.notify(`/plan:review target parse failed: ${parsed.error}. Falling back to guided picker.`, "warning");
+			const retryText = await captureTarget(ctx, "");
+			if (!retryText) {
+				exitMode(pi, ctx);
+				ctx.ui.notify("/plan:review cancelled.", "warning");
+				return;
+			}
+			parsed = await parseReviewTargetWithPasteBody(ctx, retryText);
+			if (!parsed.ok) {
+				exitMode(pi, ctx);
+				ctx.ui.notify(`/plan:review invalid target: ${parsed.error}`, "error");
+				return;
+			}
+		}
+		const stageDir = makeStageDir("plan-review");
+		const context = await captureReviewContext(pi, ctx, parsed.target);
+		const contextPath = writeStage(stageDir, "context", context.content);
+		const suffix = context.truncated ? ` Truncation notes: ${context.notes.join(" ")}` : "";
+		ctx.ui.notify(`/plan:review target resolved: ${formatReviewTarget(parsed.target)}. Context captured at ${contextPath} (${context.bytes} bytes). Launching six review agents.${suffix}`, "info");
+		const response = await runSubagent(pi, ctx, {
+			tasks: REVIEW_AGENT_REGISTRY.map(({ agent, scope }) => ({
+				agent,
+				task: reviewAgentTask(scope, parsed.target, contextPath),
+			})),
+			context: "fresh",
+			agentScope: "both",
+		}, "/plan:review agents", "spec-subagents");
+		const rawFindings = extractSubagentText(response);
+		const findingsPath = writeStage(stageDir, "raw-findings", rawFindings);
+		const synthesis = synthesizeReview(rawFindings, parsed.target);
+		const draftValidation = validateReviewPlanDraft(synthesis.planDraft, { requireHardening: false });
+		if (!draftValidation.valid) throw new Error(`Generated review plan draft failed validation:\n${draftValidation.errors.join("\n")}`);
+		const reportPath = writeStage(stageDir, "report", synthesis.report);
+		if (synthesis.quarantined.length > 0) {
+			ctx.ui.notify(`/plan:review quarantined ${synthesis.quarantined.length} malformed card(s); see Quarantined cards section in ${reportPath}.`, "warning");
+		}
+		if (synthesis.findings.length === 0) {
+			const choice = await ctx.ui.select("/plan:review found no issues", ["report only", "create empty plan draft"]);
+			if (choice === "create empty plan draft") {
+				const planDraftPath = writeStage(stageDir, "plan-draft", synthesis.planDraft);
+				ctx.ui.notify(`/plan:review agents complete with no findings. Report: ${reportPath}. Empty draft created by user opt-in: ${planDraftPath}.`, "info");
+				await handoff({
+					pi,
+					ctx,
+					label: "/plan:review finalize",
+					prompt: reviewFinalizePrompt({ target: formatReviewTarget(parsed.target), reportPath, planDraftPath }),
+					policy: "auto",
+					reason: fireAndForgetHandoffReason(),
+				});
+			} else {
+				ctx.ui.notify(`/plan:review agents complete with no findings. Report: ${reportPath}. No plan draft created.`, "info");
+				exitMode(pi, ctx);
+			}
+			return;
+		}
+		const planDraftPath = writeStage(stageDir, "plan-draft", synthesis.planDraft);
+		ctx.ui.notify(`/plan:review agents complete. Raw findings: ${findingsPath}. Report: ${reportPath}. Plan-compatible draft: ${planDraftPath}. Manual handoff prepared for hardening and save.`, "info");
+		await handoff({
+			pi,
+			ctx,
+			label: "/plan:review finalize",
+			prompt: reviewFinalizePrompt({ target: formatReviewTarget(parsed.target), reportPath, planDraftPath }),
+			policy: "auto",
+			reason: fireAndForgetHandoffReason(),
+		});
+	} catch (error) {
+		exitMode(pi, ctx);
+		const message = error instanceof Error ? error.message : String(error);
+		ctx.ui.notify(`/plan:review failed: ${message}`, "error");
+	}
+}
+
 export function registerPlanReviewCommand(pi: ExtensionAPI): void {
 	pi.registerCommand("plan:review", {
 		description: "Draft adversarial review plan from a target. Args: working-tree, staged, range, branch, paths, paste, freeform.",
 		getArgumentCompletions: (prefix: string) => ["working-tree", "staged", "range ", "branch ", "paths ", "paste", "freeform ", "exit", "help"]
 			.filter((value) => value.startsWith(prefix))
 			.map((value) => ({ value, label: value.trim() || value })),
-		handler: async (args, ctx) => {
-			await ctx.waitForIdle();
-			const command = parseReviewArgs(args);
-			if (command === "help") {
-				ctx.ui.notify(`Usage: /plan:review <target> where target is ${REVIEW_TARGET_USAGE}. Use /plan:review exit to restore tools.`, "info");
-				return;
-			}
-			if (command === "exit") {
-				exitMode(pi, ctx);
-				ctx.ui.notify("Plan review mode exited.", "info");
-				return;
-			}
-
-			enterMode(pi, ctx, "plan-review-authoring");
-			try {
-				const targetText = await captureTarget(ctx, command);
-				if (!targetText) {
-					exitMode(pi, ctx);
-					ctx.ui.notify("/plan:review cancelled: no target provided.", "warning");
-					return;
-				}
-				let parsed = await parseReviewTargetWithPasteBody(ctx, targetText);
-				if (!parsed.ok) {
-					ctx.ui.notify(`/plan:review target parse failed: ${parsed.error}. Falling back to guided picker.`, "warning");
-					const retryText = await captureTarget(ctx, "");
-					if (!retryText) {
-						exitMode(pi, ctx);
-						ctx.ui.notify("/plan:review cancelled.", "warning");
-						return;
-					}
-					parsed = await parseReviewTargetWithPasteBody(ctx, retryText);
-					if (!parsed.ok) {
-						exitMode(pi, ctx);
-						ctx.ui.notify(`/plan:review invalid target: ${parsed.error}`, "error");
-						return;
-					}
-				}
-				const stageDir = makeStageDir("plan-review");
-				const context = await captureReviewContext(pi, ctx, parsed.target);
-				const contextPath = writeStage(stageDir, "context", context.content);
-				const suffix = context.truncated ? ` Truncation notes: ${context.notes.join(" ")}` : "";
-				ctx.ui.notify(`/plan:review target resolved: ${formatReviewTarget(parsed.target)}. Context captured at ${contextPath} (${context.bytes} bytes). Launching six review agents.${suffix}`, "info");
-				const response = await runSubagent(pi, ctx, {
-					tasks: REVIEW_AGENT_REGISTRY.map(({ agent, scope }) => ({
-						agent,
-						task: reviewAgentTask(scope, parsed.target, contextPath),
-					})),
-					context: "fresh",
-					agentScope: "both",
-				}, "/plan:review agents");
-				const rawFindings = extractSubagentText(response);
-				const findingsPath = writeStage(stageDir, "raw-findings", rawFindings);
-				const synthesis = synthesizeReview(rawFindings, parsed.target);
-				const draftValidation = validateReviewPlanDraft(synthesis.planDraft, { requireHardening: false });
-				if (!draftValidation.valid) throw new Error(`Generated review plan draft failed validation:\n${draftValidation.errors.join("\n")}`);
-				const reportPath = writeStage(stageDir, "report", synthesis.report);
-				if (synthesis.quarantined.length > 0) {
-					ctx.ui.notify(`/plan:review quarantined ${synthesis.quarantined.length} malformed card(s); see Quarantined cards section in ${reportPath}.`, "warning");
-				}
-				if (synthesis.findings.length === 0) {
-					const choice = await ctx.ui.select("/plan:review found no issues", ["report only", "create empty plan draft"]);
-					if (choice === "create empty plan draft") {
-						const planDraftPath = writeStage(stageDir, "plan-draft", synthesis.planDraft);
-						ctx.ui.notify(`/plan:review agents complete with no findings. Report: ${reportPath}. Empty draft created by user opt-in: ${planDraftPath}.`, "info");
-						await prepareManualHandoff(ctx, {
-							label: "/plan:review finalize",
-							command: reviewFinalizePrompt({ target: formatReviewTarget(parsed.target), reportPath, planDraftPath }),
-							reason: unsafeAutomaticHandoffReason(),
-						}, { pi });
-					} else {
-						ctx.ui.notify(`/plan:review agents complete with no findings. Report: ${reportPath}. No plan draft created.`, "info");
-						exitMode(pi, ctx);
-					}
-					return;
-				}
-				const planDraftPath = writeStage(stageDir, "plan-draft", synthesis.planDraft);
-				ctx.ui.notify(`/plan:review agents complete. Raw findings: ${findingsPath}. Report: ${reportPath}. Plan-compatible draft: ${planDraftPath}. Manual handoff prepared for hardening and save.`, "info");
-				await prepareManualHandoff(ctx, {
-					label: "/plan:review finalize",
-					command: reviewFinalizePrompt({ target: formatReviewTarget(parsed.target), reportPath, planDraftPath }),
-					reason: unsafeAutomaticHandoffReason(),
-				}, { pi });
-			} catch (error) {
-				exitMode(pi, ctx);
-				const message = error instanceof Error ? error.message : String(error);
-				ctx.ui.notify(`/plan:review failed: ${message}`, "error");
-			}
-		},
+		handler: async (args, ctx) => runPlanReview(pi, ctx, args),
 	});
 }

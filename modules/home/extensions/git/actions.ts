@@ -3,7 +3,8 @@ import { dirname, join } from "node:path";
 import type { ExtensionAPI, ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
 import type { Api, Model } from "@mariozechner/pi-ai";
 import { fuzzyFilter } from "@mariozechner/pi-tui";
-import { prepareManualHandoff, unsafeAutomaticHandoffReason } from "../workflow/handoff.ts";
+import { fireAndForgetHandoffReason, handoff } from "@pi/lib/handoff";
+import { COMMIT_PROMPT, PR_PROMPT } from "./prompts";
 
 export type GitAction = "commit" | "pr";
 
@@ -150,6 +151,14 @@ export function installGitActionRuntime(pi: ExtensionAPI): void {
 	});
 }
 
+export async function runCommit(pi: ExtensionAPI, ctx: ExtensionCommandContext, userPrompt?: string): Promise<void> {
+	return runGitAction(pi, ctx, "commit", COMMIT_PROMPT, userPrompt);
+}
+
+export async function runPr(pi: ExtensionAPI, ctx: ExtensionCommandContext, userPrompt?: string): Promise<void> {
+	return runGitAction(pi, ctx, "pr", PR_PROMPT, userPrompt);
+}
+
 export async function runGitAction(
 	pi: ExtensionAPI,
 	ctx: ExtensionCommandContext,
@@ -171,11 +180,14 @@ export async function runGitAction(
 	}
 
 	const restore = pendingRestore;
-	await prepareManualHandoff(ctx, {
+	await handoff({
+		pi,
+		ctx,
 		label: `/${action}`,
-		command: buildPrompt(action, basePrompt, userPrompt),
-		reason: `${unsafeAutomaticHandoffReason()} Model/thinking config is not kept pending during manual handoff; re-run after accepting if a custom /git model is required.`,
-	}, { pi });
+		prompt: buildPrompt(action, basePrompt, userPrompt),
+		policy: "confirm",
+		reason: `${fireAndForgetHandoffReason()} Model/thinking config is restored after the handoff choice returns; edit/manual paths may need a rerun if a custom /git model is required.`,
+	});
 	pendingRestore = undefined;
 	await restoreGitActionConfig(pi, restore);
 }

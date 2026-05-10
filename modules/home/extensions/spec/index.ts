@@ -1,10 +1,10 @@
 import { existsSync } from "node:fs";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { maybeBlockAuthoringToolCall, setWorkflowStatus, state } from "./mode.ts";
+import { setWorkflowStatus, setupAuthoringGuard, state } from "./mode.ts";
 import { registerPlanCommands, registerSpecCommands } from "./commands.ts";
 import { registerPlanReviewCommand } from "./review-command.ts";
 import { registerSpecWorkflowTools } from "./tools.ts";
-import { recoverStaleWorkflow } from "../workflow/recovery.ts";
+import { recoverStaleWorkflow } from "@pi/lib/workflow";
 import { MODES, type Mode } from "./types.ts";
 
 export default function specWorkflowExtension(pi: ExtensionAPI) {
@@ -26,7 +26,7 @@ export default function specWorkflowExtension(pi: ExtensionAPI) {
 		if (state.mode !== "idle") setWorkflowStatus(ctx, state.mode);
 	});
 
-	pi.on("tool_call", maybeBlockAuthoringToolCall);
+	setupAuthoringGuard(pi);
 
 	registerPlanCommands(pi);
 	registerPlanReviewCommand(pi);

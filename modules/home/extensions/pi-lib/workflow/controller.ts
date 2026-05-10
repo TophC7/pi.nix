@@ -3,7 +3,8 @@ import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-age
 import type { WorkflowId, WorkflowProfile } from "./types.ts";
 import { activateWorkflowTools, restoreWorkflowTools, type WorkflowToolActivation } from "./tools.ts";
 
-export type WorkflowControllerStatus = "idle" | "entering" | "active" | "handoff_pending" | "exiting" | "failed_resetting";
+export type WorkflowControllerStatus = "idle" | "entering" | "active" | "awaiting_confirmation" | "continuation_queued" | "manual_pending" | "exiting" | "failed_resetting";
+export type WorkflowMarkerStatus = WorkflowControllerStatus | (string & {});
 
 export interface WorkflowErrorDetails {
 	readonly name: string;
@@ -13,7 +14,7 @@ export interface WorkflowErrorDetails {
 export interface WorkflowMarker {
 	readonly runId: string;
 	readonly profileId: WorkflowId;
-	readonly status: WorkflowControllerStatus;
+	readonly status: WorkflowMarkerStatus;
 	readonly previousActiveTools?: readonly string[];
 	readonly activeTools?: readonly string[];
 	readonly reason?: string;
@@ -78,14 +79,34 @@ export class WorkflowController {
 		}
 	}
 
-	markHandoffPending(pi: ExtensionAPI, ctx: ExtensionContext, reason?: string): void {
-		const run = this.requireRun("mark handoff pending");
+	markAwaitingConfirmation(pi: ExtensionAPI, ctx: ExtensionContext, reason?: string): void {
+		const run = this.requireRun("mark awaiting confirmation");
 		if (run.status !== "active") {
-			throw new WorkflowTransitionError(`Cannot mark handoff pending from ${run.status}; expected active.`);
+			throw new WorkflowTransitionError(`Cannot mark awaiting confirmation from ${run.status}; expected active.`);
 		}
-		run.status = "handoff_pending";
+		run.status = "awaiting_confirmation";
 		this.render(ctx, run);
-		this.persist(pi, run, reason ?? "handoff_pending");
+		this.persist(pi, run, reason ?? "awaiting_confirmation");
+	}
+
+	markContinuationQueued(pi: ExtensionAPI, ctx: ExtensionContext, reason?: string): void {
+		const run = this.requireRun("mark continuation queued");
+		if (run.status !== "active" && run.status !== "awaiting_confirmation") {
+			throw new WorkflowTransitionError(`Cannot mark continuation queued from ${run.status}; expected active or awaiting_confirmation.`);
+		}
+		run.status = "continuation_queued";
+		this.render(ctx, run);
+		this.persist(pi, run, reason ?? "continuation_queued");
+	}
+
+	markManualPending(pi: ExtensionAPI, ctx: ExtensionContext, reason?: string): void {
+		const run = this.requireRun("mark manual pending");
+		if (run.status !== "active" && run.status !== "awaiting_confirmation") {
+			throw new WorkflowTransitionError(`Cannot mark manual pending from ${run.status}; expected active or awaiting_confirmation.`);
+		}
+		run.status = "manual_pending";
+		this.render(ctx, run);
+		this.persist(pi, run, reason ?? "manual_pending");
 	}
 
 	exit(pi: ExtensionAPI, ctx: ExtensionContext, reason = "normal_exit"): void {

@@ -1,6 +1,7 @@
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import { defineExtension } from "@pi/lib";
 import { registerCleanupCommands } from "./commands.ts";
 
-export default function cleanupExtension(pi: ExtensionAPI) {
-	registerCleanupCommands(pi);
-}
+export default defineExtension({
+	name: "cleanup",
+	setup: registerCleanupCommands,
+});

@@ -5,11 +5,11 @@ import {
 	formatConfigStatus,
 	getGitConfig,
 	installGitActionRuntime,
-	runGitAction,
+	runCommit,
+	runPr,
 	saveGitConfig,
 } from "./actions";
 import { selectModelFromMenu, selectThinkingFromMenu } from "./model-picker";
-import { COMMIT_PROMPT, PR_PROMPT } from "./prompts";
 
 const GIT_SETTINGS = [
 	{ value: "model", label: "model", description: "Pick and save shared /commit and /pr model" },
@@ -69,16 +69,12 @@ export default function gitExtension(pi: ExtensionAPI) {
 
 	pi.registerCommand("commit", {
 		description: "Commit staged changes. Optional prompt adds instructions. Configure with `/git ...`.",
-		handler: async (args, ctx) => {
-			await runGitAction(pi, ctx, "commit", COMMIT_PROMPT, args);
-		},
+		handler: async (args, ctx) => runCommit(pi, ctx, args),
 	});
 
 	pi.registerCommand("pr", {
 		description: "Create PR. Optional prompt adds instructions. Configure with `/git ...`.",
-		handler: async (args, ctx) => {
-			await runGitAction(pi, ctx, "pr", PR_PROMPT, args);
-		},
+		handler: async (args, ctx) => runPr(pi, ctx, args),
 	});
 
 	pi.registerCommand("git", {

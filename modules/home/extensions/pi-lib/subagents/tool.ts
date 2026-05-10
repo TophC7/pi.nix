@@ -36,6 +36,7 @@ export const SubagentToolParams = Type.Object({
 });
 
 export function registerSubagentTool(pi: ExtensionAPI): void {
+	assertNoSubagentToolOwner(pi);
 	pi.registerTool({
 		name: "subagent",
 		label: "Subagent",
@@ -48,7 +49,7 @@ export function registerSubagentTool(pi: ExtensionAPI): void {
 			const agents = discoverAgents({
 				cwd,
 				agentScope: scope,
-				localPackagesDir: fileURLToPath(new URL("..", import.meta.url)),
+				localPackagesDir: fileURLToPath(new URL("../..", import.meta.url)),
 			});
 			if (params.action === "list" || (!params.action && !params.agent && !params.tasks && !params.chain)) {
 				return { content: [{ type: "text", text: formatAgentList(agents) }] };
@@ -73,6 +74,13 @@ export function registerSubagentTool(pi: ExtensionAPI): void {
 			};
 		},
 	});
+}
+
+export function assertNoSubagentToolOwner(pi: ExtensionAPI): void {
+	const owner = pi.getAllTools().find((tool) => tool.name === "subagent");
+	if (owner) {
+		throw new Error(`Cannot register local subagent tool: tool name "subagent" is already registered${owner.description ? ` (${owner.description})` : ""}.`);
+	}
 }
 
 export function shouldRegisterLocalSubagentTool(pi: ExtensionAPI): boolean {

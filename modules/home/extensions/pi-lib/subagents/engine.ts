@@ -193,6 +193,7 @@ async function runSlot(
 	slot.status = "running";
 	state.slots[index] = slot;
 	emitEvent(state, options, { timestamp: startedAt, slotId: slot.id, type: "slot-start" });
+	emitEvent(state, options, { timestamp: startedAt, slotId: slot.id, type: "turn-start", turn: 1, synthetic: true });
 	options.onUpdate?.({ type: "slot-update", runId: request.id, slot });
 
 	if (!agent) return failSlot(slot, `Unknown agent: ${plan.agent}`, state, options);
@@ -421,6 +422,7 @@ function finishSlot(slot: SubagentSlotResult, state: SubagentRunState, options: 
 	const endedAt = Date.now();
 	slot.duration.endedAt = endedAt;
 	slot.duration.elapsedMs = endedAt - slot.duration.startedAt;
+	emitEvent(state, options, { timestamp: endedAt, slotId: slot.id, type: "turn-end", turn: Math.max(1, slot.usage.turns || 1), usage: slot.usage, synthetic: true });
 	emitEvent(state, options, { timestamp: endedAt, slotId: slot.id, type, error });
 	options.onUpdate?.({ type: "slot-update", runId: state.id, slot });
 }
