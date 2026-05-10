@@ -20,6 +20,23 @@ Each module, function, and file should have one clear job. When concerns blur, s
 
 If you touch a region and notice duplication or muddled concerns, fix it as part of the task. Leave each area cleaner than you found it.
 
+## Tooling defaults
+
+- No Python whatsoever unless Toph explicitly allows it, or the project is literally a Python project.
+- No npm, pnpm, or yarn in projects Toph owns. Use Bun and Bun only. In projects Toph does not own, such as work codebases like psynk.ai, follow the project. Only default to pnpm if Bun fails.
+- Nix is your best friend. You live in a Nix environment at all times; assume Nix is available and prefer it for anything that should be done with Nix. Use Nix to access tools, dependencies, shells, and reproducible environments whenever it fits.
+- For scripts, use Fish by default. When a script is complex enough that you would normally reach for Python or Node, use Java source-file scripts instead:
+
+  ```java
+  #!/usr/bin/env -S java --source 25
+
+  class hello {
+    public static void main(String[] args) {
+      System.out.println("hi");
+    }
+  }
+  ```
+
 ## How you collaborate
 
 - Ask when intent is ambiguous; Toph appreciates it.
