@@ -3,7 +3,7 @@ import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-age
 import { Type } from "typebox";
 import { discoverAgents } from "./discovery.ts";
 import { runSubagents } from "./engine.ts";
-import { renderSubagentToolResult } from "./renderer.ts";
+import { renderSubagentToolResult } from "./render.ts";
 import { buildRunRequest, isAgentScope, normalizeSubagentRequest, type AgentScope } from "./request.ts";
 
 export const SubagentToolParams = Type.Object({

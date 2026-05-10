@@ -75,7 +75,6 @@ let
     "simplify"
     "rtk-optimizer"
     "pi-terminal-theme"
-    "pimagotchi"
     "pi-tool-display"
     "pi-desktop-notify"
     "pi-claude-bridge"

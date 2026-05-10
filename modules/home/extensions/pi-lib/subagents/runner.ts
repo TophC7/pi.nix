@@ -4,7 +4,7 @@ import type { ExtensionAPI, ExtensionCommandContext } from "@mariozechner/pi-cod
 import { discoverAgents } from "./discovery.ts";
 import { runSubagents } from "./engine.ts";
 import { buildCappedParentFacingText } from "./output.ts";
-import { createSubagentMessageRenderer, SUBAGENT_RUN_MESSAGE_TYPE } from "./renderer.ts";
+import { createSubagentMessageRenderer, SUBAGENT_RUN_MESSAGE_TYPE } from "./render.ts";
 import { buildRunRequest, normalizeSubagentRequest } from "./request.ts";
 import { combineSubagentUsage, mapEngineEventToLiveLog, type SubagentRenderable, type SubagentRunRequest, type SubagentRunResult, type SubagentRunUpdate } from "./types.ts";
 

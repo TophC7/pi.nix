@@ -33,7 +33,7 @@ class MarkdownOverlay extends Container implements Component {
 	}
 }
 
-function resolveMarkdownTheme(): MarkdownTheme {
+export function resolveMarkdownTheme(): MarkdownTheme {
 	try {
 		const theme = getMarkdownTheme();
 		theme.heading("probe");

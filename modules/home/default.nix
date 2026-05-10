@@ -60,7 +60,6 @@ let
     { name = "simplify"; package = inputs.pi-simplify; }
     { name = "rtk-optimizer"; package = inputs.pi-rtk-optimizer; }
     { name = "pi-terminal-theme"; package = piPackages.pi-terminal-theme; }
-    { name = "pimagotchi"; package = piPackages.pimagotchi; }
     { name = "pi-tool-display"; package = piPackages.pi-tool-display; }
     { name = "pi-desktop-notify"; package = piPackages.pi-desktop-notify; }
     { name = "pi-claude-bridge"; package = piPackages.pi-claude-bridge; }
