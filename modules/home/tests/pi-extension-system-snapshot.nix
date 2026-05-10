@@ -31,6 +31,7 @@ let
   expectedExtensions = [
     "~/.pi/agent/extensions/caveman.ts"
     "~/.pi/agent/extensions/clear.ts"
+    "~/.pi/agent/extensions/desktop-notify.ts"
     "~/.pi/agent/extensions/sworm-issues.ts"
     "~/.pi/agent/extensions/use-fish.ts"
     "~/.pi/agent/extensions/git"
@@ -42,6 +43,7 @@ let
   expectedExtensionLinks = [
     ".pi/agent/extensions/caveman.ts"
     ".pi/agent/extensions/clear.ts"
+    ".pi/agent/extensions/desktop-notify.ts"
     ".pi/agent/extensions/sworm-issues.ts"
     ".pi/agent/extensions/use-fish.ts"
     ".pi/agent/extensions/git"
@@ -76,7 +78,6 @@ let
     "rtk-optimizer"
     "pi-terminal-theme"
     "pi-tool-display"
-    "pi-desktop-notify"
     "pi-claude-bridge"
     "pi-web-access"
     "context-mode"

@@ -4,7 +4,7 @@ import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-age
 
 const execFileAsync = promisify(execFile);
 const APP_NAME = "Pi";
-const NOTIFY_SEND = "@notifySend@";
+const NOTIFY_SEND = "notify-send";
 const TIMEOUT_MS = Number(process.env.PI_NOTIFY_TIMEOUT_MS ?? 2500);
 const EXPIRE_MS = Number(process.env.PI_NOTIFY_EXPIRE_MS ?? 5000);
 
@@ -16,67 +16,32 @@ type Notification = {
 	urgency?: Urgency;
 };
 
-let missingNotifierWarned = false;
+let notifierFailureWarned = false;
 let lastNotificationKey = "";
 let lastNotificationAt = 0;
-let notifierCache: { envKey: string; command: string | null } | undefined;
 
 function enabled(): boolean {
 	const value = process.env.PI_DESKTOP_NOTIFY;
 	return value !== "0" && value !== "false" && value !== "off";
 }
 
-function notifierEnvKey(): string {
-	return `${process.env.PI_NOTIFY_COMMAND ?? ""}\0${process.env.PATH ?? ""}\0${NOTIFY_SEND}`;
+function expireMs(): string | undefined {
+	return Number.isFinite(EXPIRE_MS) && EXPIRE_MS > 0 ? String(EXPIRE_MS) : undefined;
 }
 
-function notificationTimeoutSeconds(): string {
-	if (!Number.isFinite(EXPIRE_MS) || EXPIRE_MS <= 0) return "5";
-	return String(Math.max(1, Math.round(EXPIRE_MS / 1000)));
-}
-
-function commandCandidates(notification: Notification): Array<[string, string[]]> {
-	const urgency = notification.urgency ?? "normal";
-	const custom = process.env.PI_NOTIFY_COMMAND;
-	const expireMs = Number.isFinite(EXPIRE_MS) && EXPIRE_MS > 0 ? String(EXPIRE_MS) : undefined;
-	const commands: Array<[string, string[]]> = [];
-
-	if (custom) commands.push([custom, [notification.title, notification.body]]);
-
-	commands.push(
-		[
-			NOTIFY_SEND,
-			[
-				"--app-name",
-				APP_NAME,
-				"--urgency",
-				urgency,
-				...(expireMs ? ["--expire-time", expireMs] : []),
-				"--icon",
-				"utilities-terminal",
-				notification.title,
-				notification.body,
-			],
-		],
-		[
-			"dunstify",
-			[
-				"--appname",
-				APP_NAME,
-				"--urgency",
-				urgency,
-				...(expireMs ? ["--timeout", expireMs] : []),
-				"--icon",
-				"utilities-terminal",
-				notification.title,
-				notification.body,
-			],
-		],
-		["kdialog", ["--title", notification.title, "--passivepopup", notification.body, notificationTimeoutSeconds()]],
-		["zenity", ["--notification", `--title=${notification.title}`, `--text=${notification.body}`]],
-	);
-
-	return commands;
+function notificationArgs(notification: Notification): string[] {
+	const expire = expireMs();
+	return [
+		"--app-name",
+		APP_NAME,
+		"--urgency",
+		notification.urgency ?? "normal",
+		...(expire ? ["--expire-time", expire] : []),
+		"--icon",
+		"utilities-terminal",
+		notification.title,
+		notification.body,
+	];
 }
 
 function shouldDeduplicate(notification: Notification): boolean {
@@ -91,43 +56,18 @@ function shouldDeduplicate(notification: Notification): boolean {
 async function notifyDesktop(notification: Notification, ctx?: ExtensionContext): Promise<void> {
 	if (!enabled() || shouldDeduplicate(notification)) return;
 
-	const envKey = notifierEnvKey();
-	const candidates = commandCandidates(notification);
-	if (notifierCache?.envKey === envKey) {
-		if (notifierCache.command === null) {
-			warnMissingNotifier(ctx);
-			return;
-		}
-		const cached = candidates.find(([command]) => command === notifierCache?.command);
-		if (cached) {
-			try {
-				await execFileAsync(cached[0], cached[1], { timeout: TIMEOUT_MS });
-				return;
-			} catch {
-				notifierCache = undefined;
-			}
-		}
+	try {
+		await execFileAsync(NOTIFY_SEND, notificationArgs(notification), { timeout: TIMEOUT_MS });
+	} catch (error) {
+		warnNotifierFailure(error, ctx);
 	}
-
-	for (const [command, args] of candidates) {
-		try {
-			await execFileAsync(command, args, { timeout: TIMEOUT_MS });
-			notifierCache = { envKey, command };
-			return;
-		} catch {
-			// Try next notifier.
-		}
-	}
-
-	notifierCache = { envKey, command: null };
-	warnMissingNotifier(ctx);
 }
 
-function warnMissingNotifier(ctx?: ExtensionContext): void {
-	if (!missingNotifierWarned && ctx?.hasUI) {
-		missingNotifierWarned = true;
-		ctx.ui.notify("No desktop notifier found. Install libnotify/notify-send, dunstify, kdialog, or zenity.", "warning");
-	}
+function warnNotifierFailure(error: unknown, ctx?: ExtensionContext): void {
+	if (notifierFailureWarned || !ctx?.hasUI) return;
+	notifierFailureWarned = true;
+	const message = error instanceof Error && error.message ? `notify-send failed: ${error.message}` : "notify-send failed";
+	ctx.ui.notify(message, "warning");
 }
 
 function truncateText(text: string, maxLength = 180): string {

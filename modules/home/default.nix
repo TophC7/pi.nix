@@ -16,6 +16,7 @@ let
   localPackageDeclarations = {
     caveman.source = ./extensions/caveman.ts;
     clear.source = ./extensions/clear.ts;
+    desktop-notify.source = ./extensions/desktop-notify.ts;
     sworm-issues.source = ./extensions/sworm-issues.ts;
     use-fish.source = ./extensions/use-fish.ts;
 
@@ -61,7 +62,6 @@ let
     { name = "rtk-optimizer"; package = inputs.pi-rtk-optimizer; }
     { name = "pi-terminal-theme"; package = piPackages.pi-terminal-theme; }
     { name = "pi-tool-display"; package = piPackages.pi-tool-display; }
-    { name = "pi-desktop-notify"; package = piPackages.pi-desktop-notify; }
     { name = "pi-claude-bridge"; package = piPackages.pi-claude-bridge; }
     { name = "pi-web-access"; package = piPackages.pi-web-access; }
     { name = "context-mode"; package = piPackages.context-mode; }
@@ -100,6 +100,7 @@ in
     home.packages = [
       cfg.package
       piPackages.rtk
+      pkgs.libnotify # notify-send for desktop-notify.ts
       pkgs.pandoc
     ];
 
