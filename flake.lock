@@ -94,11 +94,11 @@
     "context-mode": {
       "flake": false,
       "locked": {
-        "lastModified": 1778221996,
-        "narHash": "sha256-FGq+S7pEfjBf5axDzquHSEpkXXgzjWQrhr7nLrf1Kx4=",
+        "lastModified": 1778709093,
+        "narHash": "sha256-+QaXlSww7xdxgnXYFOHFVHloyWINuJ9pXrcCV2sni/g=",
         "owner": "mksglu",
         "repo": "context-mode",
-        "rev": "f2d4d18237a97c69dbbdd5e327a1f00fd8b2fbc2",
+        "rev": "21f95b766195afb3af8bcf6ab3976dd95e5f0d49",
         "type": "github"
       },
       "original": {
@@ -428,22 +428,6 @@
         "type": "github"
       }
     },
-    "pi-simplify": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1777872429,
-        "narHash": "sha256-Yy4yrWxbYFvbCpS+mgPrbdlJnXCKlQcQhrG2Mmc4T/4=",
-        "owner": "geminixiang",
-        "repo": "pi-simplify",
-        "rev": "44315b0733eea2f2e1d0feca923ebb02f6a1109f",
-        "type": "github"
-      },
-      "original": {
-        "owner": "geminixiang",
-        "repo": "pi-simplify",
-        "type": "github"
-      }
-    },
     "pi-web-access": {
       "flake": false,
       "locked": {
@@ -477,7 +461,6 @@
         "pi-ask-user": "pi-ask-user",
         "pi-mcp-adapter": "pi-mcp-adapter",
         "pi-rtk-optimizer": "pi-rtk-optimizer",
-        "pi-simplify": "pi-simplify",
         "pi-web-access": "pi-web-access"
       }
     },
