@@ -3,8 +3,10 @@ import { workflowController } from "./controller.ts";
 import { getWorkflowProfile, SAFE_DEFAULT_TOOLS } from "./profiles.ts";
 import { restoreWorkflowTools } from "./tools.ts";
 import type { WorkflowId, WorkflowProfile } from "./types.ts";
+import { clearWorkflowUiStatus, publishWorkflowUiStatus } from "./status.ts";
+import { evaluateAuthoringToolCall, type AuthoringGuardMode, type AuthoringToolCallBlock, type AuthoringToolCallEvent } from "./authoring-policy.ts";
 
-export type AuthoringGuardMode<TMode extends WorkflowId> = "idle" | TMode;
+export type { AuthoringGuardMode, AuthoringToolCallBlock, AuthoringToolCallEvent } from "./authoring-policy.ts";
 
 export interface AuthoringGuardState<TMode extends WorkflowId> {
 	mode: AuthoringGuardMode<TMode>;
@@ -15,16 +17,6 @@ export interface AuthoringGuardOptions<TMode extends WorkflowId> {
 	readonly modes: readonly TMode[];
 	readonly statusKey: string;
 	readonly statusLabel: string;
-}
-
-export interface AuthoringToolCallEvent {
-	readonly toolName?: string;
-	readonly input?: unknown;
-}
-
-export interface AuthoringToolCallBlock {
-	readonly block: true;
-	readonly reason: string;
 }
 
 export interface AuthoringGuard<TMode extends WorkflowId> {
@@ -46,14 +38,16 @@ export function createAuthoringGuard<TMode extends WorkflowId>(options: Authorin
 		return getWorkflowProfile(mode);
 	}
 
-	function setWorkflowStatus(ctx: ExtensionContext, mode: AuthoringGuardMode<TMode>): void {
+	function setWorkflowStatus(_ctx: ExtensionContext, mode: AuthoringGuardMode<TMode>): void {
 		if (mode === "idle") {
-			ctx.ui.setStatus(options.statusKey, undefined);
-			ctx.ui.setWidget(options.statusKey, undefined);
+			clearWorkflowUiStatus(options.statusKey);
 			return;
 		}
-		ctx.ui.setStatus(options.statusKey, mode);
-		ctx.ui.setWidget(options.statusKey, [`${options.statusLabel}: ${mode}`]);
+		publishWorkflowUiStatus({
+			key: options.statusKey,
+			status: mode,
+			label: `${options.statusLabel}: ${mode}`,
+		});
 	}
 
 	function enterMode(pi: ExtensionAPI, ctx: ExtensionContext, mode: AuthoringGuardMode<TMode>): void {
@@ -86,18 +80,7 @@ export function createAuthoringGuard<TMode extends WorkflowId>(options: Authorin
 	}
 
 	function maybeBlockAuthoringToolCall(event: AuthoringToolCallEvent): AuthoringToolCallBlock | undefined {
-		const profile = profileForMode(state.mode);
-		if (!profile) return;
-		if (profile.safety.blocksFileMutationTools && (event.toolName === "write" || event.toolName === "edit")) {
-			return { block: true, reason: `${event.toolName} blocked during ${state.mode}; use workflow save tools.` };
-		}
-		if (!profile.safety.blocksMutatingShell || event.toolName !== "bash") return;
-		const input = event.input as { command?: unknown };
-		if (typeof input.command !== "string") return;
-		const blocked = profile.safety.blockedBash.find((rule) => rule.pattern.test(input.command));
-		if (blocked) {
-			return { block: true, reason: `Mutating shell command blocked during ${state.mode}: ${blocked.reason}.` };
-		}
+		return evaluateAuthoringToolCall(profileForMode(state.mode), state.mode, event);
 	}
 
 	function setupAuthoringGuard(pi: ExtensionAPI): void {

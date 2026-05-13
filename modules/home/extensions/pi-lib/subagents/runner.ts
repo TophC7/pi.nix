@@ -4,8 +4,9 @@ import type { ExtensionAPI, ExtensionCommandContext } from "@mariozechner/pi-cod
 import { discoverAgents } from "./discovery.ts";
 import { runSubagents } from "./engine.ts";
 import { buildCappedParentFacingText } from "./output.ts";
-import { SUBAGENT_ANIMATION_MS } from "./render-helpers.ts";
+import { spinnerFrameForTick, SUBAGENT_ANIMATION_MS } from "./render-helpers.ts";
 import { createSubagentMessageRenderer, SUBAGENT_RUN_MESSAGE_TYPE } from "./render.ts";
+import { clearUiOwner, publishStatus } from "../ui/index.ts";
 import { buildRunRequest, normalizeSubagentRequest } from "./request.ts";
 import { combineSubagentUsage, mapEngineEventToLiveLog, type SubagentRunRequest, type SubagentRunResult, type SubagentRunState, type SubagentRunUpdate } from "./types.ts";
 
@@ -34,7 +35,7 @@ export type SubagentResponse = {
 type SubagentRenderable = SubagentRunState | SubagentRunResult;
 
 const liveRuns = new Map<string, SubagentRenderable>();
-const liveRunAnimationTimers = new Map<string, ReturnType<typeof setInterval>>();
+const liveMessageAnimationTimers = new Map<string, ReturnType<typeof setInterval>>();
 let rendererRegistered = false;
 
 function ensureRendererRegistered(pi: ExtensionAPI): void {
@@ -44,33 +45,50 @@ function ensureRendererRegistered(pi: ExtensionAPI): void {
 }
 
 const REDRAW_THROTTLE_MS = 60;
+const SUBAGENT_STATUS_TTL_MS = 5 * 60_000;
 
 function runHasRunningSlot(run: SubagentRenderable | undefined): boolean {
 	return Boolean(run && "slots" in run && run.slots.some((slot) => slot.status === "running"));
 }
 
-function syncLiveRunAnimation(runId: string, requestRedraw: () => void): void {
+function syncLiveMessageAnimation(runId: string, requestRedraw: () => void): void {
 	if (!runHasRunningSlot(liveRuns.get(runId))) {
-		stopLiveRunAnimation(runId);
+		stopLiveMessageAnimation(runId);
 		return;
 	}
-	if (liveRunAnimationTimers.has(runId)) return;
+	if (liveMessageAnimationTimers.has(runId)) return;
 	const timer = setInterval(() => {
 		if (!runHasRunningSlot(liveRuns.get(runId))) {
-			stopLiveRunAnimation(runId);
+			stopLiveMessageAnimation(runId);
 			return;
 		}
 		requestRedraw();
 	}, SUBAGENT_ANIMATION_MS);
 	(timer as { unref?: () => void }).unref?.();
-	liveRunAnimationTimers.set(runId, timer);
+	liveMessageAnimationTimers.set(runId, timer);
 }
 
-function stopLiveRunAnimation(runId: string): void {
-	const timer = liveRunAnimationTimers.get(runId);
+function stopLiveMessageAnimation(runId: string): void {
+	const timer = liveMessageAnimationTimers.get(runId);
 	if (!timer) return;
 	clearInterval(timer);
-	liveRunAnimationTimers.delete(runId);
+	liveMessageAnimationTimers.delete(runId);
+}
+
+function publishSubagentStatus(statusKey: string, text: string, animated = false): void {
+	publishStatus({
+		id: `${statusKey}:status`,
+		owner: statusKey,
+		text: animated ? ({ tick }) => `${spinnerFrameForTick(tick)} ${text}` : text,
+		priority: "normal",
+		order: 40,
+		staleAfterMs: SUBAGENT_STATUS_TTL_MS,
+		schedule: animated ? { animateEveryMs: SUBAGENT_ANIMATION_MS } : undefined,
+	});
+}
+
+function clearSubagentStatus(statusKey: string): void {
+	clearUiOwner(statusKey);
 }
 
 function throttledRedraw(ctx: ExtensionCommandContext): () => void {
@@ -85,7 +103,7 @@ function throttledRedraw(ctx: ExtensionCommandContext): () => void {
 			if (!pending) return;
 			pending = false;
 			try {
-				ctx.ui.requestRender?.();
+				(ctx.ui as { requestRender?: () => void }).requestRender?.();
 			} catch {
 				// UI context may be gone during cancellation/session switch.
 			}
@@ -107,10 +125,10 @@ export async function runSubagent(
 	const request = buildRunRequest(normalization.request, { cwd: ctx.cwd, parentSignal: ctx.signal });
 	if (request.slots.length === 0) throw new Error(`Subagent ${label} has no agents to run.`);
 
-	ctx.ui.setStatus(statusKey, `${label}: starting`);
+	publishSubagentStatus(statusKey, `${label}: starting`, true);
 	const scheduleStateCleanup = () => {
 		const timeout = setTimeout(() => {
-			stopLiveRunAnimation(request.id);
+			stopLiveMessageAnimation(request.id);
 			liveRuns.delete(request.id);
 		}, TERMINAL_STATE_TTL_MS);
 		(timeout as { unref?: () => void }).unref?.();
@@ -155,8 +173,8 @@ export async function runSubagent(
 		}
 		return toSubagentResponse(result);
 	} finally {
-		stopLiveRunAnimation(request.id);
-		ctx.ui.setStatus(statusKey, undefined);
+		stopLiveMessageAnimation(request.id);
+		clearSubagentStatus(statusKey);
 	}
 }
 
@@ -169,24 +187,24 @@ function handleRunUpdate(
 ): void {
 	if (update.type === "run-start") {
 		liveRuns.set(update.state.id, update.state);
-		ctx.ui.setStatus(statusKey, `${label}: running`);
-		syncLiveRunAnimation(update.state.id, requestRedraw);
+		publishSubagentStatus(statusKey, `${label}: running`, true);
+		syncLiveMessageAnimation(update.state.id, requestRedraw);
 	} else if (update.type === "slot-update") {
 		const run = liveRuns.get(update.runId);
 		const runningSlot = "slots" in (run ?? {}) ? run?.slots.find((slot) => slot.status === "running") : undefined;
-		ctx.ui.setStatus(statusKey, runningSlot?.currentTool ? `${label}: ${runningSlot.currentTool}` : `${label}: running`);
-		syncLiveRunAnimation(update.runId, requestRedraw);
+		publishSubagentStatus(statusKey, runningSlot?.currentTool ? `${label}: ${runningSlot.currentTool}` : `${label}: running`, true);
+		syncLiveMessageAnimation(update.runId, requestRedraw);
 	} else if (update.type === "event") {
 		const run = liveRuns.get(update.runId);
 		if (run && "events" in run && !run.events.includes(update.event)) run.events.push(update.event);
 		const live = mapEngineEventToLiveLog(update.event).at(-1);
-		if (live?.kind === "tool_start") ctx.ui.setStatus(statusKey, `${label}: ${live.toolName}`);
-		else if (live?.kind === "turn_start") ctx.ui.setStatus(statusKey, `${label}: turn ${live.turn}`);
-		syncLiveRunAnimation(update.runId, requestRedraw);
+		if (live?.kind === "tool_start") publishSubagentStatus(statusKey, `${label}: ${live.toolName}`, true);
+		else if (live?.kind === "turn_start") publishSubagentStatus(statusKey, `${label}: turn ${live.turn}`, true);
+		syncLiveMessageAnimation(update.runId, requestRedraw);
 	} else if (update.type === "run-end") {
 		liveRuns.set(update.result.id, update.result);
-		ctx.ui.setStatus(statusKey, `${label}: ${update.result.status}`);
-		stopLiveRunAnimation(update.result.id);
+		publishSubagentStatus(statusKey, `${label}: ${update.result.status}`);
+		stopLiveMessageAnimation(update.result.id);
 	}
 	requestRedraw();
 }
@@ -226,7 +244,7 @@ async function recoverParallelFailure(
 	result.rerun.decision = "rerun-failed";
 	result.rerun.requestedAt = Date.now();
 	result.rerun.rerunSlotIds = [...failedIds];
-	ctx.ui.setStatus(statusKey, `${label}: rerunning failed agents`);
+	publishSubagentStatus(statusKey, `${label}: rerunning failed agents`, true);
 	const rerun = await runSubagents(rerunRequest, {
 		agents,
 		onUpdate: (update) => handleRunUpdate(update, statusKey, `${label} rerun`, ctx, requestRedraw),

@@ -75,9 +75,11 @@ async function runHandoff<C extends HandoffContext>(options: HandoffOptions<C>):
 }
 
 async function runDirectHelper<C extends HandoffContext>(options: HandoffOptions<C>): Promise<HandoffOutcome> {
+	const runId = workflowController.activeRun?.runId;
 	try {
 		markContinuationQueued(options);
 		await options.helper?.(options.ctx);
+		releaseWorkflowRun(options.pi, options.ctx, options.label, runId, `${options.label}: direct-helper complete`);
 		return { kind: "success", mode: "direct-helper" };
 	} catch (error) {
 		return failHandoff(options, error);
@@ -90,9 +92,11 @@ function sendPromptFollowUp<C extends HandoffContext>(options: HandoffOptions<C>
 	if (isSlashLike(prompt)) {
 		return failHandoff(options, new Error(`${options.label}: slash text cannot be sent through fire-and-forget prompt handoff.`));
 	}
+	const runId = workflowController.activeRun?.runId;
 	try {
 		markContinuationQueued(options);
 		options.pi.sendUserMessage(prompt, { deliverAs: "followUp" });
+		if (runId) deferToAgentEnd(options.pi, (ctx) => releaseWorkflowRun(options.pi, ctx, options.label, runId, `${options.label}: follow-up agent_end`));
 		options.ctx.ui.notify(`${options.label}: continuation queued (unverified).`, "info");
 		return { kind: "queued_unverified", mode: "prompt-follow-up" };
 	} catch (error) {
@@ -103,6 +107,7 @@ function sendPromptFollowUp<C extends HandoffContext>(options: HandoffOptions<C>
 function stageManual<C extends HandoffContext>(options: HandoffOptions<C>): HandoffOutcome {
 	const text = options.command ?? options.prompt;
 	if (!text?.trim()) return failHandoff(options, new Error(`${options.label}: no command or prompt available for manual handoff.`));
+	const runId = workflowController.activeRun?.runId;
 	try {
 		options.ctx.ui.setEditorText(text);
 		markManualPending(options);
@@ -111,6 +116,7 @@ function stageManual<C extends HandoffContext>(options: HandoffOptions<C>): Hand
 			options.reason ? `Reason: ${options.reason}` : undefined,
 			"Edit if needed, then press Enter.",
 		].filter(Boolean).join("\n"), "warning");
+		releaseWorkflowRun(options.pi, options.ctx, options.label, runId, `${options.label}: manual staged`);
 		return { kind: "manual_pending" };
 	} catch (error) {
 		return failHandoff(options, error);
@@ -171,6 +177,16 @@ function markManualPending<C extends HandoffContext>(options: HandoffOptions<C>)
 		}
 	} catch (error) {
 		options.ctx.ui.notify(`${options.label}: could not mark manual_pending: ${formatError(error)}`, "warning");
+	}
+}
+
+function releaseWorkflowRun(pi: ExtensionAPI, ctx: ExtensionContext, label: string, runId: string | undefined, reason: string): void {
+	if (!runId || workflowController.activeRun?.runId !== runId) return;
+	try {
+		workflowController.exit(pi, ctx, reason);
+	} catch (error) {
+		ctx.ui.notify(`${label}: workflow restore failed: ${formatError(error)}`, "error");
+		throw error;
 	}
 }
 

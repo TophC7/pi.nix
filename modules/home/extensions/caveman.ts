@@ -17,6 +17,7 @@ import {
 	SettingsList,
 	Text,
 } from "@mariozechner/pi-tui";
+import { publishStatus, type UiPublicationHandle } from "@pi/lib/ui";
 
 const LEVELS = ["off", "lite", "full", "ultra", "micro"] as const;
 const STOP_ALIASES = new Set(["off", "stop", "quit"]);
@@ -48,6 +49,8 @@ const CONFIG_DIR = join(homedir(), ".pi", "agent");
 const CONFIG_PATH = join(CONFIG_DIR, "caveman.json");
 const CONFIG_DISPLAY_PATH = "~/.pi/agent/caveman.json";
 const CAVEMAN_LEVEL_ENTRY_TYPE = "caveman-level";
+const CAVEMAN_STATUS_ID = "caveman:status";
+const CAVEMAN_STATUS_OWNER = "caveman";
 const DEFAULT_CONFIG: CavemanConfig = {
 	defaultLevel: "full",
 	showStatus: true,
@@ -157,8 +160,7 @@ Boundaries: write normal code. Only compress explanations. "stop caveman" or "no
 export default function caveman(pi: ExtensionAPI) {
 	let level: Level = "off";
 	let config: CavemanConfig = { ...DEFAULT_CONFIG };
-	let timer: ReturnType<typeof setInterval> | null = null;
-	let frameIndex = 0;
+	let statusHandle: UiPublicationHandle | undefined;
 	let isActive = false;
 	let configLoadPromise: Promise<void> | null = null;
 
@@ -174,46 +176,32 @@ export default function caveman(pi: ExtensionAPI) {
 		await configLoadPromise;
 	};
 
-	function stopAnimation() {
-		if (timer) {
-			clearInterval(timer);
-			timer = null;
-		}
-		frameIndex = 0;
+	function clearStatus() {
+		statusHandle?.clear();
+		statusHandle = undefined;
 	}
 
 	function syncStatus(ctx: Pick<ExtensionContext, "ui">) {
-		stopAnimation();
 		const theme = ctx.ui.theme;
 
 		if (level === "off" || !config.showStatus) {
-			ctx.ui.setStatus("caveman", "");
+			clearStatus();
 			return;
 		}
 
 		const anim = ANIMATIONS[level];
-		const setFrame = (frame: string) => {
-			ctx.ui.setStatus(
-				"caveman",
-				frame +
-					" " +
-					theme.fg("muted", "caveman level: ") +
-					theme.fg("text", anim.label),
-			);
-		};
-
-		if (!isActive) {
-			setFrame(anim.frames[0]!);
-			return;
-		}
-
-		const renderFrame = () => {
-			setFrame(anim.frames[frameIndex % anim.frames.length]!);
-			frameIndex++;
-		};
-
-		renderFrame();
-		timer = setInterval(renderFrame, anim.interval);
+		statusHandle = publishStatus({
+			id: CAVEMAN_STATUS_ID,
+			owner: CAVEMAN_STATUS_OWNER,
+			text: ({ tick }) => {
+				const frame = isActive ? anim.frames[tick % anim.frames.length]! : anim.frames[0]!;
+				return frame + " " + theme.fg("muted", "caveman level: ") + theme.fg("text", anim.label);
+			},
+			priority: "low",
+			order: 10,
+			staleAfterMs: isActive ? anim.interval * 4 : undefined,
+			schedule: isActive ? { animateEveryMs: anim.interval } : undefined,
+		});
 	}
 
 	pi.on("session_start", async (_event, ctx) => {
@@ -247,7 +235,7 @@ export default function caveman(pi: ExtensionAPI) {
 	});
 
 	pi.on("session_shutdown", async () => {
-		stopAnimation();
+		clearStatus();
 		isActive = false;
 	});
 

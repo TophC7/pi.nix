@@ -31,12 +31,12 @@
       url = "github:nicobailon/pi-web-access";
       flake = false;
     };
-    pi-simplify = {
-      url = "github:geminixiang/pi-simplify";
-      flake = false;
-    };
     pi-rtk-optimizer = {
       url = "github:MasuRii/pi-rtk-optimizer";
+      flake = false;
+    };
+    pi-mcp-adapter = {
+      url = "github:nicobailon/pi-mcp-adapter";
       flake = false;
     };
     context-mode = {

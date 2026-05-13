@@ -1,6 +1,6 @@
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@mariozechner/pi-coding-agent";
-import { fireAndForgetHandoffReason, handoff } from "@pi/lib/handoff";
-import { getWorkflowProfile, workflowController } from "@pi/lib/workflow";
+import { deferToAgentEnd, fireAndForgetHandoffReason, handoff } from "@pi/lib/handoff";
+import { getWorkflowProfile, workflowController, workflowToolLeaseManager } from "@pi/lib/workflow";
 import { makeStageDir, writeStage } from "../spec/stage.ts";
 import {
 	cleanupApplyPrompt,
@@ -12,6 +12,7 @@ import {
 import { extractSubagentText, runSubagent } from "@pi/lib/subagents";
 
 const CLEANUP_PROFILE_ID = "cleanup";
+const CLEANUP_QUICK_TOOLS = ["read", "grep", "find", "ls", "bash", "edit", "write"] as const;
 
 function exitCleanupController(pi: ExtensionAPI, ctx: ExtensionContext, reason: string): void {
 	if (!workflowController.activeRun) return;
@@ -86,15 +87,28 @@ export async function runCleanup(pi: ExtensionAPI, ctx: ExtensionCommandContext,
 
 export async function runCleanupQuick(pi: ExtensionAPI, ctx: ExtensionCommandContext): Promise<void> {
 	await ctx.waitForIdle();
-	ctx.ui.notify("/cleanup:quick: manual handoff prepared for obvious junk removal.", "info");
-	await handoff({
-		pi,
-		ctx,
-		label: "/cleanup:quick",
-		prompt: cleanupQuickPrompt(),
-		policy: "auto",
-		reason: fireAndForgetHandoffReason(),
+	const lease = workflowToolLeaseManager.acquire(pi, {
+		profileId: CLEANUP_PROFILE_ID,
+		needsTools: CLEANUP_QUICK_TOOLS,
+		optionalTools: [],
+		blockedTools: [],
 	});
+	let releaseImmediately = true;
+	try {
+		await deferToAgentEnd(pi, () => workflowToolLeaseManager.release(pi, lease.token, "/cleanup:quick agent_end"));
+		ctx.ui.notify("/cleanup:quick: manual handoff prepared for obvious junk removal.", "info");
+		const outcome = await handoff({
+			pi,
+			ctx,
+			label: "/cleanup:quick",
+			prompt: cleanupQuickPrompt(),
+			policy: "auto",
+			reason: fireAndForgetHandoffReason(),
+		});
+		releaseImmediately = outcome.kind !== "queued_unverified";
+	} finally {
+		if (releaseImmediately) workflowToolLeaseManager.release(pi, lease.token, "/cleanup:quick immediate_release");
+	}
 }
 
 export async function runCleanupExit(pi: ExtensionAPI, ctx: ExtensionCommandContext): Promise<void> {

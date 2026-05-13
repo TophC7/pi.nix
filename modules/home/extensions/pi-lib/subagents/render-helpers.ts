@@ -13,8 +13,12 @@ const ANSI_RESET = "\x1b[0m";
 const ANSI_PATTERN = /\x1b\[[0-9;]*m/y;
 const segmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 
+export function spinnerFrameForTick(tick: number): string {
+	return SPINNER[Math.abs(Math.floor(tick)) % SPINNER.length]!;
+}
+
 export function spinnerFrame(): string {
-	return SPINNER[Math.floor(Date.now() / SUBAGENT_ANIMATION_MS) % SPINNER.length]!;
+	return spinnerFrameForTick(Math.floor(Date.now() / SUBAGENT_ANIMATION_MS));
 }
 
 /**

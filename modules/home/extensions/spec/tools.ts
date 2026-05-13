@@ -1,6 +1,7 @@
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { Type } from "typebox";
 import { deferToAgentEnd, fireAndForgetHandoffReason, handoff } from "@pi/lib/handoff";
+import { beginApprovedSpecFinalization, endApprovedSpecFinalization } from "@pi/lib/workflow";
 import { saveFile } from "./files.ts";
 import { requireSwormBridge } from "./issues.ts";
 import { runSpecNew } from "./commands.ts";
@@ -66,6 +67,21 @@ export function registerSpecWorkflowTools(pi: ExtensionAPI): void {
 			});
 			const text = `promote_plan handoff ${outcome.kind} for ${params.path}.`;
 			return { content: [{ type: "text", text }], details: { path: params.path, outcome } };
+		},
+	});
+
+	pi.registerTool({
+		name: "approve_spec_finalization",
+		label: "Approve Spec Finalization",
+		description: "Open the finalization gate for /spec:new after explicit final user approval. Enables only sanctioned save tools and Sworm mutator/config tools until agent_end.",
+		parameters: Type.Object({
+			approval: Type.String({ description: "Short record of the user's explicit final approval, e.g. 'User approved final spec and Sworm writes.'" }),
+		}),
+		async execute(_toolCallId, params) {
+			const approval = beginApprovedSpecFinalization(pi, params.approval);
+			await deferToAgentEnd(pi, () => endApprovedSpecFinalization(pi, approval.lease.token, "agent_end"));
+			const text = `Spec finalization approved; gate ${approval.lease.token} active until agent_end.`;
+			return { content: [{ type: "text", text }], details: approval };
 		},
 	});
 

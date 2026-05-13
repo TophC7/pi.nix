@@ -74,7 +74,7 @@ Mode rules:
 7. If AskClaude fails, ask_user for a recovery choice: retry, model/config adjustment, manual Claude prompt, waiver, or abort.
 8. Save with save_plan_draft to .sworm/plans/${date}-<slug>.md.
 9. After saving, ask_user: promote now, keep draft only, or revise.
-   - On "promote now": call the promote_plan tool with the path returned by save_plan_draft. That tool hands the plan off to /spec:new, exits plan-authoring mode, and unlocks Sworm tools in spec-authoring. Do not attempt Sworm writes from this mode.
+   - On "promote now": call the promote_plan tool with the path returned by save_plan_draft. That tool hands the plan off to /spec:new and exits plan-authoring mode. Do not attempt Sworm writes from this mode; /spec:new allows Sworm writes only after final approval through approve_spec_finalization.
    - On "keep draft only": stop. Tell the user the saved path and that they can promote later with \`/plan promote\` or \`/spec:new <path>\`.
    - On "revise": ask what to change, update with save_plan_draft, then re-ask this question.
 
@@ -118,7 +118,7 @@ Mode rules:
 5. If AskClaude fails, ask_user for a recovery choice: retry, model/config adjustment, manual Claude prompt, waiver, or abort.
 6. Save with save_plan_draft to .sworm/plans/${date}-<slug>.md only after AskClaude pass or explicit waiver metadata is present.
 7. After saving, ask_user: promote now, keep draft only, or revise.
-   - On "promote now": call promote_plan with the saved path.
+   - On "promote now": call promote_plan with the saved path. Do not create Sworm state here; /spec:new gates Sworm writes behind final approval and approve_spec_finalization.
    - On "keep draft only": stop and report saved path.
    - On "revise": update the draft, re-harden if material, save again, then re-ask.
 
@@ -194,12 +194,13 @@ Resolve checkpoints in order; do not skip:
 7. Call isolated AskClaude to harden the candidate spec end-to-end.
 8. If AskClaude fails, ask_user for a recovery choice: retry, model/config adjustment, manual Claude prompt, waiver, or abort.
 9. ask_user for explicit final approval. Sworm writes are durable.
-10. Set Sworm prefixes with sworm_config_set: epic_prefix=EPIC, issue_prefix=ISSUE, comment_prefix=NOTE.
-11. Create one Sworm EPIC for the spec.
-12. Create one top-level ISSUE per §T row using EPIC/ISSUE/NOTE prefixes only.
-13. Mirror §T dependencies with sworm_dependency_add.
-14. Round-trip Sworm EPIC/ISSUE IDs into the spec text and save spec files once with save_spec under .sworm/spec/<name>/. Include Current State markers (todo.md for phased/ticketed; SPEC.md for light), sworm_epic_id frontmatter, and AskClaude hardening or waiver metadata.
-15. Re-save plan frontmatter with promoted_to and promoted_at via save_plan_draft.
+10. After approval only, call approve_spec_finalization with a short approval record. If approval is not granted or approve_spec_finalization fails, stop before Sworm writes.
+11. Set Sworm prefixes with sworm_config_set: epic_prefix=EPIC, issue_prefix=ISSUE, comment_prefix=NOTE.
+12. Create one Sworm EPIC for the spec.
+13. Create one top-level ISSUE per §T row using EPIC/ISSUE/NOTE prefixes only.
+14. Mirror §T dependencies with sworm_dependency_add.
+15. Round-trip Sworm EPIC/ISSUE IDs into the spec text and save spec files once with save_spec under .sworm/spec/<name>/. Include Current State markers (todo.md for phased/ticketed; SPEC.md for light), sworm_epic_id frontmatter, and AskClaude hardening or waiver metadata.
+16. Re-save plan frontmatter with promoted_to and promoted_at via save_plan_draft.
 
 Required shape files:
 - phased: .sworm/spec/<name>/todo.md + phase-*.md

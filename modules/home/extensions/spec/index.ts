@@ -4,7 +4,7 @@ import { setWorkflowStatus, setupAuthoringGuard, state } from "./mode.ts";
 import { registerPlanCommands, registerSpecCommands } from "./commands.ts";
 import { registerPlanReviewCommand } from "./review-command.ts";
 import { registerSpecWorkflowTools } from "./tools.ts";
-import { recoverStaleWorkflow } from "@pi/lib/workflow";
+import { formatWorkflowPermissionsSnapshot, getWorkflowPermissionsSnapshot, recoverStaleWorkflow } from "@pi/lib/workflow";
 import { MODES, type Mode } from "./types.ts";
 
 export default function specWorkflowExtension(pi: ExtensionAPI) {
@@ -12,7 +12,7 @@ export default function specWorkflowExtension(pi: ExtensionAPI) {
 
 	pi.on("session_start", (_event, ctx) => {
 		const recovery = recoverStaleWorkflow(pi, ctx);
-		if (recovery.action === "restored_previous" || recovery.action === "safe_reset") {
+		if (recovery.action === "safe_reset") {
 			state.mode = "idle";
 			state.snapshot = undefined;
 			return;
@@ -31,6 +31,12 @@ export default function specWorkflowExtension(pi: ExtensionAPI) {
 	registerPlanCommands(pi);
 	registerPlanReviewCommand(pi);
 	registerSpecCommands(pi);
+	pi.registerCommand("permissions", {
+		description: "Show current workflow permission and active-tool state.",
+		handler: async (_args, ctx) => {
+			ctx.ui.notify(formatWorkflowPermissionsSnapshot(getWorkflowPermissionsSnapshot(pi)), "info");
+		},
+	});
 	pi.on("resources_discover", () => {
 		if (!existsSync(".sworm")) return;
 		return {};

@@ -2,15 +2,24 @@ import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-age
 import { SAFE_DEFAULT_TOOLS, getWorkflowProfile } from "./profiles.ts";
 import type { WorkflowId, WorkflowProfile } from "./types.ts";
 import type { WorkflowMarker } from "./controller.ts";
-import { activeToolNamesForProfile, restoreWorkflowTools } from "./tools.ts";
+import { workflowToolLeaseManager } from "./leases.ts";
+import { restoreWorkflowTools } from "./tools.ts";
+import { clearWorkflowUiStatus } from "./status.ts";
 
-export type WorkflowRecoveryAction = "none" | "migrated_awaiting_confirmation" | "restored_previous" | "safe_reset" | "failed";
+export type WorkflowRecoveryAction = "none" | "safe_reset" | "failed";
 
 export interface WorkflowRecoveryResult {
 	readonly action: WorkflowRecoveryAction;
 	readonly marker?: WorkflowMarker;
 	readonly activeTools?: readonly string[];
 	readonly error?: string;
+	readonly detail?: string;
+}
+
+let lastWorkflowRecovery: WorkflowRecoveryResult = { action: "none" };
+
+export function getLastWorkflowRecovery(): WorkflowRecoveryResult {
+	return lastWorkflowRecovery;
 }
 
 type CustomEntry = {
@@ -21,77 +30,30 @@ type CustomEntry = {
 
 export function recoverStaleWorkflow(pi: ExtensionAPI, ctx: ExtensionContext, markerType = "pi-workflow-state"): WorkflowRecoveryResult {
 	const marker = latestWorkflowMarker(ctx, markerType);
-	if (!marker || marker.status === "idle") return { action: "none" };
+	if (!marker || marker.status === "idle") return recordRecovery({ action: "none", marker });
 
 	const profile = tryProfile(marker.profileId);
-	if (marker.status === "handoff_pending") return migrateHandoffPending(pi, ctx, marker, profile, markerType);
-
 	const allToolNames = new Set(pi.getAllTools().map((tool) => tool.name));
-	const previousTools = marker.previousActiveTools?.filter((name) => allToolNames.has(name));
-	const canRestorePrevious = Boolean(previousTools && previousTools.length === marker.previousActiveTools?.length);
-	const targetTools = canRestorePrevious ? previousTools! : SAFE_DEFAULT_TOOLS.filter((name) => allToolNames.has(name));
-	const action: WorkflowRecoveryAction = canRestorePrevious ? "restored_previous" : "safe_reset";
+	const safeDefaults = profile?.recovery.safeDefaultTools ?? SAFE_DEFAULT_TOOLS;
+	const targetTools = safeDefaults.filter((name) => allToolNames.has(name));
 
 	try {
+		workflowToolLeaseManager.clear();
 		const activeTools = restoreWorkflowTools(pi, { previousActiveTools: targetTools });
 		clearWorkflowStatus(ctx, profile);
-		appendIdleMarker(pi, marker, markerType, action, activeTools);
-		notifyRecovery(ctx, marker, action);
-		return { action, marker, activeTools };
+		appendIdleMarker(pi, marker, markerType, "safe_reset", activeTools);
+		notifyRecovery(ctx, marker, "safe_reset");
+		return recordRecovery({
+			action: "safe_reset",
+			marker,
+			activeTools,
+			detail: `Safe-reset stale ${marker.profileId}:${marker.status}; old active-tool snapshot was not restored.`,
+		});
 	} catch (error) {
 		const message = formatError(error);
 		ctx.ui.notify(`Workflow recovery failed for ${marker.profileId}: ${message}`, "error");
-		return { action: "failed", marker, error: message };
+		return recordRecovery({ action: "failed", marker, error: message });
 	}
-}
-
-function migrateHandoffPending(
-	pi: ExtensionAPI,
-	ctx: ExtensionContext,
-	marker: WorkflowMarker,
-	profile: WorkflowProfile | undefined,
-	markerType: string,
-): WorkflowRecoveryResult {
-	try {
-		const activeTools = restoreAwaitingConfirmationTools(pi, marker, profile);
-		if (profile) renderAwaitingConfirmation(ctx, profile);
-		const migrated: WorkflowMarker = {
-			...marker,
-			status: "awaiting_confirmation",
-			activeTools,
-			reason: "migrated_from_handoff_pending",
-			timestamp: new Date().toISOString(),
-		};
-		pi.appendEntry(markerType, migrated);
-		ctx.ui.notify("Resumed workflow with migrated status; original continuation was not re-fired", "info");
-		return { action: "migrated_awaiting_confirmation", marker: migrated, activeTools };
-	} catch (error) {
-		const message = formatError(error);
-		ctx.ui.notify(`Workflow handoff_pending migration failed for ${marker.profileId}: ${message}`, "error");
-		return { action: "failed", marker, error: message };
-	}
-}
-
-function restoreAwaitingConfirmationTools(
-	pi: ExtensionAPI,
-	marker: WorkflowMarker,
-	profile: WorkflowProfile | undefined,
-): readonly string[] {
-	const allToolNames = pi.getAllTools().map((tool) => tool.name);
-	const all = new Set(allToolNames);
-	const markerTools = marker.activeTools?.filter((name) => all.has(name));
-	const targetTools = markerTools && markerTools.length === marker.activeTools?.length
-		? markerTools
-		: profile
-			? activeToolNamesForProfile(profile, allToolNames)
-			: SAFE_DEFAULT_TOOLS.filter((name) => all.has(name));
-	pi.setActiveTools(targetTools);
-	return pi.getActiveTools();
-}
-
-function renderAwaitingConfirmation(ctx: ExtensionContext, profile: WorkflowProfile): void {
-	ctx.ui.setStatus(profile.statusKey, `${profile.id}:awaiting_confirmation`);
-	ctx.ui.setWidget(profile.statusKey, [`Pi workflow: ${profile.label}`, "Status: awaiting_confirmation"]);
 }
 
 export function latestWorkflowMarker(ctx: ExtensionContext, markerType = "pi-workflow-state"): WorkflowMarker | undefined {
@@ -133,10 +95,9 @@ function tryProfile(id: WorkflowId): WorkflowProfile | undefined {
 	}
 }
 
-function clearWorkflowStatus(ctx: ExtensionContext, profile: WorkflowProfile | undefined): void {
+function clearWorkflowStatus(_ctx: ExtensionContext, profile: WorkflowProfile | undefined): void {
 	if (!profile) return;
-	ctx.ui.setStatus(profile.statusKey, undefined);
-	ctx.ui.setWidget(profile.statusKey, undefined);
+	clearWorkflowUiStatus(profile.statusKey);
 }
 
 function appendIdleMarker(
@@ -157,12 +118,13 @@ function appendIdleMarker(
 	} satisfies WorkflowMarker);
 }
 
-function notifyRecovery(ctx: ExtensionContext, marker: WorkflowMarker, action: WorkflowRecoveryAction): void {
-	if (action === "restored_previous") {
-		ctx.ui.notify(`Recovered stale ${marker.profileId} workflow; restored previous active tools.`, "warning");
-		return;
-	}
-	ctx.ui.notify(`Recovered stale ${marker.profileId} workflow with safe default tools; exact prior snapshot unavailable.`, "warning");
+function notifyRecovery(ctx: ExtensionContext, marker: WorkflowMarker, _action: WorkflowRecoveryAction): void {
+	ctx.ui.notify(`Recovered stale ${marker.profileId} workflow with safe default tools; old active-tool snapshot was not restored.`, "warning");
+}
+
+function recordRecovery(result: WorkflowRecoveryResult): WorkflowRecoveryResult {
+	lastWorkflowRecovery = result;
+	return result;
 }
 
 function formatError(error: unknown): string {

@@ -20,6 +20,9 @@ export {
 	capToolPreview,
 } from "./output.ts";
 export {
+	formatTokens as formatTokenCount,
+} from "./render-helpers.ts";
+export {
 	buildRunRequest,
 	isAgentScope,
 	normalizeSubagentRequest,

@@ -18,7 +18,6 @@ let
     clear.source = ./extensions/clear.ts;
     desktop-notify.source = ./extensions/desktop-notify.ts;
     sworm-issues.source = ./extensions/sworm-issues.ts;
-    use-fish.source = ./extensions/use-fish.ts;
 
     # Directory-shaped extension: Pi settings intentionally point at the
     # directory, not git/index.ts.
@@ -33,6 +32,16 @@ let
     };
 
     # Multi-file extension packages: each owns index.ts and optional agents/*.md.
+    slab = {
+      source = ./extensions/slab;
+      entry = "index.ts";
+      agentsDir = null;
+    };
+    burden = {
+      source = ./extensions/burden;
+      entry = "index.ts";
+      agentsDir = null;
+    };
     spec = {
       source = ./extensions/spec;
       entry = "index.ts";
@@ -58,14 +67,22 @@ let
   };
   externalPackageDeclarations = [
     { name = "ask-user"; package = inputs.pi-ask-user; }
-    { name = "simplify"; package = inputs.pi-simplify; }
     { name = "rtk-optimizer"; package = inputs.pi-rtk-optimizer; }
-    { name = "pi-terminal-theme"; package = piPackages.pi-terminal-theme; }
     { name = "pi-tool-display"; package = piPackages.pi-tool-display; }
     { name = "pi-claude-bridge"; package = piPackages.pi-claude-bridge; }
     { name = "pi-web-access"; package = piPackages.pi-web-access; }
+    # MCP transport for Pi. Reads ~/.pi/agent/mcp.json and registers every
+    # exposed MCP tool through pi.registerTool() so the model can call them
+    # like any built-in. Without this extension Pi has no MCP awareness, and
+    # context-mode's `ctx_*` tools never reach the model.
+    { name = "pi-mcp-adapter"; package = piPackages.pi-mcp-adapter; }
     { name = "context-mode"; package = piPackages.context-mode; }
-    { name = "token"; package = piPackages.pi-token-burden; }
+    # use-fish must load last so its bash tool_call hook runs after every
+    # other package's hook. In particular rtk-optimizer needs to see the raw
+    # bash command (e.g. `grep -r TODO .`) before we wrap it as
+    # `fish -lc '...'`; otherwise `rtk rewrite` sees `fish` as the leading
+    # token and returns no-match, silently disabling every RTK rewrite.
+    { name = "use-fish"; package = ./extensions/use-fish; }
   ];
 in
 {
@@ -118,6 +135,48 @@ in
           extensions = cfg.extensionSystem.extensionPaths;
 
           packages = cfg.extensionSystem.packageEntries;
+        };
+
+        # MCP server registry. pi-mcp-adapter consumes this on session start
+        # and registers every server's tools through pi.registerTool(). The
+        # `command` is the Nix-pinned start.mjs from the context-mode build,
+        # so resolution does not depend on PATH.
+        ".pi/agent/mcp.json".text = builtins.toJSON {
+          mcpServers = {
+            context-mode = {
+              command = "${pkgs.nodejs}/bin/node";
+              args = [ "${piPackages.context-mode}/start.mjs" ];
+              directTools = true;
+              lifecycle = "keep-alive";
+            };
+          };
+        };
+
+        # Declarative RTK config. Pi writes the same file on first run with
+        # defaults; we own it here so the `smartTruncate` and rewrite settings
+        # we want survive HM activation. The /rtk TUI still works but its
+        # changes will be reverted on the next switch.
+        ".pi/agent/extensions/pi-rtk-optimizer/config.json".text = builtins.toJSON {
+          enabled = true;
+          mode = "rewrite";
+          guardWhenRtkMissing = true;
+          showRewriteNotifications = true;
+          outputCompaction = {
+            enabled = true;
+            stripAnsi = true;
+            readCompaction = { enabled = false; };
+            sourceCodeFilteringEnabled = false;
+            preserveExactSkillReads = false;
+            sourceCodeFiltering = "none";
+            aggregateTestOutput = true;
+            filterBuildOutput = true;
+            compactGitOutput = true;
+            aggregateLinterOutput = true;
+            groupSearchOutput = true;
+            trackSavings = true;
+            smartTruncate = { enabled = true; maxLines = 300; };
+            truncate = { enabled = true; maxChars = 12000; };
+          };
         };
       };
   };

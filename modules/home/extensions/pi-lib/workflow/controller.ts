@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import type { WorkflowId, WorkflowProfile } from "./types.ts";
-import { activateWorkflowTools, restoreWorkflowTools, type WorkflowToolActivation } from "./tools.ts";
+import { workflowToolLeaseManager, type WorkflowToolLease } from "./leases.ts";
+import { restoreWorkflowTools } from "./tools.ts";
+import { clearWorkflowUiStatus, publishWorkflowUiStatus } from "./status.ts";
 
 export type WorkflowControllerStatus = "idle" | "entering" | "active" | "awaiting_confirmation" | "continuation_queued" | "manual_pending" | "exiting" | "failed_resetting";
 export type WorkflowMarkerStatus = WorkflowControllerStatus | (string & {});
@@ -11,12 +13,26 @@ export interface WorkflowErrorDetails {
 	readonly message: string;
 }
 
+export interface WorkflowMarkerLease {
+	readonly token: string;
+	readonly ownerRunId?: string;
+	readonly profileId: WorkflowId;
+	readonly status: string;
+	readonly capturedActiveTools: readonly string[];
+	readonly activeTools: readonly string[];
+	readonly acquiredAt: string;
+	readonly releasedAt?: string;
+	readonly releaseReason?: string;
+	readonly restoreError?: WorkflowErrorDetails;
+}
+
 export interface WorkflowMarker {
 	readonly runId: string;
 	readonly profileId: WorkflowId;
 	readonly status: WorkflowMarkerStatus;
 	readonly previousActiveTools?: readonly string[];
 	readonly activeTools?: readonly string[];
+	readonly lease?: WorkflowMarkerLease;
 	readonly reason?: string;
 	readonly error?: WorkflowErrorDetails;
 	readonly timestamp: string;
@@ -28,7 +44,7 @@ export interface WorkflowRun {
 	readonly startedAt: number;
 	readonly previousActiveTools: readonly string[];
 	status: WorkflowControllerStatus;
-	activation?: WorkflowToolActivation;
+	lease?: WorkflowToolLease;
 	lastError?: WorkflowErrorDetails;
 }
 
@@ -68,7 +84,7 @@ export class WorkflowController {
 		this.persist(pi, run, "entering");
 
 		try {
-			run.activation = activateWorkflowTools(pi, profile);
+			run.lease = workflowToolLeaseManager.acquire(pi, profile, { ownerRunId: run.runId });
 			run.status = "active";
 			this.render(ctx, run);
 			this.persist(pi, run, "active");
@@ -115,7 +131,7 @@ export class WorkflowController {
 		this.render(ctx, run);
 		this.persist(pi, run, reason);
 		try {
-			this.restore(pi, run);
+			this.restore(pi, run, reason);
 			this.clear(pi, ctx, run, reason);
 		} catch (error) {
 			run.lastError = errorDetails(error);
@@ -150,7 +166,7 @@ export class WorkflowController {
 		this.render(ctx, run);
 		this.persist(pi, run, reason);
 		try {
-			this.restore(pi, run);
+			this.restore(pi, run, reason);
 			this.clear(pi, ctx, run, reason);
 		} catch (restoreError) {
 			run.lastError = errorDetails(restoreError);
@@ -161,8 +177,19 @@ export class WorkflowController {
 		}
 	}
 
-	private restore(pi: ExtensionAPI, run: WorkflowRun): void {
-		restoreWorkflowTools(pi, run.activation ?? { previousActiveTools: run.previousActiveTools });
+	private restore(pi: ExtensionAPI, run: WorkflowRun, reason = "restore"): void {
+		if (!run.lease) {
+			restoreWorkflowTools(pi, { previousActiveTools: run.previousActiveTools });
+			return;
+		}
+		const result = workflowToolLeaseManager.release(pi, run.lease.token, reason);
+		run.lease = {
+			...run.lease,
+			status: result.status === "release_deferred" ? "release_deferred" : "released",
+			releasedAt: new Date().toISOString(),
+			releaseReason: reason,
+			activeTools: result.activeTools,
+		};
 	}
 
 	private clear(pi: ExtensionAPI, ctx: ExtensionContext, run: WorkflowRun, reason: string): void {
@@ -171,33 +198,52 @@ export class WorkflowController {
 		this.persist(pi, { ...run, status: "idle" }, reason);
 	}
 
-	private render(ctx: ExtensionContext, run: WorkflowRun): void {
-		ctx.ui.setStatus(run.profile.statusKey, `${run.profile.id}:${run.status}`);
-		ctx.ui.setWidget(run.profile.statusKey, [`Pi workflow: ${run.profile.label}`, `Status: ${run.status}`]);
+	private render(_ctx: ExtensionContext, run: WorkflowRun): void {
+		publishWorkflowUiStatus({
+			key: run.profile.statusKey,
+			status: `${run.profile.id}:${run.status}`,
+			label: `Pi workflow: ${run.profile.label}`,
+			detail: `Status: ${run.status}`,
+		});
 	}
 
-	private clearStatus(ctx: ExtensionContext, profile: WorkflowProfile): void {
-		ctx.ui.setStatus(profile.statusKey, undefined);
-		ctx.ui.setWidget(profile.statusKey, undefined);
+	private clearStatus(_ctx: ExtensionContext, profile: WorkflowProfile): void {
+		clearWorkflowUiStatus(profile.statusKey);
 	}
 
 	private persist(pi: ExtensionAPI, run: WorkflowRun, reason: string): void {
-		if (!run.profile.persistence.persistMarker) return;
+		if (!run.profile.recovery.persistMarker) return;
 		const marker: WorkflowMarker = {
 			runId: run.runId,
 			profileId: run.profile.id,
 			status: run.status,
-			previousActiveTools: run.profile.persistence.persistToolSnapshot ? (run.activation?.previousActiveTools ?? run.previousActiveTools) : undefined,
-			activeTools: run.activation?.activeAfterSet,
+			previousActiveTools: run.profile.recovery.persistToolSnapshot ? (run.lease?.capturedActiveTools ?? run.previousActiveTools) : undefined,
+			activeTools: run.lease?.activeTools,
+			lease: run.lease ? markerLease(run.lease) : undefined,
 			reason,
 			error: run.lastError,
 			timestamp: new Date().toISOString(),
 		};
-		pi.appendEntry(run.profile.persistence.markerType, marker);
+		pi.appendEntry(run.profile.recovery.markerType, marker);
 	}
 }
 
 export const workflowController = new WorkflowController();
+
+function markerLease(lease: WorkflowToolLease): WorkflowMarkerLease {
+	return {
+		token: lease.token,
+		ownerRunId: lease.ownerRunId,
+		profileId: lease.profileId,
+		status: lease.status,
+		capturedActiveTools: lease.capturedActiveTools,
+		activeTools: lease.activeTools,
+		acquiredAt: lease.acquiredAt,
+		releasedAt: lease.releasedAt,
+		releaseReason: lease.releaseReason,
+		restoreError: lease.restoreError,
+	};
+}
 
 function formatError(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);

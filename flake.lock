@@ -396,6 +396,22 @@
         "type": "github"
       }
     },
+    "pi-mcp-adapter": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1778479021,
+        "narHash": "sha256-An8T5HCzofCZ0iNDaUPu8NDk+8ndPgAm+owm6F9kmYM=",
+        "owner": "nicobailon",
+        "repo": "pi-mcp-adapter",
+        "rev": "e4c6437b3a40ab659e8885b3edd8d2647d1b7ffb",
+        "type": "github"
+      },
+      "original": {
+        "owner": "nicobailon",
+        "repo": "pi-mcp-adapter",
+        "type": "github"
+      }
+    },
     "pi-rtk-optimizer": {
       "flake": false,
       "locked": {
@@ -459,6 +475,7 @@
           "nixpkgs"
         ],
         "pi-ask-user": "pi-ask-user",
+        "pi-mcp-adapter": "pi-mcp-adapter",
         "pi-rtk-optimizer": "pi-rtk-optimizer",
         "pi-simplify": "pi-simplify",
         "pi-web-access": "pi-web-access"

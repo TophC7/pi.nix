@@ -1,6 +1,7 @@
 import type { ExtensionCommandContext, Theme } from "@mariozechner/pi-coding-agent";
 import { getMarkdownTheme } from "@mariozechner/pi-coding-agent";
 import { Container, Key, Markdown, Spacer, Text, matchesKey, type Component, type MarkdownTheme } from "@mariozechner/pi-tui";
+import { centeredOverlayOptions } from "./layout.ts";
 
 export interface OverlayHandle {
 	hide(): void;
@@ -78,14 +79,10 @@ export function showMarkdownOverlay(
 			if (closed) queueMicrotask(close);
 			return new MarkdownOverlay(theme, options.title, options.markdown, finish);
 		},
-		{
-			overlay: true,
-			overlayOptions: {
-				anchor: "center",
-				width: options.width ?? "80%",
-				maxHeight: options.maxHeight ?? "80%",
-			},
-		},
+		centeredOverlayOptions({
+			width: options.width,
+			maxHeight: options.maxHeight,
+		}),
 	).catch((error) => {
 		ctx.ui.notify(`Markdown overlay failed: ${error instanceof Error ? error.message : String(error)}`, "error");
 	});

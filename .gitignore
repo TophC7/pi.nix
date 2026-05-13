@@ -1,2 +1,3 @@
-.sworm/issues.db-wal
-.sworm/issues.db-shm
+.sworm/
+!.sworm/*.json
+*.nfs*
