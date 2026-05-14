@@ -19,4 +19,5 @@ export * from "./settings.ts";
 export * from "./status-store.ts";
 export * from "./store.ts";
 export * from "./table.ts";
+export * from "./theme-tones.ts";
 export * from "./widget-host.ts";

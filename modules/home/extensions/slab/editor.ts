@@ -3,23 +3,19 @@ import {
 	type KeybindingsManager,
 } from "@mariozechner/pi-coding-agent";
 import { truncateToWidth, visibleWidth, type EditorTheme, type TUI } from "@mariozechner/pi-tui";
-import { stripControls, UiWidgetHost, type UiRenderCapabilities, type UiRenderClock, type UiSnapshot, type UiWidgetEntry } from "@pi/lib/ui";
-import { fg, SLAB_PALETTES } from "./palette.ts";
+import { fitLine, padLine, stripControls, UiWidgetHost, type UiRenderCapabilities, type UiRenderClock, type UiSnapshot, type UiWidgetEntry } from "@pi/lib/ui";
+import { formatWorkspaceLabel } from "./format.ts";
+import { paint, paintIf, rainbowRole } from "./palette.ts";
+import { renderSegment, SLAB_SEGMENT_BY_ID } from "./segments.ts";
 import { renderSlabLine } from "./renderer.ts";
-import type { SlabConfig, SlabRuntimeState } from "./types.ts";
+import type { SlabConfig, SlabRuntimeState, SlabSegmentRenderContext, SlabSegmentRenderResult } from "./types.ts";
 
 const CONTENT_PADDING_X = 1;
-const AUTOCOMPLETE_INDENT = 1 + CONTENT_PADDING_X;
+const AUTOCOMPLETE_INDENT = CONTENT_PADDING_X;
 const ANSI_PATTERN = /\x1b\[[0-9;]*m/g;
 
-const BORDER = {
-	topLeft: "╭",
-	topRight: "╮",
-	bottomLeft: "╰",
-	bottomRight: "╯",
-	vertical: "│",
-	horizontal: "─",
-};
+const HORIZONTAL = "─";
+const ASCII_HORIZONTAL = "-";
 
 export interface SlabEditorState {
 	config: SlabConfig;
@@ -33,6 +29,58 @@ export interface SlabEditorWrapOptions {
 	width: number;
 	capabilities: UiRenderCapabilities;
 	focused: boolean;
+	slashCommand?: string;
+	shimmerPhase?: number;
+	paintThinkingBorder?: (thinking: string | undefined | null, text: string) => string;
+}
+
+const SLASH_COMMAND_PATTERN = /^\/([a-zA-Z][a-zA-Z0-9_-]*)/;
+
+export interface SlashCommandMatch {
+	command: string;
+	name: string;
+}
+
+export function detectSlashCommand(text: string, recognized?: ReadonlySet<string>): SlashCommandMatch | undefined {
+	const match = text.match(SLASH_COMMAND_PATTERN);
+	if (!match) return undefined;
+	const name = match[1]!;
+	if (recognized && !recognized.has(name)) return undefined;
+	return { command: match[0], name };
+}
+
+function wrapVisibleRange(line: string, start: number, end: number, wrap: (ch: string, index: number) => string): string {
+	let out = "";
+	let visibleIndex = 0;
+	let rangeIndex = 0;
+	let i = 0;
+	while (i < line.length) {
+		const rest = line.slice(i);
+		const ansi = rest.match(/^\x1b\[[0-9;]*m/);
+		if (ansi) {
+			out += ansi[0];
+			i += ansi[0].length;
+			continue;
+		}
+		const ch = line[i]!;
+		if (visibleIndex >= start && visibleIndex < end) {
+			out += wrap(ch, rangeIndex);
+			rangeIndex++;
+		} else {
+			out += ch;
+		}
+		visibleIndex++;
+		i++;
+	}
+	return out;
+}
+
+function colorizeSlashCommand(line: string, command: string, caps: UiRenderCapabilities, phase: number): string {
+	if (!caps.color || !command) return line;
+	const plain = stripControls(line);
+	const start = plain.indexOf(command);
+	if (start < 0) return line;
+	return wrapVisibleRange(line, start, start + command.length, (ch, idx) => paint(rainbowRole(idx + phase), ch));
 }
 
 function clean(text: string, caps: UiRenderCapabilities): string {
@@ -40,89 +88,185 @@ function clean(text: string, caps: UiRenderCapabilities): string {
 }
 
 function fit(text: string, width: number, caps: UiRenderCapabilities): string {
-	return truncateToWidth(clean(text, caps), Math.max(0, width), caps.unicode ? "…" : "...");
+	const cleaned = clean(text, caps);
+	return caps.unicode
+		? fitLine(cleaned, width)
+		: truncateToWidth(cleaned, Math.max(0, width), "...");
 }
 
-function ansiPadRight(text: string, width: number): string {
-	return `${text}${" ".repeat(Math.max(0, width - visibleWidth(text)))}`;
-}
-
-function normalizeRenderedLine(line: string, width: number, caps: UiRenderCapabilities): string {
-	const text = clean(line, caps);
-	const lineWidth = visibleWidth(text);
-	if (lineWidth === width) return text;
-	if (lineWidth < width) return `${text}${" ".repeat(width - lineWidth)}`;
-	return truncateToWidth(text, width, caps.unicode ? "…" : "...");
+function normalizeContent(line: string, width: number, caps: UiRenderCapabilities): string {
+	return padLine(fit(line, width, caps), width);
 }
 
 function indentAutocompleteLine(line: string, width: number, caps: UiRenderCapabilities): string {
 	const indent = " ".repeat(Math.min(AUTOCOMPLETE_INDENT, Math.max(0, width - 1)));
-	return normalizeRenderedLine(`${indent}${line}`, width, caps);
+	return normalizeContent(`${indent}${line}`, width, caps);
 }
 
 function isHorizontalBorder(line: string): boolean {
 	const plain = stripControls(line).trim();
-	return plain.length > 0
-		&& plain.includes(BORDER.horizontal)
-		&& [...plain].every((char) => "╭╮╰╯".includes(char) || char === BORDER.horizontal || char === "↑" || char === "↓" || char === " " || /[0-9a-z]/i.test(char));
+	if (!plain) return false;
+	// Pi's stock editor border is pure `─`; tolerate corner glyphs so the
+	// pane preview's fake rawLines still register, and accept scroll arrows.
+	return plain.includes(HORIZONTAL)
+		&& [...plain].every((char) =>
+			char === HORIZONTAL
+			|| char === " "
+			|| char === "↑"
+			|| char === "↓"
+			|| "╭╮╰╯".includes(char)
+			|| /[0-9a-z]/i.test(char));
 }
 
-function scrollIndicator(line: string, width: number, caps: UiRenderCapabilities): string | undefined {
+function scrollIndicator(line: string, caps: UiRenderCapabilities): string | undefined {
 	const match = stripControls(line).match(/(?:↑|↓) \d+ more/);
 	if (!match) return undefined;
-	return truncateToWidth(`${BORDER.horizontal.repeat(3)} ${match[0]} `, Math.max(0, width - 2), caps.unicode ? "…" : "...");
+	const ruler = (caps.unicode ? HORIZONTAL : ASCII_HORIZONTAL).repeat(3);
+	return `${ruler} ${match[0]} `;
 }
 
-function color(config: SlabConfig, caps: UiRenderCapabilities, key: "border" | "dim" | "text" | "title", text: string, focused = true): string {
+function ruleChar(caps: UiRenderCapabilities): string {
+	return caps.unicode ? HORIZONTAL : ASCII_HORIZONTAL;
+}
+
+function paintRule(
+	text: string,
+	state: SlabEditorState,
+	caps: UiRenderCapabilities,
+	focused: boolean,
+	paintThinkingBorder: ((thinking: string | undefined | null, text: string) => string) | undefined,
+): string {
 	if (!caps.color) return text;
-	const palette = SLAB_PALETTES[config.theme];
-	if (!focused && key !== "text") return fg(palette.dim, stripControls(text));
-	return fg(palette[key], text);
+	if (!focused) return paint("dim", text);
+	return paintThinkingBorder?.(state.surface.model.thinking, text) ?? paint("red", text);
 }
 
-function dimStatus(status: string, state: SlabEditorState, caps: UiRenderCapabilities, focused: boolean): string {
-	if (focused || !status) return status;
-	return color(state.config, caps, "dim", stripControls(status), focused);
+function buildSegmentRenderContext(
+	state: SlabEditorState,
+	width: number,
+	caps: UiRenderCapabilities,
+): SlabSegmentRenderContext {
+	return {
+		state: state.surface,
+		config: state.config,
+		widthMode: "full",
+		showProvider: false,
+		render: { width, ...caps, ...state.clock },
+	};
 }
 
-function titleLayout(original: string, width: number, innerWidth: number, state: SlabEditorState, caps: UiRenderCapabilities, focused: boolean): { line: string; width: number } {
-	const indicator = scrollIndicator(original, width, caps);
-	if (indicator) return { line: color(state.config, caps, "border", indicator, focused), width: visibleWidth(indicator) };
-	if (innerWidth < 16) return { line: color(state.config, caps, "border", BORDER.horizontal, focused), width: 1 };
-
-	const maxTitleWidth = Math.max(1, Math.min(48, Math.floor(innerWidth * 0.42)));
-	const rawTitle = ` ${state.surface.workspace.name || "workspace"} `;
-	const title = truncateToWidth(rawTitle, maxTitleWidth, caps.unicode ? "…" : "...");
-	const line = `${color(state.config, caps, "border", BORDER.horizontal, focused)}${color(state.config, caps, "title", title, focused)}`;
-	return { line, width: visibleWidth(line) };
+function styleInfoSection(text: string, caps: UiRenderCapabilities, order: number): string {
+	if (!caps.color) return text;
+	return paint(rainbowRole(order), text);
 }
 
-function makeTopBorder(original: string, state: SlabEditorState, width: number, caps: UiRenderCapabilities, focused: boolean): string {
-	const innerWidth = Math.max(0, width - 2);
-	const title = titleLayout(original, width, innerWidth, state, caps, focused);
-	const status = dimStatus(renderSlabLine(state.surface, state.config, Math.max(0, innerWidth - title.width - 3), caps, state.clock), state, caps, focused);
-	const statusWidth = visibleWidth(status);
-	const leftGap = status ? " " : "";
-	const rightGap = status ? " " : "";
-	const rightCap = status ? BORDER.horizontal : "";
-	const fillerWidth = Math.max(0, innerWidth - title.width - visibleWidth(leftGap) - statusWidth - visibleWidth(rightGap) - visibleWidth(rightCap));
-	return `${color(state.config, caps, "border", BORDER.topLeft, focused)}${title.line}${color(state.config, caps, "border", BORDER.horizontal.repeat(fillerWidth), focused)}${leftGap}${status}${rightGap}${color(state.config, caps, "border", rightCap, focused)}${color(state.config, caps, "border", BORDER.topRight, focused)}`;
+function renderGitInfoSegment(
+	state: SlabEditorState,
+	width: number,
+	caps: UiRenderCapabilities,
+): SlabSegmentRenderResult | undefined {
+	const gitSegmentConfig = state.config.segments.find((entry) => entry.id === "git");
+	if (!gitSegmentConfig?.enabled) return undefined;
+	const ctx = buildSegmentRenderContext(state, width, caps);
+	const def = SLAB_SEGMENT_BY_ID.get("git");
+	return def ? renderSegment(ctx, def) : undefined;
 }
 
-function makeBottomBorder(original: string, state: SlabEditorState, width: number, caps: UiRenderCapabilities, focused: boolean): string {
-	const indicator = scrollIndicator(original, width, caps);
-	if (!indicator) return `${color(state.config, caps, "border", BORDER.bottomLeft, focused)}${color(state.config, caps, "border", BORDER.horizontal.repeat(Math.max(0, width - 2)), focused)}${color(state.config, caps, "border", BORDER.bottomRight, focused)}`;
-	const innerWidth = Math.max(0, width - 2);
-	const fillerWidth = Math.max(0, innerWidth - visibleWidth(indicator));
-	return `${color(state.config, caps, "border", BORDER.bottomLeft, focused)}${color(state.config, caps, "border", indicator, focused)}${color(state.config, caps, "border", BORDER.horizontal.repeat(fillerWidth), focused)}${color(state.config, caps, "border", BORDER.bottomRight, focused)}`;
+interface ComposedFragment {
+	text: string;
+	width: number;
 }
 
-function wrapContentLine(line: string, state: SlabEditorState, width: number, caps: UiRenderCapabilities, focused: boolean): string {
-	const innerWidth = Math.max(0, width - 2);
-	const contentWidth = Math.max(1, innerWidth - CONTENT_PADDING_X * 2);
-	const content = normalizeRenderedLine(line, contentWidth, caps);
-	const padded = `${" ".repeat(CONTENT_PADDING_X)}${content}${" ".repeat(CONTENT_PADDING_X)}`;
-	return `${color(state.config, caps, "border", BORDER.vertical, focused)}${ansiPadRight(padded, innerWidth)}${color(state.config, caps, "border", BORDER.vertical, focused)}`;
+function composePathAndGit(
+	state: SlabEditorState,
+	width: number,
+	caps: UiRenderCapabilities,
+	focused: boolean,
+	gitResult: SlabSegmentRenderResult | undefined,
+): ComposedFragment {
+	const surface = state.surface;
+	const maxLabelWidth = Math.max(8, Math.floor(width * 0.55));
+	const path = formatWorkspaceLabel(
+		surface.workspace.path,
+		surface.workspace.name,
+		state.config.display.workspaceLabel,
+		maxLabelWidth,
+		width,
+	);
+	const pathStyled = focused ? styleInfoSection(path, caps, 0) : paintIf(caps.color, "dim", path);
+
+	const parts: string[] = [pathStyled];
+	if (gitResult) {
+		const styled = focused ? styleInfoSection(gitResult.text, caps, 1) : paintIf(caps.color, "dim", gitResult.text);
+		parts.push(styled);
+	}
+
+	const separator = paintIf(caps.color, "dim", " · ");
+	const text = parts.join(separator);
+	return { text, width: visibleWidth(text) };
+}
+
+function composeRightSegments(
+	state: SlabEditorState,
+	width: number,
+	caps: UiRenderCapabilities,
+	focused: boolean,
+	colorOffset: number,
+): ComposedFragment {
+	const raw = renderSlabLine(state.surface, state.config, width, caps, state.clock, {
+		exclude: ["git"],
+		colorOffset,
+	});
+	if (!raw) return { text: "", width: 0 };
+	const text = focused ? raw : paintIf(caps.color, "dim", stripControls(raw));
+	return { text, width: visibleWidth(text) };
+}
+
+// The info line sits *above* the top rule. Edge padding matches the content
+// row (1 char) so the workspace label aligns with what the user types. The
+// middle is plain spaces, which lets the two information halves drift to
+// their respective edges without an arbitrary rule glyph between them.
+function makeInfoLine(state: SlabEditorState, width: number, caps: UiRenderCapabilities, focused: boolean): string {
+	const innerWidth = Math.max(0, width - CONTENT_PADDING_X * 2);
+	const gap = 2; // minimum visual gap between left and right halves
+	const rightBudget = Math.max(0, innerWidth - 1 - gap);
+	const gitResult = renderGitInfoSegment(state, innerWidth, caps);
+	const rightColorOffset = 1 + (gitResult ? 1 : 0);
+	const right = composeRightSegments(state, rightBudget, caps, focused, rightColorOffset);
+	const leftBudget = Math.max(1, innerWidth - (right.width > 0 ? right.width + gap : 0));
+	const left = composePathAndGit(state, leftBudget, caps, focused, gitResult);
+	const pad = " ".repeat(CONTENT_PADDING_X);
+
+	if (right.width === 0) {
+		const trailing = " ".repeat(Math.max(0, innerWidth - left.width));
+		return `${pad}${left.text}${trailing}${pad}`;
+	}
+	const middle = " ".repeat(Math.max(gap, innerWidth - left.width - right.width));
+	return `${pad}${left.text}${middle}${right.text}${pad}`;
+}
+
+function makeRule(
+	rawLine: string,
+	state: SlabEditorState,
+	width: number,
+	caps: UiRenderCapabilities,
+	focused: boolean,
+	paintThinkingBorder: ((thinking: string | undefined | null, text: string) => string) | undefined,
+): string {
+	const rule = ruleChar(caps);
+	const scrollMark = scrollIndicator(rawLine, caps);
+	if (scrollMark) {
+		const fillerWidth = Math.max(0, width - visibleWidth(scrollMark));
+		return paintRule(`${scrollMark}${rule.repeat(fillerWidth)}`, state, caps, focused, paintThinkingBorder);
+	}
+	return paintRule(rule.repeat(Math.max(0, width)), state, caps, focused, paintThinkingBorder);
+}
+
+function wrapContentLine(line: string, width: number, caps: UiRenderCapabilities): string {
+	const padding = " ".repeat(CONTENT_PADDING_X);
+	const innerWidth = Math.max(1, width - CONTENT_PADDING_X * 2);
+	const content = normalizeContent(line, innerWidth, caps);
+	return `${padding}${content}${padding}`;
 }
 
 export function wrapSlabEditorLines(rawLines: string[], options: SlabEditorWrapOptions): string[] {
@@ -140,12 +284,18 @@ export function wrapSlabEditorLines(rawLines: string[], options: SlabEditorWrapO
 	const body = rawLines.slice(1, bottomIndex);
 	const autocomplete = rawLines.slice(bottomIndex + 1);
 	const contentLines = body.length > 0 ? [...body] : [""];
-	while (contentLines.length < state.config.editor.minContentRows) contentLines.push("");
+	const slashCommand = options.slashCommand;
+	const phase = options.shimmerPhase ?? 0;
+	const styledContent = contentLines.map((line, index) => {
+		const tinted = index === 0 && slashCommand ? colorizeSlashCommand(line, slashCommand, caps, phase) : line;
+		return fit(wrapContentLine(tinted, safeWidth, caps), safeWidth, caps);
+	});
 
 	return [
-		fit(makeTopBorder(rawLines[0] ?? "", state, safeWidth, caps, focused), safeWidth, caps),
-		...contentLines.map((line) => fit(wrapContentLine(line, state, safeWidth, caps, focused), safeWidth, caps)),
-		fit(makeBottomBorder(rawLines[bottomIndex] ?? "", state, safeWidth, caps, focused), safeWidth, caps),
+		fit(makeInfoLine(state, safeWidth, caps, focused), safeWidth, caps),
+		fit(makeRule(rawLines[0] ?? "", state, safeWidth, caps, focused, options.paintThinkingBorder), safeWidth, caps),
+		...styledContent,
+		fit(makeRule(rawLines[bottomIndex] ?? "", state, safeWidth, caps, focused, options.paintThinkingBorder), safeWidth, caps),
 		...autocomplete.map((line) => indentAutocompleteLine(line, safeWidth, caps)),
 	];
 }
@@ -164,13 +314,22 @@ function capabilities(): UiRenderCapabilities {
 	};
 }
 
+export interface SlabEditorHooks {
+	recognizedCommands(): ReadonlySet<string>;
+	paintThinkingBorder?(thinking: string | undefined | null, text: string): string;
+	onTextChange?(text: string, match: SlashCommandMatch | undefined): void;
+}
+
 export class SlabEditor extends CustomEditor {
+	private currentSlashMatch: SlashCommandMatch | undefined;
+
 	constructor(
 		tui: TUI,
 		theme: EditorTheme,
 		keybindings: KeybindingsManager,
 		private readonly getState: () => SlabEditorState,
 		private readonly widgetHost: UiWidgetHost,
+		private readonly hooks: SlabEditorHooks,
 	) {
 		super(tui, theme, keybindings);
 	}
@@ -178,15 +337,27 @@ export class SlabEditor extends CustomEditor {
 	handleInput(data: string): void {
 		if (this.widgetHost.handleInput(data)) return;
 		super.handleInput(data);
+		const text = this.getText();
+		this.currentSlashMatch = detectSlashCommand(text, this.hooks.recognizedCommands());
+		this.hooks.onTextChange?.(text, this.currentSlashMatch);
 	}
 
 	render(width: number): string[] {
 		const caps = capabilities();
 		const state = this.getState();
 		const safeWidth = Math.max(1, width);
-		const renderWidth = Math.max(1, safeWidth - 2 - CONTENT_PADDING_X * 2);
+		const renderWidth = Math.max(1, safeWidth - CONTENT_PADDING_X * 2);
 		const rawEditor = super.render(renderWidth);
-		const editorSurface = wrapSlabEditorLines(rawEditor, { state, width: safeWidth, capabilities: caps, focused: this.focused });
+		const match = this.currentSlashMatch;
+		const editorSurface = wrapSlabEditorLines(rawEditor, {
+			state,
+			width: safeWidth,
+			capabilities: caps,
+			focused: this.focused,
+			slashCommand: match?.command,
+			shimmerPhase: state.clock.tick,
+			paintThinkingBorder: this.hooks.paintThinkingBorder,
+		});
 		const above = renderWidgetLines(this.widgetHost, state.snapshot.widgets, "aboveEditor", safeWidth, caps, state.clock);
 		const below = renderWidgetLines(this.widgetHost, state.snapshot.widgets, "belowEditor", safeWidth, caps, state.clock);
 		return [

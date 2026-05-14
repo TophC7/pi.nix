@@ -126,11 +126,12 @@ in
       // {
         # Pi auto-loads AGENTS.md from the agent dir as global context.
         ".pi/agent/AGENTS.md".source = ./SOUL.md;
+        ".pi/agent/themes/terminal.json".source = ./themes/terminal.json;
         ".pi/agent/settings.json".text = builtins.toJSON {
           defaultProvider = cfg.provider;
           defaultModel = cfg.model;
           defaultThinkingLevel = "high";
-          theme = "dark";
+          theme = "terminal";
 
           extensions = cfg.extensionSystem.extensionPaths;
 

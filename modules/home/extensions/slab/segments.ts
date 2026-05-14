@@ -1,5 +1,6 @@
 import { stripControls } from "@pi/lib/ui";
 import { formatCost, formatPercent, formatTokens } from "./format.ts";
+import { GIT_CONFLICT_MARK, GIT_DIRTY_MARK, SLAB_ICONS } from "./palette.ts";
 import type { SlabSegmentData, SlabSegmentDefinition, SlabSegmentRenderContext, SlabSegmentRenderResult } from "./types.ts";
 
 function displayForMode(data: SlabSegmentData, widthMode: SlabSegmentRenderContext["widthMode"]): string {
@@ -10,7 +11,7 @@ function displayForMode(data: SlabSegmentData, widthMode: SlabSegmentRenderConte
 }
 
 function renderCollectedSegment(ctx: SlabSegmentRenderContext, segment: SlabSegmentDefinition, data: SlabSegmentData): SlabSegmentRenderResult {
-	const icon = ctx.icons[segment.id];
+	const icon = ctx.render.unicode ? SLAB_ICONS[segment.id] : "";
 	const value = displayForMode(data, ctx.widthMode);
 	const prefix = icon ? `${icon} ` : "";
 	return {
@@ -21,18 +22,14 @@ function renderCollectedSegment(ctx: SlabSegmentRenderContext, segment: SlabSegm
 
 function gitBranchLabel(ctx: SlabSegmentRenderContext): string {
 	const git = ctx.state.git;
-	if (git.branch) {
-		if (ctx.config.git.shaMode === "always" && git.sha) return `${git.branch} ${git.sha}`;
-		return git.branch;
-	}
-	if (git.detached && git.sha && ctx.config.git.shaMode !== "off") return git.sha;
+	if (git.branch) return git.branch;
 	return "HEAD";
 }
 
 function gitStatusMark(ctx: SlabSegmentRenderContext): string {
 	const status = ctx.state.git.status;
-	if (status === "conflict") return ctx.config.icons === "nerd" ? "⚠" : "!";
-	if (status === "dirty") return ctx.config.icons === "nerd" ? "●" : "*";
+	if (status === "conflict") return GIT_CONFLICT_MARK;
+	if (status === "dirty") return GIT_DIRTY_MARK;
 	return "";
 }
 

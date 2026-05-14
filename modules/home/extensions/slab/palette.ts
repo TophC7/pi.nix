@@ -1,103 +1,70 @@
-import type { SlabIconMode, SlabIconSet, SlabPalette, SlabRgb, SlabThemeName } from "./types.ts";
+import type { SlabSegmentId } from "./types.ts";
 
-export const SLAB_PALETTES: Record<SlabThemeName, SlabPalette> = {
-	light: {
-		name: "light",
-		text: { r: 15, g: 23, b: 42 },
-		dim: { r: 148, g: 163, b: 184 },
-		warn: { r: 217, g: 119, b: 6 },
-		error: { r: 225, g: 29, b: 72 },
-		separator: { r: 148, g: 163, b: 184 },
-		border: { r: 72, g: 94, b: 84 },
-		title: { r: 47, g: 104, b: 74 },
-		segments: {
-			git: { fg: { r: 35, g: 118, b: 85 } },
-			model: { fg: { r: 15, g: 23, b: 42 } },
-			context: { fg: { r: 5, g: 150, b: 105 } },
-			tokens: { fg: { r: 100, g: 116, b: 139 } },
-			cost: { fg: { r: 154, g: 104, b: 20 } },
-			status: { fg: { r: 79, g: 70, b: 229 } },
-		},
-	},
-	dark: {
-		name: "dark",
-		text: { r: 229, g: 231, b: 235 },
-		dim: { r: 107, g: 114, b: 128 },
-		warn: { r: 251, g: 191, b: 36 },
-		error: { r: 251, g: 113, b: 133 },
-		separator: { r: 75, g: 85, b: 99 },
-		border: { r: 104, g: 132, b: 119 },
-		title: { r: 104, g: 152, b: 129 },
-		segments: {
-			git: { fg: { r: 94, g: 188, b: 145 } },
-			model: { fg: { r: 229, g: 231, b: 235 } },
-			context: { fg: { r: 52, g: 211, b: 153 } },
-			tokens: { fg: { r: 156, g: 163, b: 175 } },
-			cost: { fg: { r: 251, g: 191, b: 36 } },
-			status: { fg: { r: 129, g: 140, b: 248 } },
-		},
-	},
-	"catppuccin-latte": {
-		name: "catppuccin-latte",
-		text: { r: 76, g: 79, b: 105 },
-		dim: { r: 156, g: 160, b: 176 },
-		warn: { r: 223, g: 142, b: 29 },
-		error: { r: 210, g: 15, b: 57 },
-		separator: { r: 156, g: 160, b: 176 },
-		border: { r: 204, g: 208, b: 218 },
-		title: { r: 30, g: 102, b: 245 },
-		segments: {
-			git: { fg: { r: 64, g: 160, b: 43 } },
-			model: { fg: { r: 114, g: 135, b: 253 } },
-			context: { fg: { r: 23, g: 146, b: 153 } },
-			tokens: { fg: { r: 140, g: 143, b: 161 } },
-			cost: { fg: { r: 254, g: 100, b: 11 } },
-			status: { fg: { r: 136, g: 57, b: 239 } },
-		},
-	},
-	"catppuccin-mocha": {
-		name: "catppuccin-mocha",
-		text: { r: 205, g: 214, b: 244 },
-		dim: { r: 108, g: 112, b: 134 },
-		warn: { r: 249, g: 226, b: 175 },
-		error: { r: 243, g: 139, b: 168 },
-		separator: { r: 108, g: 112, b: 134 },
-		border: { r: 49, g: 50, b: 68 },
-		title: { r: 137, g: 180, b: 250 },
-		segments: {
-			git: { fg: { r: 166, g: 227, b: 161 } },
-			model: { fg: { r: 180, g: 190, b: 254 } },
-			context: { fg: { r: 148, g: 226, b: 213 } },
-			tokens: { fg: { r: 127, g: 132, b: 156 } },
-			cost: { fg: { r: 250, g: 179, b: 135 } },
-			status: { fg: { r: 203, g: 166, b: 247 } },
-		},
-	},
+const RESET_FG = "\x1b[39m";
+const RESET_INTENSITY = "\x1b[22m";
+
+export type SlabColorRole = "default" | "dim" | "bold" | "red" | "green" | "yellow" | "blue" | "magenta" | "cyan";
+
+const CODES: Record<SlabColorRole, string> = {
+	default: "\x1b[39m",
+	dim: "\x1b[2m",
+	bold: "\x1b[1m",
+	red: "\x1b[31m",
+	green: "\x1b[32m",
+	yellow: "\x1b[33m",
+	blue: "\x1b[34m",
+	magenta: "\x1b[35m",
+	cyan: "\x1b[36m",
 };
 
-export const SLAB_ICONS: Record<SlabIconMode, SlabIconSet> = {
-	nerd: {
-		git: "",
-		model: "󰚩",
-		context: "󰔟",
-		tokens: "󰄨",
-		cost: "󰈸",
-		status: "󰐊",
-	},
-	plain: {
-		git: "git",
-		model: "ai",
-		context: "ctx",
-		tokens: "tok",
-		cost: "$",
-		status: "st",
-	},
+const RESETS: Record<SlabColorRole, string> = {
+	default: RESET_FG,
+	dim: RESET_INTENSITY,
+	bold: RESET_INTENSITY,
+	red: RESET_FG,
+	green: RESET_FG,
+	yellow: RESET_FG,
+	blue: RESET_FG,
+	magenta: RESET_FG,
+	cyan: RESET_FG,
 };
 
-function rgbToFg(color: SlabRgb): string {
-	return `\x1b[38;2;${color.r};${color.g};${color.b}m`;
+export function paint(role: SlabColorRole, text: string): string {
+	return `${CODES[role]}${text}${RESETS[role]}`;
 }
 
-export function fg(color: SlabRgb, text: string): string {
-	return `${rgbToFg(color)}${text}\x1b[39m`;
+export function paintIf(color: boolean, role: SlabColorRole, text: string): string {
+	return color ? paint(role, text) : text;
 }
+
+export const SLAB_RAINBOW_ROLES: readonly SlabColorRole[] = [
+	"red",
+	"yellow",
+	"green",
+	"cyan",
+	"blue",
+	"magenta",
+];
+
+export function rainbowRole(index: number): SlabColorRole {
+	const len = SLAB_RAINBOW_ROLES.length;
+	const idx = ((index % len) + len) % len;
+	return SLAB_RAINBOW_ROLES[idx]!;
+}
+
+// Nerd Font glyphs are the only icon set slab ships. Terminals that can't
+// render the private-use codepoints fall back via the empty-icon escape in
+// the renderer when `caps.unicode` is false.
+export const SLAB_ICONS: Record<SlabSegmentId, string> = {
+	git: "",
+	model: "󰚩",
+	context: "󰔟",
+	tokens: "󰄨",
+	cost: "󰈸",
+	status: "󰐊",
+};
+
+// Conflict/dirty marks for the git segment. Always nerd-style — slab requires
+// a Nerd Font.
+export const GIT_CONFLICT_MARK = "⚠";
+export const GIT_DIRTY_MARK = "●";

@@ -6,12 +6,9 @@ import type {
 	SlabConfig,
 	SlabContextDisplayMode,
 	SlabContextUnknownMode,
-	SlabGitShaMode,
-	SlabIconMode,
 	SlabModelThinkingMode,
 	SlabSegmentConfig,
 	SlabSegmentId,
-	SlabThemeName,
 	SlabTokensCacheMode,
 	SlabTokensDisplayMode,
 	SlabWorkspaceLabelMode,
@@ -30,11 +27,8 @@ export const DEFAULT_SLAB_SEGMENTS: SlabSegmentConfig[] = [
 
 export const SLAB_SEGMENT_IDS = new Set<SlabSegmentId>(DEFAULT_SLAB_SEGMENTS.map((segment) => segment.id));
 
-const THEMES = new Set<SlabThemeName>(["light", "dark", "catppuccin-latte", "catppuccin-mocha"]);
-const ICON_MODES = new Set<SlabIconMode>(["nerd", "plain"]);
 const PROVIDER_MODES = new Set<SlabConfig["display"]["showProvider"]>(["auto", "always", "never"]);
 const WORKSPACE_LABEL_MODES = new Set<SlabWorkspaceLabelMode>(["name", "smart", "path"]);
-const GIT_SHA_MODES = new Set<SlabGitShaMode>(["off", "detached", "always"]);
 const CONTEXT_DISPLAY_MODES = new Set<SlabContextDisplayMode>(["percent+tokens", "percent", "tokens"]);
 const CONTEXT_UNKNOWN_MODES = new Set<SlabContextUnknownMode>(["show", "hide"]);
 const TOKENS_DISPLAY_MODES = new Set<SlabTokensDisplayMode>(["input-output", "total"]);
@@ -49,15 +43,10 @@ export function defaultSlabConfig(): SlabConfig {
 	return {
 		version: SLAB_CONFIG_VERSION,
 		enabled: true,
-		theme: "light",
-		icons: "plain",
-		editor: {
-			minContentRows: 3,
-		},
 		display: {
 			adaptive: true,
 			showProvider: "auto",
-			workspaceLabel: "name",
+			workspaceLabel: "path",
 		},
 		segments: DEFAULT_SLAB_SEGMENTS.map((segment) => ({ ...segment })),
 		model: {
@@ -67,7 +56,6 @@ export function defaultSlabConfig(): SlabConfig {
 		git: {
 			showDirty: true,
 			showAheadBehind: true,
-			shaMode: "off",
 			timeoutMs: 1000,
 			refreshDebounceMs: 1500,
 		},
@@ -88,7 +76,6 @@ export function defaultSlabConfig(): SlabConfig {
 export function cloneSlabConfig(config: SlabConfig): SlabConfig {
 	return {
 		...config,
-		editor: { ...config.editor },
 		display: { ...config.display },
 		segments: config.segments.map((segment) => ({ ...segment })),
 		model: { customNames: { ...config.model.customNames }, showThinking: config.model.showThinking },
@@ -121,11 +108,6 @@ function parseBool(value: unknown, fallback: boolean): boolean {
 
 function parseStringEnum<T extends string>(value: unknown, allowed: Set<T>, fallback: T): T {
 	return typeof value === "string" && allowed.has(value as T) ? (value as T) : fallback;
-}
-
-function parseIntInRange(value: unknown, fallback: number, min: number, max: number): number {
-	if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
-	return Math.max(min, Math.min(max, Math.floor(value)));
 }
 
 function parseIntAtLeast(value: unknown, fallback: number, min: number): number {
@@ -163,7 +145,6 @@ function normalizeSegments(value: unknown): SlabSegmentConfig[] {
 export function normalizeSlabConfig(raw: unknown): SlabConfig {
 	const defaults = defaultSlabConfig();
 	const record = object(raw);
-	const editor = object(record.editor);
 	const display = object(record.display);
 	const model = object(record.model);
 	const git = object(record.git);
@@ -175,11 +156,6 @@ export function normalizeSlabConfig(raw: unknown): SlabConfig {
 	return {
 		version: SLAB_CONFIG_VERSION,
 		enabled: parseBool(record.enabled, defaults.enabled),
-		theme: parseStringEnum(record.theme, THEMES, defaults.theme),
-		icons: parseStringEnum(record.icons, ICON_MODES, defaults.icons),
-		editor: {
-			minContentRows: parseIntInRange(editor.minContentRows, defaults.editor.minContentRows, 2, 4),
-		},
 		display: {
 			adaptive: parseBool(display.adaptive, defaults.display.adaptive),
 			showProvider: parseStringEnum(display.showProvider, PROVIDER_MODES, defaults.display.showProvider),
@@ -193,7 +169,6 @@ export function normalizeSlabConfig(raw: unknown): SlabConfig {
 		git: {
 			showDirty: parseBool(git.showDirty, defaults.git.showDirty),
 			showAheadBehind: parseBool(git.showAheadBehind, defaults.git.showAheadBehind),
-			shaMode: parseStringEnum(git.shaMode, GIT_SHA_MODES, defaults.git.shaMode),
 			timeoutMs: parseIntAtLeast(git.timeoutMs, defaults.git.timeoutMs, 100),
 			refreshDebounceMs: parseIntAtLeast(git.refreshDebounceMs, defaults.git.refreshDebounceMs, 0),
 		},

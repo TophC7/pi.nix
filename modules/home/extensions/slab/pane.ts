@@ -20,9 +20,7 @@ import { wrapSlabEditorLines, type SlabEditorState } from "./editor.ts";
 import { parseGitStatus } from "./git.ts";
 import type { SlabConfig, SlabSegmentId } from "./types.ts";
 
-export type SlabPaneResult = { action: "save"; config: SlabConfig } | { action: "cancel" };
-
-type CategoryId = "general" | "display" | "editor" | "segments" | "model" | "git" | "context" | "cost" | "tokens";
+type CategoryId = "surface" | "segments" | "model" | "metrics" | "git";
 
 type SettingRow = {
 	label: string;
@@ -33,24 +31,15 @@ type SettingRow = {
 };
 
 const CATEGORIES: { id: CategoryId; label: string }[] = [
-	{ id: "general", label: "General" },
-	{ id: "display", label: "Display" },
-	{ id: "editor", label: "Editor" },
+	{ id: "surface", label: "Surface" },
 	{ id: "segments", label: "Segments" },
 	{ id: "model", label: "Model" },
+	{ id: "metrics", label: "Metrics" },
 	{ id: "git", label: "Git" },
-	{ id: "context", label: "Context" },
-	{ id: "cost", label: "Cost" },
-	{ id: "tokens", label: "Tokens" },
 ];
 
 function nextIn<T extends string>(current: T, values: readonly T[]): T {
 	const index = values.indexOf(current);
-	return values[(index + 1) % values.length] ?? values[0]!;
-}
-
-function nextNumber<T extends number>(current: number, values: readonly T[]): T {
-	const index = values.indexOf(current as T);
 	return values[(index + 1) % values.length] ?? values[0]!;
 }
 
@@ -68,53 +57,35 @@ function row(label: string, value: string, hint: string, mutate?: () => void, se
 
 export function slabPaneRows(config: SlabConfig, category: CategoryId, replace: (config: SlabConfig) => void): SettingRow[] {
 	switch (category) {
-		case "general":
+		case "surface":
 			return [
-				row("Enabled", onOff(config.enabled), "Disable restores stock Pi input.", () => { const next = cloneSlabConfig(config); next.enabled = !next.enabled; replace(next); }),
-				row("Theme", config.theme, "Cycle color palette.", () => { const next = cloneSlabConfig(config); next.theme = nextIn(next.theme, ["light", "dark", "catppuccin-latte", "catppuccin-mocha"] as const); replace(next); }),
-				row("Icons", config.icons, "Plain works without Nerd Font.", () => { const next = cloneSlabConfig(config); next.icons = nextIn(next.icons, ["plain", "nerd"] as const); replace(next); }),
-			];
-		case "display":
-			return [
-				row("Adaptive", onOff(config.display.adaptive), "Drop later segments first at narrow widths.", () => { const next = cloneSlabConfig(config); next.display.adaptive = !next.display.adaptive; replace(next); }),
-				row("Provider", config.display.showProvider, "Show model provider name.", () => { const next = cloneSlabConfig(config); next.display.showProvider = nextIn(next.display.showProvider, ["auto", "always", "never"] as const); replace(next); }),
-				row("Workspace", config.display.workspaceLabel, "Workspace title mode.", () => { const next = cloneSlabConfig(config); next.display.workspaceLabel = nextIn(next.display.workspaceLabel, ["name", "smart", "path"] as const); replace(next); }),
-			];
-		case "editor":
-			return [
-				row("Min rows", `${config.editor.minContentRows}`, "Resting editor height.", () => { const next = cloneSlabConfig(config); next.editor.minContentRows = nextNumber(next.editor.minContentRows, [2, 3, 4] as const); replace(next); }),
+				row("Enabled", onOff(config.enabled), "Turn slab on/off. Off restores stock Pi input.", () => { const next = cloneSlabConfig(config); next.enabled = !next.enabled; replace(next); }),
+				row("Workspace", config.display.workspaceLabel, "How the left label is shortened: repo name, smart path, or full path.", () => { const next = cloneSlabConfig(config); next.display.workspaceLabel = nextIn(next.display.workspaceLabel, ["name", "smart", "path"] as const); replace(next); }),
+				row("Provider", config.display.showProvider, "Show provider only when multiple providers exist, always, or never.", () => { const next = cloneSlabConfig(config); next.display.showProvider = nextIn(next.display.showProvider, ["auto", "always", "never"] as const); replace(next); }),
+				row("Fit narrow terminals", onOff(config.display.adaptive), "At small widths, drop lower-priority right-side segments first.", () => { const next = cloneSlabConfig(config); next.display.adaptive = !next.display.adaptive; replace(next); }),
 			];
 		case "segments":
-			return [
-				...config.segments.map((segment) => row(segmentLabel(segment.id), onOff(segment.enabled), "Enter toggles. U/D reorders selected segment.", () => replace(toggleSlabSegment(config, segment.id)), segment.id)),
-				row("Order", config.segments.map((segment) => segment.id).join(" → "), "Segment order/enabled state is saved."),
-			];
+			return config.segments.map((segment, index) => row(
+				`${index + 1}. ${segmentLabel(segment.id)}`,
+				onOff(segment.enabled),
+				"Enter toggles visibility. U/D moves this segment; color follows order.",
+				() => replace(toggleSlabSegment(config, segment.id)),
+				segment.id,
+			));
 		case "model":
 			return [
-				row("Thinking", config.model.showThinking, "Show thinking level.", () => { const next = cloneSlabConfig(config); next.model.showThinking = nextIn(next.model.showThinking, ["auto", "always", "never"] as const); replace(next); }),
-				row("Custom names", `${Object.keys(config.model.customNames).length}`, "Custom model aliases persist in config JSON."),
+				row("Thinking label", config.model.showThinking, "Show thinking level next to model: auto hides off/minimal noise.", () => { const next = cloneSlabConfig(config); next.model.showThinking = nextIn(next.model.showThinking, ["auto", "always", "never"] as const); replace(next); }),
+			];
+		case "metrics":
+			return [
+				row("Context", config.context.display, "Show context as percent, tokens, or both.", () => { const next = cloneSlabConfig(config); next.context.display = nextIn(next.context.display, ["percent+tokens", "percent", "tokens"] as const); replace(next); }),
+				row("Cost", config.cost.hideZero ? "hide zero" : "always", "Hide cost until it is non-zero, or always reserve the segment.", () => { const next = cloneSlabConfig(config); next.cost.hideZero = !next.cost.hideZero; replace(next); }),
+				row("Tokens", config.tokens.display, "Show input/output arrows or one total token count.", () => { const next = cloneSlabConfig(config); next.tokens.display = nextIn(next.tokens.display, ["input-output", "total"] as const); replace(next); }),
 			];
 		case "git":
 			return [
-				row("Dirty mark", onOff(config.git.showDirty), "Show dirty/conflict mark.", () => { const next = cloneSlabConfig(config); next.git.showDirty = !next.git.showDirty; replace(next); }),
-				row("Ahead/behind", onOff(config.git.showAheadBehind), "Show upstream divergence.", () => { const next = cloneSlabConfig(config); next.git.showAheadBehind = !next.git.showAheadBehind; replace(next); }),
-				row("SHA", config.git.shaMode, "Detached/always/off short SHA.", () => { const next = cloneSlabConfig(config); next.git.shaMode = nextIn(next.git.shaMode, ["off", "detached", "always"] as const); replace(next); }),
-				row("Timeout", `${config.git.timeoutMs}ms`, "Git command timeout."),
-				row("Debounce", `${config.git.refreshDebounceMs}ms`, "Event refresh debounce."),
-			];
-		case "context":
-			return [
-				row("Display", config.context.display, "Percent, tokens, or both.", () => { const next = cloneSlabConfig(config); next.context.display = nextIn(next.context.display, ["percent+tokens", "percent", "tokens"] as const); replace(next); }),
-				row("Unknown", config.context.unknown, "Show/hide unknown context.", () => { const next = cloneSlabConfig(config); next.context.unknown = nextIn(next.context.unknown, ["show", "hide"] as const); replace(next); }),
-			];
-		case "cost":
-			return [
-				row("Hide zero", onOff(config.cost.hideZero), "Hide cost until non-zero.", () => { const next = cloneSlabConfig(config); next.cost.hideZero = !next.cost.hideZero; replace(next); }),
-			];
-		case "tokens":
-			return [
-				row("Display", config.tokens.display, "Input/output or total.", () => { const next = cloneSlabConfig(config); next.tokens.display = nextIn(next.tokens.display, ["input-output", "total"] as const); replace(next); }),
-				row("Cache", config.tokens.cache, "Auto/show/hide cache tokens.", () => { const next = cloneSlabConfig(config); next.tokens.cache = nextIn(next.tokens.cache, ["auto", "show", "hide"] as const); replace(next); }),
+				row("Dirty mark", onOff(config.git.showDirty), "Show ● when the working tree has changes; conflicts always show ⚠.", () => { const next = cloneSlabConfig(config); next.git.showDirty = !next.git.showDirty; replace(next); }),
+				row("Ahead/behind", onOff(config.git.showAheadBehind), "Show ↑/↓ counts against upstream.", () => { const next = cloneSlabConfig(config); next.git.showAheadBehind = !next.git.showAheadBehind; replace(next); }),
 			];
 	}
 }
@@ -142,24 +113,16 @@ function sampleState(config: SlabConfig): SlabEditorState {
 }
 
 export function renderSlabConfigPreview(config: SlabConfig, width: number): string[] {
-	if (!config.enabled) return ["stock Pi input (slab disabled)", ...renderFooterBridgeLines(["typed footer widget"], ["legacy status"], width, { color: false, unicode: true })];
+	if (!config.enabled) return ["stock Pi input (slab disabled)", ...renderFooterBridgeLines(["typed footer widget"], ["legacy status"], width, { color: true, unicode: true })];
 	return [
 		...wrapSlabEditorLines(["╭────╮", "Ask Pi to refactor this module", "╰────╯", "autocomplete preview"], {
 			state: sampleState(config),
 			width,
-			capabilities: { color: false, unicode: true },
+			capabilities: { color: true, unicode: true },
 			focused: true,
 		}),
-		...renderFooterBridgeLines(["typed footer widget"], ["legacy status"], width, { color: false, unicode: true }),
+		...renderFooterBridgeLines(["typed footer widget"], ["legacy status"], width, { color: true, unicode: true }),
 	];
-}
-
-function sameConfig(left: SlabConfig, right: SlabConfig): boolean {
-	return JSON.stringify(left) === JSON.stringify(right);
-}
-
-function paint(theme: Theme, tone: "accent" | "muted" | "dim" | "success" | "warning", text: string): string {
-	return theme.fg(tone, text);
 }
 
 function padTo(text: string, width: number): string {
@@ -175,22 +138,24 @@ function fitLine(text: string, width: number): string {
 const FOOTER_KEYS = [
 	{ key: "←/→", label: "category" },
 	{ key: "↑/↓", label: "row" },
-	{ key: "Enter", label: "cycle" },
+	{ key: "Enter", label: "apply" },
 	{ key: "U/D", label: "reorder" },
-	{ key: "S", label: "save" },
 	{ key: "R", label: "reset" },
-	{ key: "Esc", label: "cancel" },
+	{ key: "Esc", label: "close" },
 ] as const;
 
 export class SlabConfigPane implements DialogContent {
-	private readonly initial: SlabConfig;
 	private draft: SlabConfig;
 	private categoryIndex = 0;
 	private rowIndex = 0;
-	private status = "";
+	private status = "live";
 
-	constructor(initial: SlabConfig, private readonly theme: Theme, private readonly done: (result: SlabPaneResult) => void) {
-		this.initial = cloneSlabConfig(initial);
+	constructor(
+		initial: SlabConfig,
+		private readonly theme: Theme,
+		private readonly apply: (config: SlabConfig) => void,
+		private readonly close: () => void,
+	) {
 		this.draft = cloneSlabConfig(initial);
 	}
 
@@ -198,16 +163,11 @@ export class SlabConfigPane implements DialogContent {
 
 	handleInput(data: string): void {
 		if (matchesKey(data, "escape")) {
-			this.done({ action: "cancel" });
-			return;
-		}
-		if (data === "s" || data === "S") {
-			this.done({ action: "save", config: cloneSlabConfig(this.draft) });
+			this.close();
 			return;
 		}
 		if (data === "r" || data === "R") {
-			this.draft = defaultSlabConfig();
-			this.status = "reset to defaults";
+			this.replace(defaultSlabConfig(), "reset to defaults");
 			return;
 		}
 		if (matchesKey(data, "left")) this.moveCategory(-1);
@@ -223,8 +183,7 @@ export class SlabConfigPane implements DialogContent {
 		const safeWidth = Math.max(40, width);
 		const rows = this.rows();
 		const category = CATEGORIES[this.categoryIndex]!;
-		const dirty = sameConfig(this.initial, this.draft);
-		const statusText = dirty ? "saved" : `dirty${this.status ? ` · ${this.status}` : ""}`;
+		const statusText = `auto-applied${this.status ? ` · ${this.status}` : ""}`;
 
 		const header = renderDialogHeader({
 			title: `Slab config  ·  ${statusText}`,
@@ -238,11 +197,11 @@ export class SlabConfigPane implements DialogContent {
 		});
 
 		const lines: string[] = [header, renderDialogDivider({ theme: this.theme, width: safeWidth })];
+		lines.push(...this.renderPreviewSection(safeWidth));
+		lines.push(renderDialogDivider({ theme: this.theme, width: safeWidth }));
 		lines.push(...this.renderCategoryTabs(safeWidth));
 		lines.push(renderDialogDivider({ theme: this.theme, width: safeWidth }));
 		lines.push(...this.renderSettingRows(rows, category.label, safeWidth));
-		lines.push(renderDialogDivider({ theme: this.theme, width: safeWidth }));
-		lines.push(...this.renderPreviewSection(safeWidth));
 		lines.push(renderDialogDivider({ theme: this.theme, width: safeWidth }));
 		lines.push(footer);
 		return lines;
@@ -250,52 +209,48 @@ export class SlabConfigPane implements DialogContent {
 
 	private renderCategoryTabs(width: number): string[] {
 		const parts = CATEGORIES.map((item, index) => index === this.categoryIndex
-			? this.theme.fg("accent", this.theme.bold(` ${item.label} ▸`))
-			: this.theme.fg("dim", `  ${item.label}  `));
+			? this.theme.fg("accent", this.theme.bold(` ${item.label} `))
+			: this.theme.fg("dim", ` ${item.label} `));
 		const joined = parts.join(this.theme.fg("dim", "│"));
-		return ["", fitLine(`  ${joined}`, width), ""];
+		return [fitLine(`  ${joined}`, width)];
 	}
 
 	private renderSettingRows(rows: readonly SettingRow[], categoryLabel: string, width: number): string[] {
-		const lines: string[] = ["", fitLine(`  ${this.theme.fg("muted", this.theme.bold(categoryLabel.toUpperCase()))}`, width)];
+		const lines: string[] = [fitLine(`  ${this.theme.fg("muted", this.theme.bold(categoryLabel.toUpperCase()))}`, width)];
 		if (rows.length === 0) {
-			lines.push(fitLine(`  ${this.theme.fg("dim", "No settings.")}`, width));
-		} else {
-			const labelWidth = 22;
-			const valueWidth = 22;
-			const hintWidth = Math.max(8, width - labelWidth - valueWidth - 8);
-			rows.forEach((row, index) => {
-				const selected = index === this.rowIndex;
-				const cursor = selected ? this.theme.fg("accent", this.theme.bold("›")) : " ";
-				const label = padTo(row.label, labelWidth);
-				const value = padTo(row.value, valueWidth);
-				const hint = padTo(row.hint, hintWidth);
-				const styledLabel = selected ? this.theme.bold(label) : label;
-				const styledValue = selected ? this.theme.fg("accent", value) : this.theme.fg("muted", value);
-				const styledHint = this.theme.fg("dim", hint);
-				lines.push(fitLine(` ${cursor} ${styledLabel}  ${styledValue}  ${styledHint}`, width));
-			});
+			return [...lines, fitLine(`  ${this.theme.fg("dim", "No settings.")}`, width)];
 		}
-		lines.push("");
+		const labelWidth = Math.max(16, Math.min(28, Math.floor(width * 0.32)));
+		const valueWidth = Math.max(10, Math.min(24, Math.floor(width * 0.24)));
+		rows.forEach((row, index) => {
+			const selected = index === this.rowIndex;
+			const cursor = selected ? this.theme.fg("accent", this.theme.bold("›")) : " ";
+			const label = padTo(row.label, labelWidth);
+			const value = padTo(row.value, valueWidth);
+			const styledLabel = selected ? this.theme.bold(label) : label;
+			const styledValue = selected ? this.theme.fg("accent", value) : this.theme.fg("muted", value);
+			lines.push(fitLine(` ${cursor} ${styledLabel}  ${styledValue}`, width));
+			if (selected) lines.push(fitLine(`   ${this.theme.fg("dim", row.hint)}`, width));
+		});
 		return lines;
 	}
 
 	private renderPreviewSection(width: number): string[] {
 		const previewWidth = Math.max(32, width - 4);
 		return [
-			"",
 			fitLine(`  ${this.theme.fg("muted", this.theme.bold("PREVIEW"))}`, width),
-			"",
 			...renderSlabConfigPreview(this.draft, previewWidth).map((line) => fitLine(`  ${line}`, width)),
-			"",
 		];
 	}
 
 	private rows(): SettingRow[] {
-		return slabPaneRows(this.draft, CATEGORIES[this.categoryIndex]!.id, (next) => {
-			this.draft = next;
-			this.status = "changed";
-		});
+		return slabPaneRows(this.draft, CATEGORIES[this.categoryIndex]!.id, (next) => this.replace(next, "changed"));
+	}
+
+	private replace(next: SlabConfig, status: string): void {
+		this.draft = cloneSlabConfig(next);
+		this.status = status;
+		this.apply(cloneSlabConfig(this.draft));
 	}
 
 	private moveCategory(direction: -1 | 1): void {
@@ -317,7 +272,6 @@ export class SlabConfigPane implements DialogContent {
 	private moveSelectedSegment(direction: -1 | 1): void {
 		const item = this.rows()[this.rowIndex];
 		if (!item?.segmentId) return;
-		this.draft = moveSlabSegment(this.draft, item.segmentId, direction);
-		this.status = "segment moved";
+		this.replace(moveSlabSegment(this.draft, item.segmentId, direction), "segment moved");
 	}
 }

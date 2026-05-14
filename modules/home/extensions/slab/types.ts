@@ -1,11 +1,8 @@
 import type { UiRenderCapabilities, UiRenderClock, UiStatusEntry } from "@pi/lib/ui";
 
 export type SlabSegmentId = "git" | "model" | "context" | "tokens" | "cost" | "status";
-export type SlabThemeName = "light" | "dark" | "catppuccin-latte" | "catppuccin-mocha";
-export type SlabIconMode = "nerd" | "plain";
 export type SlabWidthMode = "full" | "compact" | "minimal";
 export type SlabGitStatus = "clean" | "dirty" | "conflict" | "unknown";
-export type SlabGitShaMode = "off" | "detached" | "always";
 export type SlabContextDisplayMode = "percent+tokens" | "percent" | "tokens";
 export type SlabContextUnknownMode = "show" | "hide";
 export type SlabTokensDisplayMode = "input-output" | "total";
@@ -21,11 +18,6 @@ export interface SlabSegmentConfig {
 export interface SlabConfig {
 	version: 1;
 	enabled: boolean;
-	theme: SlabThemeName;
-	icons: SlabIconMode;
-	editor: {
-		minContentRows: number;
-	};
 	display: {
 		adaptive: boolean;
 		showProvider: "auto" | "always" | "never";
@@ -39,7 +31,6 @@ export interface SlabConfig {
 	git: {
 		showDirty: boolean;
 		showAheadBehind: boolean;
-		shaMode: SlabGitShaMode;
 		timeoutMs: number;
 		refreshDebounceMs: number;
 	};
@@ -106,30 +97,6 @@ export interface SlabRuntimeState {
 	version: number;
 }
 
-export interface SlabRgb {
-	r: number;
-	g: number;
-	b: number;
-}
-
-export interface SlabSegmentPalette {
-	fg: SlabRgb;
-}
-
-export interface SlabPalette {
-	name: SlabThemeName;
-	text: SlabRgb;
-	dim: SlabRgb;
-	warn: SlabRgb;
-	error: SlabRgb;
-	separator: SlabRgb;
-	border: SlabRgb;
-	title: SlabRgb;
-	segments: Record<SlabSegmentId, SlabSegmentPalette>;
-}
-
-export type SlabIconSet = Record<SlabSegmentId, string>;
-
 export interface SlabSegmentData {
 	primary: string;
 	secondary?: string;
@@ -140,7 +107,6 @@ export interface SlabSegmentRenderContext {
 	state: SlabRuntimeState;
 	config: SlabConfig;
 	widthMode: SlabWidthMode;
-	icons: SlabIconSet;
 	showProvider: boolean;
 	render: UiRenderCapabilities & UiRenderClock & { width: number };
 }
