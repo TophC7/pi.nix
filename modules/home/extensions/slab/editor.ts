@@ -3,12 +3,10 @@ import {
 	type KeybindingsManager,
 } from "@mariozechner/pi-coding-agent";
 import { truncateToWidth, visibleWidth, type EditorTheme, type TUI } from "@mariozechner/pi-tui";
-import type { UiRenderCapabilities, UiRenderClock, UiSnapshot, UiWidgetEntry } from "@pi/lib/ui";
-import { stripControls } from "./format.ts";
+import { stripControls, UiWidgetHost, type UiRenderCapabilities, type UiRenderClock, type UiSnapshot, type UiWidgetEntry } from "@pi/lib/ui";
 import { fg, SLAB_PALETTES } from "./palette.ts";
 import { renderSlabLine } from "./renderer.ts";
 import type { SlabConfig, SlabRuntimeState } from "./types.ts";
-import { SlabWidgetHost } from "./widget-host.ts";
 
 const CONTENT_PADDING_X = 1;
 const AUTOCOMPLETE_INDENT = 1 + CONTENT_PADDING_X;
@@ -152,7 +150,7 @@ export function wrapSlabEditorLines(rawLines: string[], options: SlabEditorWrapO
 	];
 }
 
-function renderWidgetLines(host: SlabWidgetHost, widgets: readonly UiWidgetEntry[], placement: UiWidgetEntry["placement"], width: number, caps: UiRenderCapabilities, clock: UiRenderClock): string[] {
+function renderWidgetLines(host: UiWidgetHost, widgets: readonly UiWidgetEntry[], placement: UiWidgetEntry["placement"], width: number, caps: UiRenderCapabilities, clock: UiRenderClock): string[] {
 	return host
 		.renderPlacement(widgets, placement, { width, capabilities: caps, ...clock })
 		.map((line) => fit(line, width, caps));
@@ -172,7 +170,7 @@ export class SlabEditor extends CustomEditor {
 		theme: EditorTheme,
 		keybindings: KeybindingsManager,
 		private readonly getState: () => SlabEditorState,
-		private readonly widgetHost: SlabWidgetHost,
+		private readonly widgetHost: UiWidgetHost,
 	) {
 		super(tui, theme, keybindings);
 	}

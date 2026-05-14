@@ -72,7 +72,11 @@ let
       cp ${record.package.source} "$out/${record.bundleName}"
     '';
 
-  linkPiLibForPackage = record: lib.optionalString (hasPiLib && record.directory && record.name != "pi-lib") ''
+  # NOTE: pi-lib also gets a self-symlink. Node resolves symlinks to realpath
+  # before walking up for `node_modules`, so pi-lib's own internal
+  # `@pi/lib/...` imports (e.g. workflow/status.ts → @pi/lib/ui) need a
+  # resolver next to the realpath, not just at the consuming extension.
+  linkPiLibForPackage = record: lib.optionalString (hasPiLib && record.directory) ''
     mkdir -p "$out/${record.bundleName}/node_modules/@pi"
     ln -s ../../../pi-lib "$out/${record.bundleName}/node_modules/@pi/lib"
   '';

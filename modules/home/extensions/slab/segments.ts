@@ -1,4 +1,5 @@
-import { formatCost, formatPercent, formatTokens, stripControls } from "./format.ts";
+import { stripControls } from "@pi/lib/ui";
+import { formatCost, formatPercent, formatTokens } from "./format.ts";
 import type { SlabSegmentData, SlabSegmentDefinition, SlabSegmentRenderContext, SlabSegmentRenderResult } from "./types.ts";
 
 function displayForMode(data: SlabSegmentData, widthMode: SlabSegmentRenderContext["widthMode"]): string {

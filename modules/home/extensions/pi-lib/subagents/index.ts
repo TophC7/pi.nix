@@ -19,9 +19,7 @@ export {
 	capRecentOutput,
 	capToolPreview,
 } from "./output.ts";
-export {
-	formatTokens as formatTokenCount,
-} from "./render-helpers.ts";
+export { formatTokenCount } from "@pi/lib/ui";
 export {
 	buildRunRequest,
 	isAgentScope,

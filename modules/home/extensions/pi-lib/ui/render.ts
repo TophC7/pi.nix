@@ -1,6 +1,6 @@
 import { visibleWidth } from "@mariozechner/pi-tui";
 import type { UiComponentLike } from "./contracts.ts";
-import { truncLine } from "../subagents/render-helpers.ts";
+import { truncLine } from "./ansi.ts";
 
 export function fitLine(text: string, width: number, ellipsis = "…"): string {
 	const safeWidth = Math.max(0, width);

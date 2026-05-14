@@ -4,7 +4,12 @@ import type {
 	UiRenderContext,
 	UiWidgetEntry,
 	UiWidgetPlacement,
-} from "@pi/lib/ui";
+} from "./contracts.ts";
+
+// ABOUT: Generic widget host: instance reuse keyed on entry content identity,
+// focus traversal (Tab/Shift-Tab) over focusable instances, Escape returns
+// focus to the editor, Ctrl-C passes through, dispose cascades. Moved from
+// slab/widget-host.ts in §T014 with no behavior change.
 
 interface WidgetInstance {
 	readonly key: string;
@@ -15,7 +20,7 @@ interface WidgetInstance {
 	orderIndex: number;
 }
 
-export interface SlabWidgetHostOptions {
+export interface UiWidgetHostOptions {
 	onInvalidate?: () => void;
 }
 
@@ -49,12 +54,12 @@ function renderContent(entry: UiWidgetEntry, context: UiRenderContext): readonly
 	return entry.content;
 }
 
-export class SlabWidgetHost {
+export class UiWidgetHost {
 	private readonly instances = new Map<string, WidgetInstance>();
 	private focusedKey: string | undefined;
 	private order = new Map<string, number>();
 
-	constructor(private readonly options: SlabWidgetHostOptions = {}) {}
+	constructor(private readonly options: UiWidgetHostOptions = {}) {}
 
 	get focusedWidgetId(): string | undefined {
 		const focused = this.focusedInstance();

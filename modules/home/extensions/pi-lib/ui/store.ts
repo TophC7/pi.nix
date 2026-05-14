@@ -1,3 +1,7 @@
+// ABOUT: Generic reactive store primitive, Svelte-style. Stable public API
+// exported from @pi/lib/ui; the status store and any extension that wants a
+// small observable value layer builds on this. No project-specific coupling.
+
 export type StoreListener<T> = (value: T) => void;
 
 export interface StoreSubscription {

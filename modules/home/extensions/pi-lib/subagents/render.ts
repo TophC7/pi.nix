@@ -14,7 +14,7 @@ import {
 	type SubagentToolSnapshot,
 	type SubagentUsage,
 } from "./types.ts";
-import { resolveMarkdownTheme } from "../ui/markdown-overlay.ts";
+import { resolveMarkdownTheme } from "@pi/lib/ui/markdown-overlay.ts";
 
 import {
 	SUBAGENT_ANIMATION_MS,

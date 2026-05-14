@@ -1,17 +1,16 @@
 // ABOUT: Visual primitives lifted from nicobailon/pi-subagents: glyphs, spinner,
-// truncation, stat formatting. No knowledge of our domain types; pure formatters
-// the renderer in render.ts composes with.
+// stat formatting, tool-call previews. ANSI truncation (truncLine) and token
+// formatting (formatTokens) moved into @pi/lib/ui in §T012/§T051; we re-export
+// them here for back-compat with consumers that still import via this module.
 
 import { homedir } from "node:os";
 import type { Theme } from "@mariozechner/pi-coding-agent";
-import { visibleWidth } from "@mariozechner/pi-tui";
+import { formatTokens, truncLine } from "@pi/lib/ui";
+
+export { formatTokens, truncLine };
 
 const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 export const SUBAGENT_ANIMATION_MS = 80;
-
-const ANSI_RESET = "\x1b[0m";
-const ANSI_PATTERN = /\x1b\[[0-9;]*m/y;
-const segmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 
 export function spinnerFrameForTick(tick: number): string {
 	return SPINNER[Math.abs(Math.floor(tick)) % SPINNER.length]!;
@@ -19,51 +18,6 @@ export function spinnerFrameForTick(tick: number): string {
 
 export function spinnerFrame(): string {
 	return spinnerFrameForTick(Math.floor(Date.now() / SUBAGENT_ANIMATION_MS));
-}
-
-/**
- * ANSI-aware width-truncation. pi-tui's truncateToWidth drops styles before the
- * ellipsis and bleeds bg colors; this preserves active styles through the cut.
- */
-export function truncLine(text: string, maxWidth: number): string {
-	if (visibleWidth(text) <= maxWidth) return text;
-	const targetWidth = Math.max(0, maxWidth - 1);
-	let result = "";
-	let currentWidth = 0;
-	let activeStyles: string[] = [];
-	let i = 0;
-	while (i < text.length) {
-		const ansiCode = ansiAt(text, i);
-		if (ansiCode) {
-			result += ansiCode;
-			if (ansiCode === ANSI_RESET || ansiCode === "\x1b[m") activeStyles = [];
-			else activeStyles.push(ansiCode);
-			i += ansiCode.length;
-			continue;
-		}
-
-		const nextAnsi = text.indexOf("\x1b[", i);
-		const end = nextAnsi === -1 ? text.length : Math.max(i + 1, nextAnsi);
-		for (const seg of segmenter.segment(text.slice(i, end))) {
-			const w = visibleWidth(seg.segment);
-			if (currentWidth + w > targetWidth) return finishTruncated(result, activeStyles);
-			result += seg.segment;
-			currentWidth += w;
-		}
-		i = end;
-	}
-	return finishTruncated(result, activeStyles);
-}
-
-function ansiAt(text: string, index: number): string | undefined {
-	ANSI_PATTERN.lastIndex = index;
-	return ANSI_PATTERN.exec(text)?.[0];
-}
-
-function finishTruncated(result: string, activeStyles: readonly string[]): string {
-	return activeStyles.length > 0
-		? `${result}${activeStyles.join("")}…${ANSI_RESET}`
-		: `${result}…`;
 }
 
 export function themeBold(theme: Theme, text: string): string {
@@ -74,17 +28,6 @@ export function themeBold(theme: Theme, text: string): string {
 export function statJoin(theme: Theme, parts: readonly (string | undefined | false)[]): string {
 	const filtered = parts.filter((part): part is string => Boolean(part));
 	return filtered.map((part) => theme.fg("dim", part)).join(` ${theme.fg("dim", "·")} `);
-}
-
-export function formatTokens(tokens: number): string {
-	if (!Number.isFinite(tokens) || tokens <= 0) return "0";
-	if (tokens >= 1_000_000) return `${trimUnit(tokens / 1_000_000)}M`;
-	if (tokens >= 1_000) return `${trimUnit(tokens / 1_000)}k`;
-	return String(Math.round(tokens));
-}
-
-function trimUnit(value: number): string {
-	return value >= 10 ? String(Math.round(value)) : value.toFixed(1).replace(/\.0$/, "");
 }
 
 export function formatDuration(ms: number | undefined): string {

@@ -1,8 +1,7 @@
 import { homedir } from "node:os";
 import { basename } from "node:path";
 import { visibleWidth } from "@mariozechner/pi-tui";
-import { formatTokenCount } from "@pi/lib/subagents";
-import { fitLine } from "@pi/lib/ui";
+import { fitLine, formatTokenCount } from "@pi/lib/ui";
 import type { SlabWorkspaceLabelMode } from "./types.ts";
 
 const SMART_NAME_MAX_SURFACE_WIDTH = 83;
@@ -104,11 +103,4 @@ export function formatWorkspaceLabel(cwd: string, name: string, mode: SlabWorksp
 	return fitSafePath(safePath, budget);
 }
 
-export function stripControls(text: string): string {
-	return text
-		.replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, "")
-		.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "")
-		.replace(/[\r\n\t]/g, " ")
-		.replace(/ +/g, " ")
-		.trim();
-}
+

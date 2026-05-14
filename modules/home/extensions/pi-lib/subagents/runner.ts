@@ -6,7 +6,7 @@ import { runSubagents } from "./engine.ts";
 import { buildCappedParentFacingText } from "./output.ts";
 import { spinnerFrameForTick, SUBAGENT_ANIMATION_MS } from "./render-helpers.ts";
 import { createSubagentMessageRenderer, SUBAGENT_RUN_MESSAGE_TYPE } from "./render.ts";
-import { clearUiOwner, publishStatus } from "../ui/index.ts";
+import { clearUiOwner, publishStatus } from "@pi/lib/ui";
 import { buildRunRequest, normalizeSubagentRequest } from "./request.ts";
 import { combineSubagentUsage, mapEngineEventToLiveLog, type SubagentRunRequest, type SubagentRunResult, type SubagentRunState, type SubagentRunUpdate } from "./types.ts";
 

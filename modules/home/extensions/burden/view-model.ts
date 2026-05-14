@@ -1,7 +1,5 @@
 import type { BurdenEntry, BurdenGap, BurdenReport, BurdenSectionKind, BurdenSourceRef } from "./types.ts";
 
-export type BurdenRowActionKind = "open-source" | "open-snapshot" | "toggle-skill";
-
 export interface BurdenSourceView {
 	readonly kind: BurdenSourceRef["kind"];
 	readonly label: string;
@@ -22,18 +20,11 @@ export interface BurdenSnapshotView {
 	readonly content: string;
 }
 
-export interface BurdenSkillView {
-	readonly name: string;
-	readonly path?: string;
-	readonly toggleable: boolean;
-}
-
 export interface BurdenRowActions {
 	readonly openSource?: {
 		readonly path: string;
 	};
 	readonly openSnapshot?: BurdenSnapshotView;
-	readonly toggleSkill?: BurdenSkillView;
 }
 
 export interface BurdenRowView {
@@ -52,7 +43,6 @@ export interface BurdenRowView {
 	readonly childIds: readonly string[];
 	readonly hasGeneratedContent: boolean;
 	readonly searchText: string;
-	readonly detailLines: readonly string[];
 	readonly actions: BurdenRowActions;
 	readonly entry: BurdenEntry;
 }
@@ -148,11 +138,9 @@ function rowView(
 	const source = sourceView(entry.source);
 	const sourceLabel = source?.label ?? labelForKind(entry.kind);
 	const snapshot = snapshotView(entry, id, sourceLabel);
-	const skill = skillView(entry.source);
 	const actions: BurdenRowActions = {
 		openSource: entry.source?.path ? { path: entry.source.path } : undefined,
 		openSnapshot: snapshot,
-		toggleSkill: skill?.toggleable ? skill : undefined,
 	};
 	return {
 		id,
@@ -170,7 +158,6 @@ function rowView(
 		childIds,
 		hasGeneratedContent: typeof entry.content === "string" && entry.content.length > 0,
 		searchText: searchText(entry, sourceLabel),
-		detailLines: detailLines(entry, sourceLabel),
 		actions,
 		entry,
 	};
@@ -209,15 +196,6 @@ function snapshotView(entry: BurdenEntry, rowId: string, sourceLabel: string): B
 	};
 }
 
-function skillView(source: BurdenSourceRef | undefined): BurdenSkillView | undefined {
-	if (source?.kind !== "skill") return undefined;
-	return {
-		name: source.name ?? source.path ?? "skill",
-		path: source.path,
-		toggleable: Boolean(source.path),
-	};
-}
-
 function gapView(gap: BurdenGap, index: number, totalTokens: number): BurdenGapView {
 	return {
 		id: `gap:${index}`,
@@ -228,16 +206,6 @@ function gapView(gap: BurdenGap, index: number, totalTokens: number): BurdenGapV
 		percentOfTotal: percent(gap.tokens, totalTokens),
 		searchText: [gap.label, gap.reason, gap.tokens, gap.chars].join(" "),
 	};
-}
-
-function detailLines(entry: BurdenEntry, sourceLabel: string): string[] {
-	const lines = [
-		entry.label,
-		`${entry.tokens} tokens • ${entry.chars} chars`,
-		`source: ${sourceLabel}`,
-	];
-	if (entry.content) lines.push("", entry.content);
-	return lines;
 }
 
 function searchText(entry: BurdenEntry, sourceLabel: string): string {

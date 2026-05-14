@@ -1,9 +1,23 @@
-import { matchesKey, truncateToWidth, type Component } from "@mariozechner/pi-tui";
+// ABOUT: Slab's multi-category settings pane. The single-category settings
+// primitive in @pi/lib/ui (showSettingsPane / SettingsList) doesn't fit this
+// pane's category-grid + per-row mutate model. §T023 retained the current
+// Component structure; promoting a multi-category settings primitive into
+// @pi/lib/ui is tracked as future work after this spec lands.
+
+import { matchesKey } from "@mariozechner/pi-tui";
 import type { Theme } from "@mariozechner/pi-coding-agent";
+import {
+	fitLine as fitLineShared,
+	padLine,
+	renderDialogDivider,
+	renderDialogFooter,
+	renderDialogHeader,
+	renderFooterBridgeLines,
+	type DialogContent,
+} from "@pi/lib/ui";
 import { cloneSlabConfig, defaultSlabConfig, moveSlabSegment, toggleSlabSegment } from "./config.ts";
 import { wrapSlabEditorLines, type SlabEditorState } from "./editor.ts";
 import { parseGitStatus } from "./git.ts";
-import { renderFooterBridgeLines } from "./footer-bridge.ts";
 import type { SlabConfig, SlabSegmentId } from "./types.ts";
 
 export type SlabPaneResult = { action: "save"; config: SlabConfig } | { action: "cancel" };
@@ -148,7 +162,27 @@ function paint(theme: Theme, tone: "accent" | "muted" | "dim" | "success" | "war
 	return theme.fg(tone, text);
 }
 
-export class SlabConfigPane implements Component {
+function padTo(text: string, width: number): string {
+	const safeWidth = Math.max(0, width);
+	return padLine(fitLineShared(text, safeWidth), safeWidth);
+}
+
+function fitLine(text: string, width: number): string {
+	const safeWidth = Math.max(0, width);
+	return padLine(fitLineShared(text, safeWidth), safeWidth);
+}
+
+const FOOTER_KEYS = [
+	{ key: "←/→", label: "category" },
+	{ key: "↑/↓", label: "row" },
+	{ key: "Enter", label: "cycle" },
+	{ key: "U/D", label: "reorder" },
+	{ key: "S", label: "save" },
+	{ key: "R", label: "reset" },
+	{ key: "Esc", label: "cancel" },
+] as const;
+
+export class SlabConfigPane implements DialogContent {
 	private readonly initial: SlabConfig;
 	private draft: SlabConfig;
 	private categoryIndex = 0;
@@ -186,26 +220,75 @@ export class SlabConfigPane implements Component {
 	}
 
 	render(width: number): string[] {
+		const safeWidth = Math.max(40, width);
 		const rows = this.rows();
 		const category = CATEGORIES[this.categoryIndex]!;
-		const previewWidth = Math.max(32, Math.min(width - 4, 96));
-		const dirty = sameConfig(this.initial, this.draft) ? "saved" : "dirty";
-		const lines = [
-			paint(this.theme, "accent", "Slab config"),
-			paint(this.theme, "dim", "←/→ category · ↑/↓ setting · Enter toggle/cycle · U/D reorder segment · S save · R reset · Esc cancel"),
-			`Status: ${dirty}${this.status ? ` · ${this.status}` : ""}`,
+		const dirty = sameConfig(this.initial, this.draft);
+		const statusText = dirty ? "saved" : `dirty${this.status ? ` · ${this.status}` : ""}`;
+
+		const header = renderDialogHeader({
+			title: `Slab config  ·  ${statusText}`,
+			theme: this.theme,
+			width: safeWidth,
+		});
+		const footer = renderDialogFooter({
+			theme: this.theme,
+			width: safeWidth,
+			keys: FOOTER_KEYS,
+		});
+
+		const lines: string[] = [header, renderDialogDivider({ theme: this.theme, width: safeWidth })];
+		lines.push(...this.renderCategoryTabs(safeWidth));
+		lines.push(renderDialogDivider({ theme: this.theme, width: safeWidth }));
+		lines.push(...this.renderSettingRows(rows, category.label, safeWidth));
+		lines.push(renderDialogDivider({ theme: this.theme, width: safeWidth }));
+		lines.push(...this.renderPreviewSection(safeWidth));
+		lines.push(renderDialogDivider({ theme: this.theme, width: safeWidth }));
+		lines.push(footer);
+		return lines;
+	}
+
+	private renderCategoryTabs(width: number): string[] {
+		const parts = CATEGORIES.map((item, index) => index === this.categoryIndex
+			? this.theme.fg("accent", this.theme.bold(` ${item.label} ▸`))
+			: this.theme.fg("dim", `  ${item.label}  `));
+		const joined = parts.join(this.theme.fg("dim", "│"));
+		return ["", fitLine(`  ${joined}`, width), ""];
+	}
+
+	private renderSettingRows(rows: readonly SettingRow[], categoryLabel: string, width: number): string[] {
+		const lines: string[] = ["", fitLine(`  ${this.theme.fg("muted", this.theme.bold(categoryLabel.toUpperCase()))}`, width)];
+		if (rows.length === 0) {
+			lines.push(fitLine(`  ${this.theme.fg("dim", "No settings.")}`, width));
+		} else {
+			const labelWidth = 22;
+			const valueWidth = 22;
+			const hintWidth = Math.max(8, width - labelWidth - valueWidth - 8);
+			rows.forEach((row, index) => {
+				const selected = index === this.rowIndex;
+				const cursor = selected ? this.theme.fg("accent", this.theme.bold("›")) : " ";
+				const label = padTo(row.label, labelWidth);
+				const value = padTo(row.value, valueWidth);
+				const hint = padTo(row.hint, hintWidth);
+				const styledLabel = selected ? this.theme.bold(label) : label;
+				const styledValue = selected ? this.theme.fg("accent", value) : this.theme.fg("muted", value);
+				const styledHint = this.theme.fg("dim", hint);
+				lines.push(fitLine(` ${cursor} ${styledLabel}  ${styledValue}  ${styledHint}`, width));
+			});
+		}
+		lines.push("");
+		return lines;
+	}
+
+	private renderPreviewSection(width: number): string[] {
+		const previewWidth = Math.max(32, width - 4);
+		return [
 			"",
-			`Categories: ${CATEGORIES.map((item, index) => index === this.categoryIndex ? paint(this.theme, "accent", `[${item.label}]`) : item.label).join("  ")}`,
-			paint(this.theme, "muted", `${category.label} settings`),
-			...rows.map((item, index) => {
-				const cursor = index === this.rowIndex ? paint(this.theme, "accent", "›") : " ";
-				return `${cursor} ${truncateToWidth(item.label, 20, "…").padEnd(20)} ${truncateToWidth(item.value, Math.max(8, width - 28), "…")}`;
-			}),
+			fitLine(`  ${this.theme.fg("muted", this.theme.bold("PREVIEW"))}`, width),
 			"",
-			paint(this.theme, "muted", "Preview"),
-			...renderSlabConfigPreview(this.draft, previewWidth),
+			...renderSlabConfigPreview(this.draft, previewWidth).map((line) => fitLine(`  ${line}`, width)),
+			"",
 		];
-		return lines.map((line) => truncateToWidth(line, width, "…"));
 	}
 
 	private rows(): SettingRow[] {

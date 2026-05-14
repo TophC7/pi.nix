@@ -1,6 +1,11 @@
 import { truncateToWidth } from "@mariozechner/pi-tui";
-import type { UiRenderCapabilities } from "@pi/lib/ui";
-import { stripControls } from "./format.ts";
+import type { UiRenderCapabilities } from "./contracts.ts";
+import { stripControls } from "./ansi.ts";
+
+// ABOUT: Pure rendering for the legacy footer-status compatibility row. Moved
+// from slab/footer-bridge.ts in §T015 with no behavior change. Now uses the
+// shared `stripControls` from ./ansi.ts. Slab calls `renderFooterBridgeLines`
+// to merge new typed footer widgets with legacy status strings.
 
 const ANSI_PATTERN = /\x1b\[[0-9;]*m/g;
 

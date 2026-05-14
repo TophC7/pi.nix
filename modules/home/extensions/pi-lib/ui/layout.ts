@@ -102,7 +102,7 @@ function chooseFrameWidth(viewportWidth: number, options: CenteredFrameOptions):
 
 function sectionLines(section: string | readonly string[] | undefined): string[] {
 	if (section === undefined) return [];
-	return Array.isArray(section) ? [...section] : [section];
+	return typeof section === "string" ? [section] : [...section];
 }
 
 function frameLine(text: string, width: number): string {

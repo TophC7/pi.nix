@@ -36,7 +36,11 @@ export interface PublishStatusInput {
 export interface PublishWidgetInput {
 	readonly id?: UiEntryId;
 	readonly owner: string;
-	readonly placement?: UiWidgetPlacement;
+	/**
+	 * Required. Callers must pick a placement explicitly. Silent defaults
+	 * hid intent and produced widgets in unexpected slots; removed in §T004.
+	 */
+	readonly placement: UiWidgetPlacement;
 	readonly content: UiRenderableLines | UiWidgetEntry["content"];
 	readonly priority?: UiPriority;
 	readonly order?: number;
@@ -232,7 +236,7 @@ class SharedUiStatusStore implements UiStatusStoreWriter {
 		const entry: UiWidgetEntry = {
 			id: input.id ?? newId(input.owner),
 			owner: input.owner,
-			placement: input.placement ?? "aboveEditor",
+			placement: input.placement,
 			content: input.content,
 			ordering: ordering(input.priority, input.order),
 			lifecycle: lifecycle(now, input.ttlMs, input.staleAfterMs),

@@ -3,7 +3,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import type { ExtensionAPI, ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
 import { fireAndForgetHandoffReason, handoff } from "@pi/lib/handoff";
-import { showMarkdownOverlay } from "@pi/lib/ui";
+import { showMarkdownOverlay } from "@pi/lib/ui/markdown-overlay.ts";
 import { enterMode, exitMode, state } from "./mode.ts";
 import { isPlanDraftPath, parsePlanCommand, pickPlan } from "./plans.ts";
 import {

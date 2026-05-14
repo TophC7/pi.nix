@@ -1,4 +1,4 @@
-import { clearUiOwner, publishStatus, publishWidget } from "../ui/index.ts";
+import { clearUiOwner, publishStatus, publishWidget } from "@pi/lib/ui";
 
 export interface WorkflowUiStatus {
 	readonly key: string;

@@ -26,6 +26,7 @@ export class SearchableTable<T> implements UiComponentLike {
 	private selectedIndex = 0;
 	private scrollOffset = 0;
 	private query = "";
+	private visibleRowsOverride: number | undefined;
 
 	constructor(private readonly options: SearchableTableOptions<T>) {
 		this.rows = options.rows;
@@ -45,6 +46,10 @@ export class SearchableTable<T> implements UiComponentLike {
 
 	getQuery(): string {
 		return this.query;
+	}
+
+	setVisibleRows(visibleRows: number): void {
+		this.visibleRowsOverride = Math.max(1, Math.floor(visibleRows));
 	}
 
 	selectedRow(): T | undefined {
@@ -69,7 +74,7 @@ export class SearchableTable<T> implements UiComponentLike {
 	render(width: number): string[] {
 		const safeWidth = Math.max(1, width);
 		const rows = this.filteredRows();
-		const visibleRows = Math.max(1, this.options.visibleRows ?? Math.min(8, rows.length || 1));
+		const visibleRows = Math.max(1, this.visibleRowsOverride ?? this.options.visibleRows ?? Math.min(8, rows.length || 1));
 		this.clampSelection();
 		this.syncOffset(visibleRows, rows.length);
 		const columnWidths = computeColumnWidths(this.options.columns, safeWidth - 2);

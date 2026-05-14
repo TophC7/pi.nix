@@ -1,3 +1,11 @@
+/**
+ * Component surface used by widget host runtimes.
+ *
+ * `invalidate()` is required: the host calls it after focus/input changes and
+ * during scheduler animation ticks so the next render is recomputed. A no-op
+ * implementation is fine for stateless components, but the method must exist.
+ * `handleInput` and `dispose` remain optional.
+ */
 export interface UiComponentLike {
 	render(width: number): string[];
 	handleInput?(data: string): void;

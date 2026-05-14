@@ -7,6 +7,9 @@ import { truncateToWidth, type Component } from "@mariozechner/pi-tui";
 import {
 	createUiRenderDriver,
 	getUiStatusStore,
+	openDialog,
+	renderFooterBridgeLines,
+	UiWidgetHost,
 	type UiRenderCapabilities,
 	type UiRenderClock,
 	type UiRenderDriverHandle,
@@ -15,12 +18,10 @@ import {
 } from "@pi/lib/ui";
 import { defaultSlabConfig, loadSlabConfig, saveSlabConfig } from "./config.ts";
 import { SlabEditor } from "./editor.ts";
-import { renderFooterBridgeLines } from "./footer-bridge.ts";
 import { collectGitSnapshot } from "./git.ts";
 import { SlabConfigPane, type SlabPaneResult } from "./pane.ts";
 import { createSlabRuntimeState } from "./state.ts";
 import type { SlabConfig, SlabGitSnapshot, SlabRuntimeState } from "./types.ts";
-import { SlabWidgetHost } from "./widget-host.ts";
 
 export const SLAB_EXTENSION_NAME = "slab" as const;
 
@@ -59,7 +60,7 @@ function fit(text: string, width: number, caps: UiRenderCapabilities): string {
 	return truncateToWidth(clean(text, caps), Math.max(0, width), caps.unicode ? "…" : "...");
 }
 
-function renderWidgetLines(host: SlabWidgetHost, widgets: readonly UiWidgetEntry[], placement: UiWidgetEntry["placement"], width: number, caps: UiRenderCapabilities, clock: UiRenderClock): string[] {
+function renderWidgetLines(host: UiWidgetHost, widgets: readonly UiWidgetEntry[], placement: UiWidgetEntry["placement"], width: number, caps: UiRenderCapabilities, clock: UiRenderClock): string[] {
 	return host
 		.renderPlacement(widgets, placement, { width, capabilities: caps, ...clock })
 		.map((line) => fit(line, width, caps));
@@ -69,7 +70,7 @@ class SlabFooter implements Component {
 	constructor(
 		private readonly footerData: ReadonlyFooterDataProvider,
 		private readonly getState: () => SlabState,
-		private readonly widgetHost: SlabWidgetHost,
+		private readonly widgetHost: UiWidgetHost,
 	) {}
 
 	render(width: number): string[] {
@@ -94,7 +95,7 @@ export default function slab(pi: ExtensionAPI): void {
 	let gitRefreshGeneration = 0;
 	let state: SlabState | undefined;
 	let driver: UiRenderDriverHandle | undefined;
-	let widgetHost: SlabWidgetHost | undefined;
+	let widgetHost: UiWidgetHost | undefined;
 	let renderRequested = false;
 	let requestRender = () => {
 		renderRequested = true;
@@ -148,7 +149,7 @@ export default function slab(pi: ExtensionAPI): void {
 		currentCtx = ctx;
 		gitSnapshot = undefined;
 		state = createState(ctx, config);
-		widgetHost = new SlabWidgetHost({ onInvalidate: () => requestRender() });
+		widgetHost = new UiWidgetHost({ onInvalidate: () => requestRender() });
 		driver = createUiRenderDriver({
 			store: getUiStatusStore(),
 			throttleMs: REDRAW_THROTTLE_MS,
@@ -205,7 +206,16 @@ export default function slab(pi: ExtensionAPI): void {
 				return;
 			}
 			const initial = await loadSlabConfig();
-			const result = await ctx.ui.custom<SlabPaneResult>((tui, theme, _keybindings, done) => new SlabConfigPane(initial, theme, done), { overlay: true, overlayOptions: { width: "90%", maxHeight: "90%" } });
+			const result = await new Promise<SlabPaneResult>((resolve) => {
+				openDialog(
+					ctx,
+					({ theme, close }) => new SlabConfigPane(initial, theme, (next) => {
+						resolve(next);
+						close();
+					}),
+					{ width: "96%", maxHeight: "94%", padding: 0, borderStyle: "square" },
+				);
+			});
 			if (result.action !== "save") return;
 			await saveSlabConfig(result.config);
 			config = result.config;

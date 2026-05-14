@@ -6,55 +6,29 @@
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type {
-	ExtensionAPI,
-	ExtensionContext,
-} from "@mariozechner/pi-coding-agent";
-import { getSettingsListTheme } from "@mariozechner/pi-coding-agent";
-import {
-	Container,
-	type SettingItem,
-	SettingsList,
-	Text,
-} from "@mariozechner/pi-tui";
-import { publishStatus, type UiPublicationHandle } from "@pi/lib/ui";
+import type { ExtensionAPI, ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
+import { DynamicBorder, getSelectListTheme } from "@mariozechner/pi-coding-agent";
+import { Container, SelectList } from "@mariozechner/pi-tui";
 
 const LEVELS = ["off", "lite", "full", "ultra", "micro"] as const;
-const STOP_ALIASES = new Set(["off", "stop", "quit"]);
 type Level = (typeof LEVELS)[number];
 
-const CAVEMAN_COMMAND_OPTIONS = [
+const LEVEL_OPTIONS: { value: Level; label: string; description: string }[] = [
+	{ value: "off", label: "off", description: "Disable caveman mode" },
 	{ value: "lite", label: "lite", description: "Professional, no fluff" },
 	{ value: "full", label: "full", description: "Classic caveman" },
 	{ value: "ultra", label: "ultra", description: "Maximum compression" },
-	{
-		value: "micro",
-		label: "micro",
-		description: "Experimental prompt-minimized mode",
-	},
-	{ value: "off", label: "off", description: "Disable caveman mode" },
-	{ value: "stop", label: "stop", description: "Disable caveman mode" },
-	{ value: "quit", label: "quit", description: "Disable caveman mode" },
-	{ value: "config", label: "config", description: "Open settings dialog" },
-] as const;
+	{ value: "micro", label: "micro", description: "Experimental prompt-minimized mode" },
+];
 
 interface CavemanConfig {
-	/** Level to apply on new sessions. "off" means don't auto-enable. */
 	defaultLevel: Level;
-	/** Whether to show the animated footer status. */
-	showStatus: boolean;
 }
 
 const CONFIG_DIR = join(homedir(), ".pi", "agent");
 const CONFIG_PATH = join(CONFIG_DIR, "caveman.json");
-const CONFIG_DISPLAY_PATH = "~/.pi/agent/caveman.json";
 const CAVEMAN_LEVEL_ENTRY_TYPE = "caveman-level";
-const CAVEMAN_STATUS_ID = "caveman:status";
-const CAVEMAN_STATUS_OWNER = "caveman";
-const DEFAULT_CONFIG: CavemanConfig = {
-	defaultLevel: "full",
-	showStatus: true,
-};
+const DEFAULT_CONFIG: CavemanConfig = { defaultLevel: "full" };
 let saveConfigQueue: Promise<void> = Promise.resolve();
 
 async function loadConfig(): Promise<CavemanConfig> {
@@ -62,13 +36,7 @@ async function loadConfig(): Promise<CavemanConfig> {
 		const raw = await readFile(CONFIG_PATH, "utf8");
 		const parsed = JSON.parse(raw);
 		return {
-			defaultLevel: LEVELS.includes(parsed.defaultLevel)
-				? parsed.defaultLevel
-				: DEFAULT_CONFIG.defaultLevel,
-			showStatus:
-				typeof parsed.showStatus === "boolean"
-					? parsed.showStatus
-					: DEFAULT_CONFIG.showStatus,
+			defaultLevel: LEVELS.includes(parsed.defaultLevel) ? parsed.defaultLevel : DEFAULT_CONFIG.defaultLevel,
 		};
 	} catch {
 		return { ...DEFAULT_CONFIG };
@@ -83,38 +51,6 @@ async function saveConfig(config: CavemanConfig): Promise<void> {
 	});
 	return saveConfigQueue;
 }
-
-interface Animation {
-	frames: string[];
-	label: string;
-	/** ms between frames */
-	interval: number;
-}
-
-const R = "\x1b[38;5;196m"; // red
-const O = "\x1b[38;5;208m"; // orange
-const Y = "\x1b[38;5;220m"; // yellow
-const W = "\x1b[38;5;230m"; // white-hot
-const E = "\x1b[38;5;52m"; // ember (dark red)
-const X = "\x1b[0m"; // reset
-
-const FIRE_FRAMES = [
-	`${R}⠠${O}⠄${X}`,
-	`${O}⠔${Y}⠂${X}`,
-	`${Y}⠊${W}⠑${X}`,
-	`${W}⠑${Y}⠊${X}`,
-	`${Y}⠂${O}⠔${X}`,
-	`${O}⠄${R}⠠${X}`,
-	`${R}⠠${E}⠄${X}`,
-	`${E}⠔${R}⠂${X}`,
-];
-
-const ANIMATIONS: Record<Exclude<Level, "off">, Animation> = {
-	lite: { frames: FIRE_FRAMES, label: "LITE", interval: 300 },
-	full: { frames: FIRE_FRAMES, label: "FULL", interval: 200 },
-	ultra: { frames: FIRE_FRAMES, label: "ULTRA", interval: 100 },
-	micro: { frames: FIRE_FRAMES, label: "MICRO", interval: 120 },
-};
 
 const BASE = `\
 IMPORTANT: You are in CAVEMAN MODE. Respond terse like smart caveman. \
@@ -160,8 +96,6 @@ Boundaries: write normal code. Only compress explanations. "stop caveman" or "no
 export default function caveman(pi: ExtensionAPI) {
 	let level: Level = "off";
 	let config: CavemanConfig = { ...DEFAULT_CONFIG };
-	let statusHandle: UiPublicationHandle | undefined;
-	let isActive = false;
 	let configLoadPromise: Promise<void> | null = null;
 
 	const ensureConfigLoaded = async () => {
@@ -176,32 +110,14 @@ export default function caveman(pi: ExtensionAPI) {
 		await configLoadPromise;
 	};
 
-	function clearStatus() {
-		statusHandle?.clear();
-		statusHandle = undefined;
-	}
-
-	function syncStatus(ctx: Pick<ExtensionContext, "ui">) {
-		const theme = ctx.ui.theme;
-
-		if (level === "off" || !config.showStatus) {
-			clearStatus();
-			return;
+	function applyLevel(next: Level): void {
+		if (next === level && config.defaultLevel === next) return;
+		level = next;
+		pi.appendEntry(CAVEMAN_LEVEL_ENTRY_TYPE, { level });
+		if (config.defaultLevel !== next) {
+			config = { ...config, defaultLevel: next };
+			void saveConfig(config);
 		}
-
-		const anim = ANIMATIONS[level];
-		statusHandle = publishStatus({
-			id: CAVEMAN_STATUS_ID,
-			owner: CAVEMAN_STATUS_OWNER,
-			text: ({ tick }) => {
-				const frame = isActive ? anim.frames[tick % anim.frames.length]! : anim.frames[0]!;
-				return frame + " " + theme.fg("muted", "caveman level: ") + theme.fg("text", anim.label);
-			},
-			priority: "low",
-			order: 10,
-			staleAfterMs: isActive ? anim.interval * 4 : undefined,
-			schedule: isActive ? { animateEveryMs: anim.interval } : undefined,
-		});
 	}
 
 	pi.on("session_start", async (_event, ctx) => {
@@ -220,184 +136,63 @@ export default function caveman(pi: ExtensionAPI) {
 			level = config.defaultLevel;
 			pi.appendEntry(CAVEMAN_LEVEL_ENTRY_TYPE, { level });
 		}
-
-		syncStatus(ctx);
-	});
-
-	pi.on("agent_start", async (_event, ctx) => {
-		isActive = true;
-		syncStatus(ctx);
-	});
-
-	pi.on("agent_end", async (_event, ctx) => {
-		isActive = false;
-		syncStatus(ctx);
-	});
-
-	pi.on("session_shutdown", async () => {
-		clearStatus();
-		isActive = false;
 	});
 
 	pi.registerCommand("caveman", {
-		description:
-			"Toggle caveman mode, set level, use stop/off/quit to disable, or 'config' to open settings",
+		description: "Open caveman level picker, or pass a level directly (off, lite, full, ultra, micro)",
 		getArgumentCompletions: (prefix: string) => {
 			const normalized = prefix.trim().toLowerCase();
-			const items = CAVEMAN_COMMAND_OPTIONS.filter((item) =>
-				item.value.startsWith(normalized),
-			);
+			const items = LEVEL_OPTIONS.filter((item) => item.value.startsWith(normalized));
 			return items.length > 0 ? items : null;
 		},
 		handler: async (args, ctx) => {
+			await ensureConfigLoaded();
 			const arg = args?.trim().toLowerCase();
 
-			if (arg === "config") {
-				await openConfig(ctx);
+			if (arg) {
+				if (!LEVELS.includes(arg as Level)) {
+					ctx.ui.notify(`Unknown caveman level "${arg}". Use: ${LEVELS.join(", ")}`, "error");
+					return;
+				}
+				applyLevel(arg as Level);
+				ctx.ui.notify(arg === "off" ? "Caveman off." : `Caveman: ${arg}`, "info");
 				return;
 			}
 
-			if (!arg) {
-				level = level === "off" ? "full" : "off";
-			} else if (STOP_ALIASES.has(arg)) {
-				level = "off";
-			} else if (LEVELS.includes(arg as Level)) {
-				level = arg as Level;
-			} else {
-				ctx.ui.notify(
-					`Unknown: "${arg}". Use: ${LEVELS.join(", ")}, stop, quit, or config`,
-					"error",
-				);
+			if (!ctx.hasUI) {
+				ctx.ui.notify("Pass a level when running non-interactively", "warning");
 				return;
 			}
 
-			pi.appendEntry(CAVEMAN_LEVEL_ENTRY_TYPE, { level });
-			syncStatus(ctx);
-
-			ctx.ui.notify(
-				level === "off"
-					? "Caveman mode off."
-					: `Caveman: ${ANIMATIONS[level].label}`,
-				"info",
-			);
+			const picked = await openLevelPicker(ctx, level);
+			if (picked === undefined) return;
+			applyLevel(picked);
+			ctx.ui.notify(picked === "off" ? "Caveman off." : `Caveman: ${picked}`, "info");
 		},
 	});
 
-	async function openConfig(ctx: ExtensionContext) {
-		await ensureConfigLoaded();
-
-		await ctx.ui.custom((_tui, theme, _kb, done) => {
-			const items: SettingItem[] = [
-				{
-					id: "defaultLevel",
-					label: "Default level for new sessions",
-					currentValue: config.defaultLevel,
-					values: [...LEVELS],
-				},
-				{
-					id: "showStatus",
-					label: "Show animated status bar",
-					currentValue: config.showStatus ? "on" : "off",
-					values: ["on", "off"],
-				},
-			];
-
+	async function openLevelPicker(ctx: ExtensionCommandContext, current: Level): Promise<Level | undefined> {
+		return ctx.ui.custom<Level | undefined>((tui, _theme, _keybindings, done) => {
+			const items = LEVEL_OPTIONS.map((option) => ({
+				value: option.value,
+				label: option.label,
+				description: option.description,
+			}));
 			const container = new Container();
-			container.addChild(
-				new Text(theme.fg("accent", theme.bold(" Caveman Config")), 0, 0),
-			);
-			container.addChild(
-				new Text(theme.fg("dim", ` Saved to ${CONFIG_DISPLAY_PATH}`), 0, 0),
-			);
-			container.addChild(
-				new Text(
-					theme.fg("dim", " Default level applies to future sessions."),
-					0,
-					0,
-				),
-			);
-			container.addChild(new Text("", 0, 0));
-
-			const applySettingChange = (id: string, newValue: string) => {
-				const nextConfig = { ...config };
-				if (id === "defaultLevel" && LEVELS.includes(newValue as Level)) {
-					nextConfig.defaultLevel = newValue as Level;
-				} else if (id === "showStatus") {
-					nextConfig.showStatus = newValue === "on";
-				}
-
-				if (
-					nextConfig.defaultLevel === config.defaultLevel &&
-					nextConfig.showStatus === config.showStatus
-				) {
-					return;
-				}
-
-				config = nextConfig;
-				void saveConfig(config).catch((error) => {
-					ctx.ui.notify(`Failed to save caveman config: ${error}`, "error");
-				});
-				syncStatus(ctx);
-			};
-
-			let selectedIndex = 0;
-			const settingsList = new SettingsList(
-				items,
-				Math.min(items.length + 2, 10),
-				getSettingsListTheme(),
-				applySettingChange,
-				() => done(undefined),
-			);
-
-			container.addChild(settingsList);
-			container.addChild(
-				new Text(
-					theme.fg("dim", " ←→/hl/tab change • ↑↓/jk move • esc close"),
-					0,
-					0,
-				),
-			);
-
-			const cycleSelectedValue = (direction: -1 | 1) => {
-				const item = items[selectedIndex];
-				if (!item?.values?.length) return;
-
-				const currentIndex = item.values.indexOf(item.currentValue);
-				const nextIndex =
-					(currentIndex + direction + item.values.length) % item.values.length;
-				const newValue = item.values[nextIndex]!;
-				item.currentValue = newValue;
-				settingsList.updateValue(item.id, newValue);
-				applySettingChange(item.id, newValue);
-			};
-
+			container.addChild(new DynamicBorder());
+			const list = new SelectList(items, items.length, getSelectListTheme(), { minPrimaryColumnWidth: 8, maxPrimaryColumnWidth: 12 });
+			const currentIndex = items.findIndex((item) => item.value === current);
+			if (currentIndex !== -1) list.setSelectedIndex(currentIndex);
+			list.onSelect = (item) => done(item.value as Level);
+			list.onCancel = () => done(undefined);
+			container.addChild(list);
+			container.addChild(new DynamicBorder());
 			return {
-				render: (w: number) => container.render(w),
+				render: (width: number) => container.render(width),
 				invalidate: () => container.invalidate(),
 				handleInput: (data: string) => {
-					if (data === "j") data = "\u001b[B";
-					else if (data === "k") data = "\u001b[A";
-
-					if (data === "\u001b[B") {
-						selectedIndex = Math.min(selectedIndex + 1, items.length - 1);
-					} else if (data === "\u001b[A") {
-						selectedIndex = Math.max(selectedIndex - 1, 0);
-					} else if (data === "h") {
-						cycleSelectedValue(-1);
-						_tui.requestRender();
-						return;
-					} else if (data === "l" || data === "\u001b[C" || data === "\t") {
-						cycleSelectedValue(1);
-						_tui.requestRender();
-						return;
-					} else if (data === "\u001b[D") {
-						cycleSelectedValue(-1);
-						_tui.requestRender();
-						return;
-					}
-
-					settingsList.handleInput?.(data);
-					_tui.requestRender();
+					list.handleInput(data);
+					tui.requestRender();
 				},
 			};
 		});
@@ -407,9 +202,7 @@ export default function caveman(pi: ExtensionAPI) {
 		await ensureConfigLoaded();
 		if (level === "off") return;
 		if (level === "micro") {
-			return {
-				systemPrompt: `${event.systemPrompt}\n\n${MICRO_PROMPT}`,
-			};
+			return { systemPrompt: `${event.systemPrompt}\n\n${MICRO_PROMPT}` };
 		}
 		return {
 			systemPrompt: `${event.systemPrompt}\n\n${BASE}\n\n${INTENSITY[level]}\n\n${SAFETY}`,
