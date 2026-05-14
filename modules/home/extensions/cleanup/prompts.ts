@@ -1,15 +1,15 @@
 export interface CleanupApplyArgs {
-	diffPath: string;
-	findingsPath: string;
-	focus?: string;
+  diffPath: string
+  findingsPath: string
+  focus?: string
 }
 
 function focusLine(focus?: string): string {
-	return focus ? `\nAdditional focus: ${focus}\n` : "";
+  return focus ? `\nAdditional focus: ${focus}\n` : ''
 }
 
 export function cleanupReuseTask(diffPath: string, focus?: string): string {
-	return `Run the /cleanup reuse pass.
+  return `Run the /cleanup reuse pass.
 
 Diff under review: ${diffPath}${focusLine(focus)}
 Read the diff file. Search the repository for existing utilities, helpers, hooks, or primitives that the diff duplicates or reinvents.
@@ -24,11 +24,11 @@ Return concise findings only. For each finding include:
 - file path and line range of the new code;
 - existing symbol or file the code should reuse;
 - one-sentence reason;
-- severity: blocking / required / suggestion.`;
+- severity: blocking / required / suggestion.`
 }
 
 export function cleanupQualityTask(diffPath: string, focus?: string): string {
-	return `Run the /cleanup quality pass.
+  return `Run the /cleanup quality pass.
 
 Diff under review: ${diffPath}${focusLine(focus)}
 Read the diff file. Flag dead code, debug remnants, slop, hacky patterns, and over-engineering in the changed scope.
@@ -43,11 +43,11 @@ Return concise findings only. For each finding include:
 - file path and line range;
 - one-sentence failure mode;
 - one-sentence concrete fix;
-- severity: blocking / required / suggestion.`;
+- severity: blocking / required / suggestion.`
 }
 
 export function cleanupEfficiencyTask(diffPath: string, focus?: string): string {
-	return `Run the /cleanup efficiency pass.
+  return `Run the /cleanup efficiency pass.
 
 Diff under review: ${diffPath}${focusLine(focus)}
 Read the diff file. Flag wasted work, missed concurrency, hot-path bloat, no-op updates, and memory issues in the changed scope.
@@ -61,16 +61,16 @@ Return concise findings only. For each finding include:
 - file path and line range;
 - one-sentence failure mode plus the win;
 - one-sentence concrete fix;
-- severity: blocking / required / suggestion.`;
+- severity: blocking / required / suggestion.`
 }
 
 export function cleanupApplyPrompt(args: CleanupApplyArgs): string {
-	return `Apply /cleanup findings to the working tree.
+  return `Apply /cleanup findings to the working tree.
 
 Inputs (read these files; do not re-derive):
 - Diff under review: ${args.diffPath}
 - Combined findings from cleanup.cleanup-reuse-scout, cleanup.cleanup-quality-scout, cleanup.cleanup-efficiency-scout: ${args.findingsPath}
-${args.focus ? `\nUser focus: ${args.focus}\n` : ""}
+${args.focus ? `\nUser focus: ${args.focus}\n` : ''}
 Mode rules:
 1. Read both input files.
 2. Apply only findings that are clearly correct and worth doing now. Skip false positives without arguing.
@@ -83,11 +83,11 @@ After applying, return one tight summary block:
 - Skipped: bulleted list, one short line per skipped finding with the reason it was wrong or out of scope. Omit the section if empty.
 - Worth a look: bulleted list of any finding you considered but did not apply because it is risky, ambiguous, or larger than /cleanup scope. One short reason each. Omit the section if empty.
 
-Keep the summary tight. No narration, no preamble.`;
+Keep the summary tight. No narration, no preamble.`
 }
 
 export function cleanupQuickPrompt(): string {
-	return `Quick cleanup pass on the current working tree.
+  return `Quick cleanup pass on the current working tree.
 
 Delete only:
 1. console.log / console.warn / console.error / debugger statements.
@@ -99,5 +99,5 @@ Do not touch:
 - Defensive patterns or error handling.
 - Anything that might be intentional.
 
-For each deletion, confirm safety by searching for references first. Do not stage or commit. Return a short list of what was removed; if nothing was removed, say so in one line.`;
+For each deletion, confirm safety by searching for references first. Do not stage or commit. Return a short list of what was removed; if nothing was removed, say so in one line.`
 }

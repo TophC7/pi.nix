@@ -1,135 +1,159 @@
-import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@mariozechner/pi-coding-agent";
-import { deferToAgentEnd, fireAndForgetHandoffReason, handoff } from "@pi/lib/handoff";
-import { getWorkflowProfile, workflowController, workflowToolLeaseManager } from "@pi/lib/workflow";
-import { makeStageDir, writeStage } from "../spec/stage.ts";
+import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from '@mariozechner/pi-coding-agent'
+import { deferToAgentEnd, fireAndForgetHandoffReason, handoff } from '@pi/lib/handoff'
+import { extractSubagentText, runSubagent } from '@pi/lib/subagents'
+import { getWorkflowProfile, workflowController, workflowToolLeaseManager } from '@pi/lib/workflow'
+import { makeStageDir, writeStage } from '../spec/stage.ts'
 import {
-	cleanupApplyPrompt,
-	cleanupEfficiencyTask,
-	cleanupQualityTask,
-	cleanupQuickPrompt,
-	cleanupReuseTask,
-} from "./prompts.ts";
-import { extractSubagentText, runSubagent } from "@pi/lib/subagents";
+  cleanupApplyPrompt,
+  cleanupEfficiencyTask,
+  cleanupQualityTask,
+  cleanupQuickPrompt,
+  cleanupReuseTask
+} from './prompts.ts'
 
-const CLEANUP_PROFILE_ID = "cleanup";
-const CLEANUP_QUICK_TOOLS = ["read", "grep", "find", "ls", "bash", "edit", "write"] as const;
+const CLEANUP_PROFILE_ID = 'cleanup'
+const CLEANUP_QUICK_TOOLS = ['read', 'grep', 'find', 'ls', 'bash', 'edit', 'write'] as const
 
 function exitCleanupController(pi: ExtensionAPI, ctx: ExtensionContext, reason: string): void {
-	if (!workflowController.activeRun) return;
-	if (workflowController.activeRun.profile.id !== CLEANUP_PROFILE_ID) return;
-	try {
-		workflowController.exit(pi, ctx, reason);
-	} catch (error) {
-		ctx.ui.notify(`/cleanup workflow exit failed: ${error instanceof Error ? error.message : String(error)}`, "warning");
-	}
+  if (!workflowController.activeRun) return
+  if (workflowController.activeRun.profile.id !== CLEANUP_PROFILE_ID) return
+  try {
+    workflowController.exit(pi, ctx, reason)
+  } catch (error) {
+    ctx.ui.notify(`/cleanup workflow exit failed: ${error instanceof Error ? error.message : String(error)}`, 'warning')
+  }
 }
 
 export async function runCleanup(pi: ExtensionAPI, ctx: ExtensionCommandContext, args?: string): Promise<void> {
-	await ctx.waitForIdle();
-	const focus = args?.trim() || undefined;
+  await ctx.waitForIdle()
+  const focus = args?.trim() || undefined
 
-	const repoCheck = await pi.exec("git", ["rev-parse", "--git-dir"], { cwd: ctx.cwd, signal: ctx.signal });
-	if ((repoCheck.code ?? 1) !== 0) {
-		ctx.ui.notify("/cleanup requires a git repository.", "error");
-		return;
-	}
-	const status = await pi.exec("git", ["status", "--porcelain"], { cwd: ctx.cwd, signal: ctx.signal });
-	if (!status.stdout.trim()) {
-		ctx.ui.notify("/cleanup: no working-tree changes to review.", "info");
-		return;
-	}
-	const diff = await pi.exec("git", ["diff", "HEAD"], { cwd: ctx.cwd, signal: ctx.signal });
-	const diffText = (diff.stdout || "").trim();
-	if (!diffText) {
-		ctx.ui.notify("/cleanup: working tree changes produced an empty diff.", "warning");
-		return;
-	}
+  const repoCheck = await pi.exec('git', ['rev-parse', '--git-dir'], {
+    cwd: ctx.cwd,
+    signal: ctx.signal
+  })
+  if ((repoCheck.code ?? 1) !== 0) {
+    ctx.ui.notify('/cleanup requires a git repository.', 'error')
+    return
+  }
+  const status = await pi.exec('git', ['status', '--porcelain'], {
+    cwd: ctx.cwd,
+    signal: ctx.signal
+  })
+  if (!status.stdout.trim()) {
+    ctx.ui.notify('/cleanup: no working-tree changes to review.', 'info')
+    return
+  }
+  const diff = await pi.exec('git', ['diff', 'HEAD'], {
+    cwd: ctx.cwd,
+    signal: ctx.signal
+  })
+  const diffText = (diff.stdout || '').trim()
+  if (!diffText) {
+    ctx.ui.notify('/cleanup: working tree changes produced an empty diff.', 'warning')
+    return
+  }
 
-	try {
-		workflowController.enter(pi, ctx, getWorkflowProfile(CLEANUP_PROFILE_ID));
-	} catch (error) {
-		ctx.ui.notify(`/cleanup cannot start workflow: ${error instanceof Error ? error.message : String(error)}`, "error");
-		return;
-	}
+  try {
+    workflowController.enter(pi, ctx, getWorkflowProfile(CLEANUP_PROFILE_ID))
+  } catch (error) {
+    ctx.ui.notify(`/cleanup cannot start workflow: ${error instanceof Error ? error.message : String(error)}`, 'error')
+    return
+  }
 
-	const stageDir = makeStageDir("cleanup");
-	const diffPath = writeStage(stageDir, "diff", diffText);
-	ctx.ui.notify("/cleanup: launching reuse, quality, and efficiency scouts.", "info");
+  const stageDir = makeStageDir('cleanup')
+  const diffPath = writeStage(stageDir, 'diff', diffText)
+  ctx.ui.notify('/cleanup: launching reuse, quality, and efficiency scouts.', 'info')
 
-	try {
-		const response = await runSubagent(pi, ctx, {
-			tasks: [
-				{ agent: "cleanup.cleanup-reuse-scout", task: cleanupReuseTask(diffPath, focus) },
-				{ agent: "cleanup.cleanup-quality-scout", task: cleanupQualityTask(diffPath, focus) },
-				{ agent: "cleanup.cleanup-efficiency-scout", task: cleanupEfficiencyTask(diffPath, focus) },
-			],
-			context: "fresh",
-			agentScope: "both",
-		}, "/cleanup scouts", "cleanup-subagents");
-		const findings = extractSubagentText(response);
-		const findingsPath = writeStage(stageDir, "findings", findings);
-		ctx.ui.notify("/cleanup: scouts complete. Manual handoff prepared for parent agent to apply fixes.", "info");
-		await handoff({
-			pi,
-			ctx,
-			label: "/cleanup apply",
-			prompt: cleanupApplyPrompt({ diffPath, findingsPath, focus }),
-			policy: "auto",
-			reason: fireAndForgetHandoffReason(),
-		});
-	} catch (error) {
-		exitCleanupController(pi, ctx, "scout_failed");
-		const message = error instanceof Error ? error.message : String(error);
-		ctx.ui.notify(`/cleanup error: ${message}`, "error");
-		throw error;
-	}
+  try {
+    const response = await runSubagent(
+      pi,
+      ctx,
+      {
+        tasks: [
+          {
+            agent: 'cleanup.cleanup-reuse-scout',
+            task: cleanupReuseTask(diffPath, focus)
+          },
+          {
+            agent: 'cleanup.cleanup-quality-scout',
+            task: cleanupQualityTask(diffPath, focus)
+          },
+          {
+            agent: 'cleanup.cleanup-efficiency-scout',
+            task: cleanupEfficiencyTask(diffPath, focus)
+          }
+        ],
+        context: 'fresh',
+        agentScope: 'both'
+      },
+      '/cleanup scouts',
+      'cleanup-subagents'
+    )
+    const findings = extractSubagentText(response)
+    const findingsPath = writeStage(stageDir, 'findings', findings)
+    ctx.ui.notify('/cleanup: scouts complete. Manual handoff prepared for parent agent to apply fixes.', 'info')
+    await handoff({
+      pi,
+      ctx,
+      label: '/cleanup apply',
+      prompt: cleanupApplyPrompt({ diffPath, findingsPath, focus }),
+      policy: 'auto',
+      reason: fireAndForgetHandoffReason()
+    })
+  } catch (error) {
+    exitCleanupController(pi, ctx, 'scout_failed')
+    const message = error instanceof Error ? error.message : String(error)
+    ctx.ui.notify(`/cleanup error: ${message}`, 'error')
+    throw error
+  }
 }
 
 export async function runCleanupQuick(pi: ExtensionAPI, ctx: ExtensionCommandContext): Promise<void> {
-	await ctx.waitForIdle();
-	const lease = workflowToolLeaseManager.acquire(pi, {
-		profileId: CLEANUP_PROFILE_ID,
-		needsTools: CLEANUP_QUICK_TOOLS,
-		optionalTools: [],
-		blockedTools: [],
-	});
-	let releaseImmediately = true;
-	try {
-		await deferToAgentEnd(pi, () => workflowToolLeaseManager.release(pi, lease.token, "/cleanup:quick agent_end"));
-		ctx.ui.notify("/cleanup:quick: manual handoff prepared for obvious junk removal.", "info");
-		const outcome = await handoff({
-			pi,
-			ctx,
-			label: "/cleanup:quick",
-			prompt: cleanupQuickPrompt(),
-			policy: "auto",
-			reason: fireAndForgetHandoffReason(),
-		});
-		releaseImmediately = outcome.kind !== "queued_unverified";
-	} finally {
-		if (releaseImmediately) workflowToolLeaseManager.release(pi, lease.token, "/cleanup:quick immediate_release");
-	}
+  await ctx.waitForIdle()
+  const lease = workflowToolLeaseManager.acquire(pi, {
+    profileId: CLEANUP_PROFILE_ID,
+    needsTools: CLEANUP_QUICK_TOOLS,
+    optionalTools: [],
+    blockedTools: []
+  })
+  let releaseImmediately = true
+  try {
+    await deferToAgentEnd(pi, () => workflowToolLeaseManager.release(pi, lease.token, '/cleanup:quick agent_end'))
+    ctx.ui.notify('/cleanup:quick: manual handoff prepared for obvious junk removal.', 'info')
+    const outcome = await handoff({
+      pi,
+      ctx,
+      label: '/cleanup:quick',
+      prompt: cleanupQuickPrompt(),
+      policy: 'auto',
+      reason: fireAndForgetHandoffReason()
+    })
+    releaseImmediately = outcome.kind !== 'queued_unverified'
+  } finally {
+    if (releaseImmediately) workflowToolLeaseManager.release(pi, lease.token, '/cleanup:quick immediate_release')
+  }
 }
 
 export async function runCleanupExit(pi: ExtensionAPI, ctx: ExtensionCommandContext): Promise<void> {
-	await ctx.waitForIdle();
-	exitCleanupController(pi, ctx, "user_exit");
-	ctx.ui.notify("/cleanup workflow exited.", "info");
+  await ctx.waitForIdle()
+  exitCleanupController(pi, ctx, 'user_exit')
+  ctx.ui.notify('/cleanup workflow exited.', 'info')
 }
 
 export function registerCleanupCommands(pi: ExtensionAPI): void {
-	pi.registerCommand("cleanup", {
-		description: "Review changed files (reuse, quality, efficiency) and apply fixes.",
-		handler: async (args, ctx) => runCleanup(pi, ctx, args),
-	});
+  pi.registerCommand('cleanup', {
+    description: 'Review changed files (reuse, quality, efficiency) and apply fixes.',
+    handler: async (args, ctx) => runCleanup(pi, ctx, args)
+  })
 
-	pi.registerCommand("cleanup:quick", {
-		description: "Delete only obvious junk (console.log, debugger, unused imports, empty catches).",
-		handler: async (_args, ctx) => runCleanupQuick(pi, ctx),
-	});
+  pi.registerCommand('cleanup:quick', {
+    description: 'Delete only obvious junk (console.log, debugger, unused imports, empty catches).',
+    handler: async (_args, ctx) => runCleanupQuick(pi, ctx)
+  })
 
-	pi.registerCommand("cleanup:exit", {
-		description: "Exit the /cleanup workflow and restore prior tools.",
-		handler: async (_args, ctx) => runCleanupExit(pi, ctx),
-	});
+  pi.registerCommand('cleanup:exit', {
+    description: 'Exit the /cleanup workflow and restore prior tools.',
+    handler: async (_args, ctx) => runCleanupExit(pi, ctx)
+  })
 }

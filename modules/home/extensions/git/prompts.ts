@@ -22,7 +22,7 @@ Rules:
 - Commit only already-staged changes.
 - Do not edit files, stage files, unstage files, amend, retry, or bypass hooks.
 - If commit fails, show error output and exact attempted commit message, then stop.
-- If commit succeeds, show commit hash and summary briefly.`;
+- If commit succeeds, show commit hash and summary briefly.`
 
 export const PR_PROMPT = `Create a pull request from the current branch's committed and pushed changes.
 
@@ -66,4 +66,4 @@ Rules:
 - Do not edit files, create commits, amend commits, or fix branch state beyond allowed push.
 - Do not include Test plan, Testing, or How to test sections.
 - If PR creation fails after allowed push-and-retry, show error output plus exact title and body attempted, then stop.
-- If PR succeeds, return PR URL only.`;
+- If PR succeeds, return PR URL only.`

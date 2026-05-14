@@ -1,13 +1,13 @@
 function localDate(): string {
-	const d = new Date();
-	const yyyy = d.getFullYear();
-	const mm = String(d.getMonth() + 1).padStart(2, "0");
-	const dd = String(d.getDate()).padStart(2, "0");
-	return `${yyyy}-${mm}-${dd}`;
+  const d = new Date()
+  const yyyy = d.getFullYear()
+  const mm = String(d.getMonth() + 1).padStart(2, '0')
+  const dd = String(d.getDate()).padStart(2, '0')
+  return `${yyyy}-${mm}-${dd}`
 }
 
 export function planScoutTask(description: string): string {
-	return `Explore repo for /plan idea hardening.
+  return `Explore repo for /plan idea hardening.
 
 User idea:
 ${description}
@@ -23,11 +23,11 @@ Return concise findings only. Include:
 Rules:
 - Read-only. Do not edit or write files.
 - Use fish-compatible read-only shell commands only.
-- Cite exact paths and line ranges where possible.`;
+- Cite exact paths and line ranges where possible.`
 }
 
 export function planRiskScoutTask(description: string): string {
-	return `Run independent risk/validation scout for /plan idea hardening.
+  return `Run independent risk/validation scout for /plan idea hardening.
 
 User idea:
 ${description}
@@ -43,17 +43,17 @@ Focus on:
 Rules:
 - Read-only. Do not edit or write files.
 - Use fish-compatible read-only shell commands only.
-- Cite exact paths and line ranges where possible.`;
+- Cite exact paths and line ranges where possible.`
 }
 
 export interface PlanFinalizeArgs {
-	description: string;
-	findingsPath: string;
+  description: string
+  findingsPath: string
 }
 
 export function planFinalizePrompt(args: PlanFinalizeArgs): string {
-	const date = localDate();
-	return `Finalize Pi /plan for: ${args.description}
+  const date = localDate()
+  return `Finalize Pi /plan for: ${args.description}
 
 Scouts already ran. You now own the interview, synthesis, hardening, and save.
 
@@ -91,18 +91,18 @@ promoted_to:
 promoted_at:
 ---
 
-Required sections: Goal, Findings, Options considered, Recommended approach, Risks, Open questions resolved, Critical files, Promotion notes.`;
+Required sections: Goal, Findings, Options considered, Recommended approach, Risks, Open questions resolved, Critical files, Promotion notes.`
 }
 
 export interface ReviewFinalizeArgs {
-	target: string;
-	reportPath: string;
-	planDraftPath: string;
+  target: string
+  reportPath: string
+  planDraftPath: string
 }
 
 export function reviewFinalizePrompt(args: ReviewFinalizeArgs): string {
-	const date = localDate();
-	return `Finalize /plan:review for: ${args.target}
+  const date = localDate()
+  return `Finalize /plan:review for: ${args.target}
 
 Review agents and synthesis already ran. You now own hardening, save, and optional promotion.
 
@@ -141,11 +141,11 @@ Accepted hardening metadata shapes:
 - Explicit waiver: \`hardened_by: waiver\`, \`hardened_status: waived\`, non-empty \`waiver_reason\`.
 
 Required sections: Goal, Review findings, Required work, Suggestions, Promotion notes.
-Review cards must keep severity in {Blocking, Required, Suggestion}, valid scope names, location, Problem, Evidence, Fix direction, and Spec promotion note. Suggestions must remain Advisory unless explicit opt-in metadata promotes them.`;
+Review cards must keep severity in {Blocking, Required, Suggestion}, valid scope names, location, Problem, Evidence, Fix direction, and Spec promotion note. Suggestions must remain Advisory unless explicit opt-in metadata promotes them.`
 }
 
 export function specVerifierTask(planPath: string): string {
-	return `Verify plan draft before /spec:new.
+  return `Verify plan draft before /spec:new.
 
 Plan path: ${planPath}
 
@@ -164,16 +164,16 @@ Rules:
 - Read-only. Do not edit or write files.
 - Do not create Sworm state.
 - Use fish-compatible read-only shell commands only.
-- Cite exact paths and line ranges where possible.`;
+- Cite exact paths and line ranges where possible.`
 }
 
 export interface SpecFinalizeArgs {
-	planPath: string;
-	verificationPath: string;
+  planPath: string
+  verificationPath: string
 }
 
 export function specFinalizePrompt(args: SpecFinalizeArgs): string {
-	return `Finalize Pi /spec:new from plan draft: ${args.planPath}
+  return `Finalize Pi /spec:new from plan draft: ${args.planPath}
 
 Verifier already ran. You now own the interview, architect/review subagent dispatch, hardening, save, and Sworm writes.
 
@@ -205,5 +205,5 @@ Resolve checkpoints in order; do not skip:
 Required shape files:
 - phased: .sworm/spec/<name>/todo.md + phase-*.md
 - ticketed: .sworm/spec/<name>/todo.md + ticket-*.md
-- light: .sworm/spec/<name>/SPEC.md`;
+- light: .sworm/spec/<name>/SPEC.md`
 }
