@@ -124,7 +124,10 @@ class SlabFooter implements Component {
     const caps = capabilities()
     const state = this.getState()
     const widgetLines = renderWidgetLines(this.widgetHost, state.snapshot.widgets, 'footer', width, caps, state.clock)
-    return renderFooterBridgeLines(widgetLines, this.footerData.getExtensionStatuses().values(), width, caps)
+    const rightWidgetLines = renderWidgetLines(this.widgetHost, state.snapshot.widgets, 'footerRight', width, caps, state.clock)
+    return renderFooterBridgeLines(widgetLines, this.footerData.getExtensionStatuses().values(), width, caps, {
+      rightWidgetLines
+    })
   }
 
   invalidate(): void {}
@@ -328,7 +331,10 @@ export default function slab(pi: ExtensionAPI): void {
       }
       if (!widgetHost) throw new Error('slab widget host not initialized')
       return new SlabEditor(tui, theme, keybindings, getState, widgetHost, {
-        recognizedCommands: () => recognizedCommands,
+        recognizedCommands: () => {
+          refreshCommandRegistry()
+          return recognizedCommands
+        },
         paintThinkingBorder: (thinking, text) =>
           thinkingTonePainter?.paint(ctx.ui.theme, thinking, text) ?? ctx.ui.theme.getThinkingBorderColor('off')(text),
         onTextChange: onEditorTextChange

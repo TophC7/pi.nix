@@ -20,7 +20,7 @@ export type UiTone = 'accent' | 'muted' | 'dim' | 'success' | 'warning' | 'error
 
 export type UiPriority = 'critical' | 'high' | 'normal' | 'low' | 'background'
 
-export type UiWidgetPlacement = 'aboveEditor' | 'belowEditor' | 'footer'
+export type UiWidgetPlacement = 'aboveEditor' | 'belowEditor' | 'inputRight' | 'footer' | 'footerRight'
 
 export interface UiRenderCapabilities {
   readonly color: boolean

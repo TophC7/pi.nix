@@ -18,6 +18,7 @@ import type { SlabConfig, SlabRuntimeState, SlabSegmentRenderContext, SlabSegmen
 
 const CONTENT_PADDING_X = 1
 const AUTOCOMPLETE_INDENT = CONTENT_PADDING_X
+const INPUT_RIGHT_GAP = 2
 const ANSI_PATTERN = /\x1b\[[0-9;]*m/g
 
 const HORIZONTAL = '─'
@@ -334,6 +335,44 @@ function renderWidgetLines(
     .map((line) => fit(line, width, caps))
 }
 
+function inputRightWidth(width: number): number {
+  return Math.min(34, Math.max(16, Math.floor(width * 0.3)))
+}
+
+function canRenderInputRight(totalWidth: number, rightWidth: number): boolean {
+  return totalWidth - rightWidth - INPUT_RIGHT_GAP >= 24
+}
+
+function inputRightContentWidth(lines: readonly string[], maxWidth: number): number {
+  const contentWidth = lines.reduce((width, line) => Math.max(width, visibleWidth(line)), 0)
+  return Math.max(1, Math.min(maxWidth, contentWidth))
+}
+
+function leftPadVisible(line: string, width: number): string {
+  const extra = Math.max(0, width - visibleWidth(line))
+  return `${' '.repeat(extra)}${line}`
+}
+
+function joinInputAdjacent(
+  editorLines: readonly string[],
+  widgetLines: readonly string[],
+  editorWidth: number,
+  widgetWidth: number,
+  caps: UiRenderCapabilities
+): string[] {
+  const rows = Math.max(editorLines.length, widgetLines.length)
+  const gap = ' '.repeat(INPUT_RIGHT_GAP)
+  const lines: string[] = []
+
+  for (let index = 0; index < rows; index++) {
+    const left = padLine(fit(editorLines[index] ?? '', editorWidth, caps), editorWidth)
+    const right = leftPadVisible(fit(widgetLines[index] ?? '', widgetWidth, caps), widgetWidth)
+    lines.push(`${left}${gap}${right}`)
+  }
+
+  return lines
+}
+
 function capabilities(): UiRenderCapabilities {
   const lang = process.env.LC_ALL || process.env.LANG || ''
   return {
@@ -374,18 +413,33 @@ export class SlabEditor extends CustomEditor {
     const caps = capabilities()
     const state = this.getState()
     const safeWidth = Math.max(1, width)
-    const renderWidth = Math.max(1, safeWidth - CONTENT_PADDING_X * 2)
+    const desiredRightWidth = inputRightWidth(safeWidth)
+    const rightWidgets = renderWidgetLines(
+      this.widgetHost,
+      state.snapshot.widgets,
+      'inputRight',
+      desiredRightWidth,
+      caps,
+      state.clock
+    )
+    const rightWidth = inputRightContentWidth(rightWidgets, desiredRightWidth)
+    const useInputRight = rightWidgets.length > 0 && canRenderInputRight(safeWidth, rightWidth)
+    const editorWidth = useInputRight ? safeWidth - rightWidth - INPUT_RIGHT_GAP : safeWidth
+    const renderWidth = Math.max(1, editorWidth - CONTENT_PADDING_X * 2)
     const rawEditor = super.render(renderWidth)
     const match = this.currentSlashMatch
     const editorSurface = wrapSlabEditorLines(rawEditor, {
       state,
-      width: safeWidth,
+      width: editorWidth,
       capabilities: caps,
       focused: this.focused,
       slashCommand: match?.command,
       shimmerPhase: state.clock.tick,
       paintThinkingBorder: this.hooks.paintThinkingBorder
     })
+    const mainSurface = useInputRight
+      ? joinInputAdjacent(editorSurface, rightWidgets, editorWidth, rightWidth, caps)
+      : editorSurface
     const above = renderWidgetLines(
       this.widgetHost,
       state.snapshot.widgets,
@@ -402,6 +456,9 @@ export class SlabEditor extends CustomEditor {
       caps,
       state.clock
     )
-    return [...above, ...editorSurface, ...below]
+    const fallbackInputRight = rightWidgets.length > 0 && !useInputRight
+      ? rightWidgets.map((line) => fit(line, safeWidth, caps))
+      : []
+    return [...above, ...mainSurface, ...fallbackInputRight, ...below]
   }
 }

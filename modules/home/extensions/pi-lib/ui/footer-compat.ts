@@ -1,4 +1,4 @@
-import { truncateToWidth } from '@mariozechner/pi-tui'
+import { truncateToWidth, visibleWidth } from '@mariozechner/pi-tui'
 import { stripControls } from './ansi.ts'
 import type { UiRenderCapabilities } from './contracts.ts'
 
@@ -32,14 +32,45 @@ export function renderLegacyStatusRow(
   return fit(`${label}${values.join(separator)}`, width, capabilities)
 }
 
+export interface FooterBridgeOptions {
+  readonly rightWidgetLines?: readonly string[]
+}
+
 export function renderFooterBridgeLines(
   widgetLines: readonly string[],
   legacyStatuses: Iterable<string | undefined>,
   width: number,
-  capabilities: UiRenderCapabilities
+  capabilities: UiRenderCapabilities,
+  options: FooterBridgeOptions = {}
 ): string[] {
-  const lines = widgetLines.map((line) => fit(line, width, capabilities))
+  const leftLines = widgetLines.map((line) => fit(line, width, capabilities))
   const legacy = renderLegacyStatusRow(legacyStatuses, width, capabilities)
-  if (legacy) lines.push(legacy)
+  if (legacy) leftLines.push(legacy)
+
+  const rightLines = (options.rightWidgetLines ?? []).map((line) => fit(line, width, capabilities))
+  if (rightLines.length === 0) return leftLines
+
+  const rows = Math.max(leftLines.length, rightLines.length)
+  const lines: string[] = []
+  for (let index = 0; index < rows; index++) {
+    lines.push(joinFooterLine(leftLines[index] ?? '', rightLines[index] ?? '', width, capabilities))
+  }
   return lines
+}
+
+function joinFooterLine(
+  left: string,
+  right: string,
+  width: number,
+  capabilities: UiRenderCapabilities
+): string {
+  const safeWidth = Math.max(0, width)
+  const cleanRight = fit(right, safeWidth, capabilities)
+  const rightWidth = visibleWidth(cleanRight)
+  if (rightWidth === 0) return fit(left, safeWidth, capabilities)
+
+  const leftBudget = Math.max(0, safeWidth - rightWidth - 1)
+  const cleanLeft = fit(left, leftBudget, capabilities)
+  const gap = ' '.repeat(Math.max(1, safeWidth - visibleWidth(cleanLeft) - rightWidth))
+  return `${cleanLeft}${gap}${cleanRight}`
 }

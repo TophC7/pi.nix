@@ -13,6 +13,35 @@ let
   b2n = inputs.bun2nix.packages.${system}.default;
   lock = lib.fs.relativeTo ../../locks;
   claudeCode = inputs.llm-agents.packages.${system}.claude-code;
+  piNodePackage = inputs.llm-agents.packages.${system}.pi;
+  piBunPackage = pkgs.stdenvNoCC.mkDerivation {
+    pname = "pi";
+    version = piNodePackage.version or "bun-runtime";
+    nativeBuildInputs = [ pkgs.makeWrapper ];
+    dontUnpack = true;
+
+    installPhase = ''
+      runHook preInstall
+
+      mkdir -p $out/lib/node_modules/@earendil-works $out/bin
+      cp -R --no-preserve=mode,ownership \
+        ${piNodePackage}/lib/node_modules/@earendil-works/pi-coding-agent \
+        $out/lib/node_modules/@earendil-works/pi-coding-agent
+
+      while IFS= read -r file; do
+        substituteInPlace "$file" \
+          --replace-quiet "${pkgs.nodejs}/bin/node" "${pkgs.bun}/bin/bun"
+      done < <(grep -R -l "${pkgs.nodejs}/bin/node" "$out/lib/node_modules" || true)
+
+      makeWrapper ${pkgs.bun}/bin/bun $out/bin/pi \
+        --prefix PATH : ${lib.makeBinPath [ pkgs.bun pkgs.fd pkgs.ripgrep ]} \
+        --set PI_SKIP_VERSION_CHECK 1 \
+        --set PI_TELEMETRY 0 \
+        --add-flags "$out/lib/node_modules/@earendil-works/pi-coding-agent/dist/cli.js"
+
+      runHook postInstall
+    '';
+  };
   localPackageDeclarations = {
     caveman.source = ./extensions/caveman.ts;
     clear.source = ./extensions/clear.ts;
@@ -34,6 +63,16 @@ let
     # Multi-file extension packages: each owns index.ts and optional agents/*.md.
     slab = {
       source = ./extensions/slab;
+      entry = "index.ts";
+      agentsDir = null;
+    };
+    buddy = {
+      source = lib.cleanSourceWith {
+        src = ./extensions/buddy;
+        filter = path: type:
+          !(type == "directory" && baseNameOf path == "tests")
+          && !(lib.hasInfix "/tests/" (toString path));
+      };
       entry = "index.ts";
       agentsDir = null;
     };
@@ -93,7 +132,7 @@ in
 
     package = lib.mkOption {
       type = lib.types.package;
-      default = inputs.llm-agents.packages.${system}.pi;
+      default = piBunPackage;
       description = "Pi coding agent package to install.";
     };
 

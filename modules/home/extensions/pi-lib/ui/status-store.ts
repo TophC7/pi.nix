@@ -59,10 +59,25 @@ const PRIORITY_ORDER: Record<UiPriority, number> = {
   background: 4
 }
 
-let nextGeneratedId = 1
+const GLOBAL_STATE_KEY = '__piLibUiStatusStore'
+
+interface SharedUiStatusStoreGlobalState {
+  readonly store: UiStatusStoreWriter
+  nextGeneratedId: number
+}
+
+function sharedGlobalState(): SharedUiStatusStoreGlobalState {
+  // Pi loads each extension through jiti with moduleCache disabled, so every
+  // extension can receive its own @pi/lib module instance. Keep the shared UI
+  // store on globalThis so producers (Buddy) and hosts (Slab) meet in one bus.
+  const root = globalThis as typeof globalThis & { [GLOBAL_STATE_KEY]?: SharedUiStatusStoreGlobalState }
+  root[GLOBAL_STATE_KEY] ??= { store: createUiStatusStore(), nextGeneratedId: 1 }
+  return root[GLOBAL_STATE_KEY]
+}
 
 function newId(owner: string): UiEntryId {
-  return `${owner}:${nextGeneratedId++}`
+  const state = sharedGlobalState()
+  return `${owner}:${state.nextGeneratedId++}`
 }
 
 function lifecycle(now: number, ttlMs: number | undefined, staleAfterMs: number | undefined): UiLifecycle {
@@ -304,7 +319,7 @@ export function createUiStatusStore(): UiStatusStoreWriter {
   return new SharedUiStatusStore()
 }
 
-export const uiStatusStore = createUiStatusStore()
+export const uiStatusStore = sharedGlobalState().store
 
 export function getUiStatusStore(): UiStatusStore {
   return uiStatusStore
