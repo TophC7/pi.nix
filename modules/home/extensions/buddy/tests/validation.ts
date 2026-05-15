@@ -9,7 +9,7 @@ import { getCompanion, hatchCompanion, observeCompanion, petCompanion } from '..
 import { initBuddySchema } from '../db/schema.ts'
 import { renderSprite, SPECIES_LIST } from '../core/species.ts'
 import { refreshBuddyRenderState, renderBuddyFooter, renderBuddyInputSprite, renderBuddyPresenceSprite } from '../ui/render.ts'
-import { renderSharePreview } from '../ui/share-preview.ts'
+import { renderBuddyDossier } from '../ui/dossier.ts'
 import { resolveBuddyStatePaths } from '../db/paths.ts'
 import { buildBuddyContext } from '../prompts.ts'
 import { registerBuddyTools } from '../tools.ts'
@@ -170,10 +170,11 @@ check('UI placement static gates', () => {
   const buddyCommands = readFileSync(join(root, 'modules/home/extensions/buddy/commands.ts'), 'utf8')
   const buddyDialog = readFileSync(join(root, 'modules/home/extensions/buddy/ui/dialog.ts'), 'utf8')
   const buddyRender = readFileSync(join(root, 'modules/home/extensions/buddy/ui/render.ts'), 'utf8')
-  const sharePreview = readFileSync(join(root, 'modules/home/extensions/buddy/ui/share-preview.ts'), 'utf8')
+  const buddyDossier = readFileSync(join(root, 'modules/home/extensions/buddy/ui/dossier.ts'), 'utf8')
   const slabEditor = readFileSync(join(root, 'modules/home/extensions/slab/editor.ts'), 'utf8')
   const slabFooter = readFileSync(join(root, 'modules/home/extensions/slab/index.ts'), 'utf8')
   const footerCompat = readFileSync(join(root, 'modules/home/extensions/pi-lib/ui/footer-compat.ts'), 'utf8')
+  const gitActions = readFileSync(join(root, 'modules/home/extensions/git/actions.ts'), 'utf8')
   assert(contracts.includes('inputRight') && contracts.includes('footerRight'), 'pi-lib placements missing')
   assert(buddyUi.includes("placement: 'inputRight'") && buddyUi.includes("placement: 'footerRight'") && !buddyUi.includes("placement: 'inputFooter'"), 'Buddy should own inputRight presence plus footerRight name')
   assert(buddyCommands.includes('openBuddyDialog') && buddyCommands.includes('getArgumentCompletions'), 'Buddy command missing native dialog/completions')
@@ -184,18 +185,19 @@ check('UI placement static gates', () => {
   assert(!buddyRender.includes('shiftDown: true'), 'Buddy footer should not move sprite feet with Pi footer')
   assert(!buddyEvents.includes('setStatus') && buddyEvents.includes('refreshBuddyStatus'), 'Buddy should not use legacy Pi status footer')
   assert(buddyCommandRouter.includes('refreshBuddyStatus'), 'Slash command path should refresh Buddy status after each action')
-  assert(!sharePreview.includes('renderCard') && sharePreview.includes('joinColumns') && sharePreview.includes('renderStatLine'), 'Buddy share preview should use dossier layout without nested card box')
-  assert(sharePreview.includes("theme.fg('success'") && sharePreview.includes("theme.fg('warning'") && sharePreview.includes('wrapText'), 'Buddy share preview should color peak/dump stats and wrap description text')
+  assert(!buddyDossier.includes('renderCard') && buddyDossier.includes('joinColumns') && buddyDossier.includes('renderStatLine'), 'Buddy dossier should use dossier layout without nested card box')
+  assert(buddyDossier.includes("theme.fg('success'") && buddyDossier.includes("theme.fg('warning'") && buddyDossier.includes('wrapText'), 'Buddy dossier should color peak/dump stats and wrap description text')
   assert(slabEditor.includes('inputRight') && !slabEditor.includes('inputFooter') && !slabEditor.includes('inputFooterRight'), 'Slab editor should only manage inputRight; compact name belongs to footerRight')
   assert(slabEditor.includes('visibleWidth(line)') && !slabEditor.includes('visibleWidth(stripControls(line))'), 'Slab inputRight width must include visible padding to avoid overflow')
   assert(slabEditor.includes('layoutRightRail') && slabEditor.includes('footerLine') && !slabEditor.includes('Math.max(editorLines.length, widgetLines.length)'), 'Slab inputRight must not add rows below the editor; spillover belongs to footer line')
   assert(slabFooter.includes('footerRight') && slabFooter.includes('renderSlabFooterLines') && slabFooter.includes('mergeFooterRightRail') && !slabFooter.includes('getExtensionStatuses().values()'), 'Slab footer should render mcp-aware footerRight, not legacy compat values')
   assert(!footerCompat.includes('visibleWidth(stripControls(cleanRight))') && !footerCompat.includes('visibleWidth(stripControls(cleanLeft))'), 'Footer right layout must preserve spaces when measuring widget widths')
   assert(slabFooter.includes('refreshCommandRegistry()') && slabFooter.includes('recognizedCommands'), 'Slab command registry not refreshed for extension commands')
+  assert(gitActions.includes("if (outcome.kind === 'queued_unverified') return") && gitActions.includes("ctx.ui.notify(`/${restore.action} config restored`"), '/git model override should survive queued handoff until agent_end restore')
   assert(!productionBuddySource().some((entry) => entry.text.includes('ctx.ui.set' + 'Footer') || entry.text.includes('ctx.ui.set' + 'EditorComponent')), 'Buddy directly owns Pi footer/editor UI')
 })
 
-check('sprite canvas and share header layout stay deterministic', () => {
+check('sprite canvas and dossier header layout stay deterministic', () => {
   const db = new Database(':memory:')
   initBuddySchema(db)
   const companion = hatchCompanion(db, { name: 'Deltaflare', species: 'Data Drake' }).companion
@@ -220,10 +222,10 @@ check('sprite canvas and share header layout stay deterministic', () => {
   assert(gooseInput[0]?.trimStart().startsWith('[___]'), 'hat should sit at the top of the canvas')
   assert(gooseInput.at(-1)?.includes('^^^^'), 'feet should sit at the bottom of the canvas')
 
-  const preview = renderSharePreview(dataDrake, 56)
-  assert(preview[0]?.includes('happy'), 'share header should move mood to former level slot')
-  assert(preview[1]?.includes('lvl ') && preview[1]?.includes('/'), 'share level header should include lvl, bar, and current/needed XP')
-  assert(!preview.at(-1)?.includes('happy ·'), 'share description should not duplicate mood footer')
+  const preview = renderBuddyDossier(dataDrake, 56)
+  assert(preview[0]?.includes('happy'), 'dossier header should move mood to former level slot')
+  assert(preview[1]?.includes('lvl ') && preview[1]?.includes('/'), 'dossier level header should include lvl, bar, and current/needed XP')
+  assert(!preview.at(-1)?.includes('happy ·'), 'dossier description should not duplicate mood footer')
 })
 
 check('forbidden archive and cross-client strings absent from production Buddy source', () => {

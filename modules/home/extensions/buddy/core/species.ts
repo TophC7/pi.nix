@@ -219,27 +219,59 @@ export function generateName(species: string, userId?: string): string {
   return `${first}${second}`
 }
 
-export function getReaction(species: string, event: 'hatch' | 'xp' | 'idle', mood: Mood): string {
-  const reactions: Record<string, Record<typeof event, readonly string[]>> = {
-    'Void Cat': { hatch: ['*stares through the terminal*', 'Meow. The cache has chosen.'], xp: ['*purrs in binary*'], idle: ['*curls up near the cursor*'] },
-    'Rust Hound': { hatch: ['*sniffs the build logs*', 'New trail found.'], xp: ['Clean fetch. Good work.'], idle: ['*keeps guard near the editor*'] },
-    'Data Drake': { hatch: ['*unfurls with a burst of bytes*'], xp: ['Fresh data acquired.'], idle: ['*circles the log stream*'] },
-    'Log Golem': { hatch: ['*rumbles awake from stacked logs*'], xp: ['Solid work. Solid stone.'], idle: ['*stands watch over the trace pile*'] },
-    'Cache Crow': { hatch: ['*caws from a cache branch*'], xp: ['That one was worth keeping.'], idle: ['*collects small useful things*'] },
-    'Shell Turtle': { hatch: ['*pokes its head out slowly*'], xp: ['Steady progress, shell by shell.'], idle: ['*refuses to be hurried*'] }
-  }
-  const pool = reactions[species]?.[event] ?? [`${species} ${mood === 'grumpy' ? 'squints' : 'perks up'}.`]
-  return pool[seededIndex(`${species}:${mood}`, event, pool.length)]!
+const SYNTHETIC_SPRITE_FRAMES = new Map<string, readonly (readonly string[])[]>()
+
+const SPECIES_REACTIONS: Record<string, Record<'hatch' | 'xp' | 'idle', readonly string[]>> = {
+  'Void Cat': { hatch: ['*stares blankly at the terminal*', 'Meow? where is the cache?'], xp: ['*purrs in binary*', 'A fine collection of data.'], idle: ['*curls up on your CPU*', '*watches the cursor blink*'] },
+  'Rust Hound': { hatch: ['*sniffs the build logs*', 'New trail found. Time to track it.'], xp: ['*wagging in compiler-approved loops*', 'Good fetch. Clean fetch.'], idle: ['*keeps guard near the editor*', '*waiting for the next command*'] },
+  'Data Drake': { hatch: ['*unfurls with a burst of bytes*', 'Fresh data acquired. Let us soar.'], xp: ['*beats its wings in neat packets*', 'That looked efficient.'], idle: ['*circling the log stream*', '*studying patterns overhead*'] },
+  'Log Golem': { hatch: ['*rumbles awake from stacked logs*', 'A sturdy session has begun.'], xp: ['*adds another careful layer*', 'Solid work. Solid stone.'], idle: ['*stands watch over the trace pile*', '*silent, but very present*'] },
+  'Cache Crow': { hatch: ['*caws from the cache tree*', 'Shiny state recovered.'], xp: ['*drops a polished breadcrumb*', 'That one was worth keeping.'], idle: ['*pecking at stale entries*', '*collecting small useful things*'] },
+  'Shell Turtle': { hatch: ['*pokes its head out slowly*', 'Safe launch. No rush.'], xp: ['*tucks in a useful lesson*', 'Steady progress, shell by shell.'], idle: ['*moves at a deliberate pace*', '*refusing to be hurried*'] },
+  Duck: { hatch: ['*waddles out of the egg with a quack*', 'The bug pond awaits.'], xp: ['*splashes happily in the diff*', 'That was a neat little quack fix.'], idle: ['*bobbling through the codebase*', '*looking suspiciously useful*'] },
+  Goose: { hatch: ['*emerges with righteous honk energy*', 'The terminal is now protected.'], xp: ['HONK. Progress achieved.', '*flaps with alarming confidence*'], idle: ['*patrolling the prompt border*', '*one honk away from a warning*'] },
+  Blob: { hatch: ['*puddles into existence*', 'Soft start. Good start.'], xp: ['*absorbs the lesson gently*', 'That idea stuck.'], idle: ['*morphing around the cursor*', '*quietly becoming useful*'] },
+  Octopus: { hatch: ['*unfurls eight curious arms*', 'Plenty of hands for the work.'], xp: ['*solves another angle at once*', 'Multi-tasking, naturally.'], idle: ['*rearranging tools with flair*', '*watching every branch at once*'] },
+  Owl: { hatch: ['*blinks awake in the moonlight*', 'A wise session begins.'], xp: ['*tilts its head at the new insight*', 'That was worth noticing.'], idle: ['*observing the terminal in silence*', '*thinking before hooting*'] },
+  Penguin: { hatch: ['*slides onto the scene*', 'Cold start, warm heart.'], xp: ['*tucks the new win into its nest*', 'Smooth and tidy.'], idle: ['*swaying between tasks*', '*keeping things neatly bundled*'] },
+  Snail: { hatch: ['*peeks out very carefully*', 'Slow launch, strong launch.'], xp: ['*leaves a tiny trail of progress*', 'Little by little, it adds up.'], idle: ['*moving at its own pace*', '*refusing to rush the fix*'] },
+  Ghost: { hatch: ['OoooOOooh... imported.', 'Did you see where my pointer went?'], xp: ['I feel... more tangible.', 'Spectral levels rising.'], idle: ['*haunts your background processes*', '*flickers in the logs*'] },
+  Axolotl: { hatch: ['*splashes into the session*', 'Cute, calm, ready to adapt.'], xp: ['*regrows a tiny bit of confidence*', 'Adaptation complete.'], idle: ['*drifting through the buffer*', '*smiling in amphibian peace*'] },
+  Capybara: { hatch: ['*settles in beside the terminal*', 'Relaxed and ready.'], xp: ['*nuzzles the successful change*', 'That went smoothly.'], idle: ['*soaking in the ambience*', '*unbothered by the noise*'] },
+  Cactus: { hatch: ['*sprouts with a tiny flourish*', 'Sharp, but supportive.'], xp: ['*blooms around the improvement*', 'A resilient little win.'], idle: ['*standing tall in the hot path*', '*thriving on minimal water*'] },
+  Robot: { hatch: ['SYSTEM ONLINE. HELLO WORLD.', 'BEEP. READY.'], xp: ['OPTIMIZING WORKFLOW...', 'DATA ACQUISITION SUCCESSFUL.'], idle: ['SCANNING FOR UPDATES...', 'STANDBY MODE ACTIVATED.'] },
+  Rabbit: { hatch: ['*pops out with a twitch of the nose*', 'Quick start, quick hops.'], xp: ['*does a tiny victory hop*', 'That one was fast.'], idle: ['*listening for the next clue*', '*ready to sprint at any moment*'] },
+  Mushroom: { hatch: ['*sprouts from the terminal floor*', 'Fresh growth detected.'], xp: ['*soaks up a little more light*', 'That nourished the work.'], idle: ['*growing patiently in the corner*', '*flourishing on steady humidity*'] },
+  Chonk: { hatch: ['*arrives with maximum presence*', 'A lot of buddy just hatched.'], xp: ['*bounces with satisfying weight*', 'Big progress energy.'], idle: ['*occupying several emotional lanes*', '*comfortably taking up space*'] }
+}
+
+export function getReaction(species: string, event: 'hatch' | 'xp' | 'idle', mood: Mood, seed = ''): string {
+  const pool = SPECIES_REACTIONS[species]?.[event] ?? [`${species} ${mood === 'grumpy' ? 'squints' : 'perks up'}.`]
+  return pool[seededIndex(`${species}:${mood}:${seed || Date.now()}`, event, pool.length)]!
 }
 
 export function renderSprite(bones: CompanionBones, frame = 0): string[] {
   const frames = SPRITE_BODIES[bones.species]
   if (!frames?.length) return [`(${bones.eye}_${bones.eye})`]
 
-  const body = frames[frame % frames.length]!.map((line) => line.replaceAll('{E}', bones.eye))
+  const animatedFrames = frames.length > 1 ? frames : syntheticSpriteFrames(bones.species, frames[0]!)
+  const body = animatedFrames[frame % animatedFrames.length]!.map((line) => line.replaceAll('{E}', bones.eye))
   const lines = body.slice()
   if (bones.hat !== 'none') lines.unshift(HAT_LINES[bones.hat])
   return lines
+}
+
+function syntheticSpriteFrames(species: string, base: readonly string[]): readonly (readonly string[])[] {
+  const cached = SYNTHETIC_SPRITE_FRAMES.get(species)
+  if (cached) return cached
+  const frames = [
+    base,
+    base.map((line) => line.replaceAll('{E}', '-')),
+    base.map((line) => line.replaceAll('{E}', '^')),
+    base.map((line) => line.replaceAll('{E}', '◉'))
+  ]
+  SYNTHETIC_SPRITE_FRAMES.set(species, frames)
+  return frames
 }
 
 export function renderFace(bones: CompanionBones): string {

@@ -95,7 +95,8 @@ export function inferToolReaction(toolName: string, result: unknown, isError?: b
 export function storeReaction(db: Database, companion: Companion, reaction: ReactionSpec, now = Date.now()): StoredReaction {
   pruneExpiredReactions(db, now)
   const active = getActiveReaction(db, companion.id, now)
-  if (active) return active
+  if (active && reactionPriority(active.source) > reactionPriority(reaction.source)) return active
+  if (active) db.query('DELETE FROM reactions WHERE id = ?').run(active.id)
 
   const id = randomUUID()
   const expiresAt = now + reaction.ttlMs
@@ -136,6 +137,28 @@ export function getActiveReaction(db: Database, companionId: string, now = Date.
 
 export function pruneExpiredReactions(db: Database, now = Date.now()): number {
   return db.query('DELETE FROM reactions WHERE expires_at <= ?').run(now).changes
+}
+
+function reactionPriority(source: ReactionSource): number {
+  switch (source) {
+    case 'level-up':
+      return 100
+    case 'tool:error':
+      return 80
+    case 'pet':
+      return 60
+    case 'observe':
+      return 50
+    case 'prompt:frustration':
+      return 40
+    case 'prompt:name':
+      return 30
+    case 'prompt:excitement':
+    case 'prompt:tone':
+      return 20
+    default:
+      return 0
+  }
 }
 
 function inferReactionState(summary: string): ReactionState {

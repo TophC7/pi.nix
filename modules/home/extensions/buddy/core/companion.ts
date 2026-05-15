@@ -93,7 +93,22 @@ const petReactions: Record<string, readonly string[]> = {
   'Data Drake': ['*hoards this affection carefully*', '*chirps in packet-sized sparks*'],
   'Log Golem': ['*rumbles warmly*', '*adds one happy log entry*'],
   'Cache Crow': ['*caws and hides a shiny feeling*', '*preens with suspicious pride*'],
-  'Shell Turtle': ['*accepts pets at a safe pace*', '*slow blink of approval*']
+  'Shell Turtle': ['*accepts pets at a safe pace*', '*slow blink of approval*'],
+  Duck: ['*happy little paddle*', '*quacks into the sleeve*'],
+  Goose: ['*permits this. barely.*', 'HONK. acceptable.'],
+  Blob: ['*squishes approvingly*', '*wobbles into the hand*'],
+  Octopus: ['*delegates one arm to affection*', '*all eight arms approve*'],
+  Owl: ['*blinks with scholarly tolerance*', '*feathers settle neatly*'],
+  Penguin: ['*tiny flipper pat accepted*', '*slides closer*'],
+  Snail: ['*extends one polite eyestalk*', '*slowly appreciates this*'],
+  Ghost: ['*your hand passes through. still counts.*', '*flickers happily*'],
+  Axolotl: ['*gills wiggle brightly*', '*smiles in amphibian*'],
+  Capybara: ['*unbothered. pleased.*', '*settles harder*'],
+  Cactus: ['*careful side pat only*', '*tiny flower approves*'],
+  Robot: ['AFFECTION INPUT ACCEPTED.', '*fans spin softly*'],
+  Rabbit: ['*nose twitch escalation*', '*tiny hop of approval*'],
+  Mushroom: ['*cap wiggles gently*', '*absorbs good vibes*'],
+  Chonk: ['*maximum purr density*', '*leans with structural importance*']
 }
 
 export function getCompanion(db: Database, userIdOverride?: string): Companion | null {
@@ -196,7 +211,7 @@ export function observeCompanion(db: Database, summary: string, mode?: string): 
   const xp = awardXp(db, row.id, 'observe')
   const companion = refreshMood(db, row.id, xp.leveledUp)
   const voiceMode = isVoiceMode(mode) ? mode : isVoiceMode(row.observer_mode) ? row.observer_mode : 'both'
-  const baseReaction = getReaction(companion.species, 'xp', toMood(companion.mood))
+  const baseReaction = getReaction(companion.species, 'xp', toMood(companion.mood), `${cleanSummary}:${companion.xp}`)
   const reaction = xp.leveledUp
     ? `✨ ${companion.name} leveled up to ${xp.newLevel}! ${baseReaction}`
     : baseReaction

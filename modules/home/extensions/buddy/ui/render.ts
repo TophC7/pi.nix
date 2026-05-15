@@ -1,5 +1,6 @@
 import { visibleWidth } from '@mariozechner/pi-tui'
 import { fitLine, padLine } from '@pi/lib/ui'
+import { getAnimationProfile, getAnimationState, pickFrame } from '../core/animation.ts'
 import type { StoredReaction } from '../core/reactions.ts'
 import { renderFace, renderSprite } from '../core/species.ts'
 import type { Companion, Eye } from '../core/types.ts'
@@ -15,12 +16,14 @@ export interface BuddyPresenceSpriteOptions {
   readonly maxWidth?: number
   readonly includeName?: boolean
   readonly shiftDown?: boolean
+  readonly blink?: boolean
 }
 
 export interface BuddyInputSpriteOptions {
   readonly eye?: Eye
   readonly frame?: number
   readonly maxWidth?: number
+  readonly blink?: boolean
 }
 
 const FOOTER_BUDDY_MAX_TERMINAL_WIDTH = 62
@@ -37,10 +40,12 @@ export function renderBuddyInput(context: BuddyRenderContext): readonly string[]
   if (!cachedCompanion) return []
 
   const reaction = activeReaction(cachedCompanion)
-  const eye = (reaction?.eyeOverride as Eye | undefined) ?? cachedCompanion.eye
+  const eye = (reaction?.eyeOverride as Eye | undefined) || cachedCompanion.eye
+  const frame = pickBuddyFrame(cachedCompanion, reaction, context.tick ?? 0)
   return renderBuddyInputSprite(cachedCompanion, {
     eye,
-    frame: context.tick ?? 0,
+    frame: frame.frame,
+    blink: frame.blink,
     maxWidth: context.width
   })
 }
@@ -49,7 +54,7 @@ export function renderBuddyFooter(context: BuddyRenderContext): readonly string[
   if (!cachedCompanion) return []
 
   const reaction = activeReaction(cachedCompanion)
-  const eye = (reaction?.eyeOverride as Eye | undefined) ?? cachedCompanion.eye
+  const eye = (reaction?.eyeOverride as Eye | undefined) || cachedCompanion.eye
   const compactFace = context.width < FOOTER_BUDDY_MAX_TERMINAL_WIDTH ? ` ${renderFace({ ...cachedCompanion, eye })}` : ''
   return [fitPlain(`${cachedCompanion.name}${compactFace}`, context.width)]
 }
@@ -77,11 +82,12 @@ export function renderBuddyPresenceSprite(
 }
 
 function rawSpriteLines(companion: Companion, options: BuddyPresenceSpriteOptions | BuddyInputSpriteOptions): string[] {
-  return cropSpriteCanvas(
-    renderSprite({ ...companion, eye: options.eye ?? companion.eye }, options.frame ?? 0)
-      .map((line) => line.trimEnd())
-      .filter((line) => line.length > 0)
-  )
+  const eye = options.eye || companion.eye
+  const lines = renderSprite({ ...companion, eye }, options.frame ?? 0)
+    .map((line) => options.blink && eye ? line.replaceAll(eye, '-') : line)
+    .map((line) => line.trimEnd())
+    .filter((line) => line.length > 0)
+  return cropSpriteCanvas(lines)
 }
 
 function cropSpriteCanvas(lines: readonly string[]): string[] {
@@ -131,4 +137,9 @@ function centerPlain(line: string, width: number): string {
 function activeReaction(companion: Companion): StoredReaction | null {
   if (!cachedReaction || cachedReaction.companionId !== companion.id) return null
   return cachedReaction.expiresAt > Date.now() ? cachedReaction : null
+}
+
+function pickBuddyFrame(companion: Companion, reaction: StoredReaction | null, tick: number) {
+  const profile = getAnimationProfile(companion.species)
+  return pickFrame(profile, getAnimationState(companion, reaction), tick)
 }

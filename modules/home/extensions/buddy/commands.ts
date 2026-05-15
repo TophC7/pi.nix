@@ -10,7 +10,6 @@ const BUDDY_ACTIONS = [
   { value: 'pet', label: 'pet', description: 'Pet Buddy and award small XP.' },
   { value: 'mode', label: 'mode', description: 'Set voice mode: backseat, skillcoach, both.' },
   { value: 'guard', label: 'guard', description: 'Toggle guard-mode reasoning observations.' },
-  { value: 'share', label: 'share', description: 'Open terminal card preview overlay.' },
   { value: 'remember', label: 'remember', description: 'Store a Buddy memory.' },
   { value: 'forget', label: 'forget', description: 'Forget memories, progress, or all state.' },
   { value: 'reasoning', label: 'reasoning', description: 'Show or purge guard-mode reasoning state.' },
@@ -35,13 +34,6 @@ async function runBuddyCommand(ctx: ExtensionCommandContext, args: string): Prom
   if (action === '' || action === 'settings' || action === 'config' || action === 'help') {
     const result = openBuddyDialog(ctx)
     if (result.isError) ctx.ui.notify(result.text, 'warning')
-    return
-  }
-
-  if (action === 'share') {
-    const { openBuddySharePreview } = await import('./ui/share-dialog.ts')
-    const result = openBuddySharePreview(ctx)
-    ctx.ui.notify(result.text, result.isError ? 'warning' : 'info')
     return
   }
 
@@ -103,9 +95,11 @@ function lastToken(args: string): string {
 }
 
 function summarizeCommandResult(action: string, text: string, details: unknown): string {
-  const companion = (details as { companion?: { name?: string; species?: string } } | undefined)?.companion
+  const resultDetails = details as { companion?: { name?: string; species?: string }; animation?: string } | undefined
+  const companion = resultDetails?.companion
   if (action === 'hatch' && companion?.name && companion.species) {
-    return `Hatched ${companion.name} the ${companion.species}. Run /buddy for settings.`
+    const animation = resultDetails?.animation ?? text
+    return animation.length <= 700 ? animation : `Hatched ${companion.name} the ${companion.species}. Run /buddy for the full Buddy view.`
   }
   if (text.length <= 700) return text
   const firstLine = text.split('\n').find((line) => line.trim().length > 0)

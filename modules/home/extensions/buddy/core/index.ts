@@ -1,3 +1,4 @@
+export * from './animation.ts'
 export * from './bubble.ts'
 export * from './card.ts'
 export * from './companion.ts'

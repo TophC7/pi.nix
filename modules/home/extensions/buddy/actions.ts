@@ -43,7 +43,7 @@ export function buddyHatch(input: BuddyHatchInput = {}): BuddyActionResult {
   return capture(() => {
     const { db } = getBuddyDatabase()
     const result = hatchCompanion(db, { name: input.name, species: input.species, userId: input.user_id })
-    return { text: result.animation + '\n\n' + result.reaction, details: { companion: result.companion, card: result.card } }
+    return { text: result.animation + '\n\n' + result.reaction, details: { companion: result.companion, card: result.card, animation: result.animation } }
   })
 }
 
@@ -191,15 +191,6 @@ export function buddyReasoningPurge(input: BuddyReasoningPurgeInput = {}): Buddy
     if (scope === 'session' && !sessionId) return hatchFirst('Hatch a companion first or pass session_id to purge reasoning session state.')
     const result = purgeReasoning(db, scope, sessionId)
     return { text: 'Buddy reasoning purge complete: ' + result.claims + ' claims, ' + result.edges + ' edges, ' + result.findings + ' findings.', details: { scope, sessionId, ...result } }
-  })
-}
-
-export function buddyShareHeadless(): BuddyActionResult {
-  return capture(() => {
-    const { db } = getBuddyDatabase()
-    const companion = getCompanion(db)
-    if (!companion) return hatchFirst('Hatch a companion first, then run /buddy share.')
-    return { text: 'Buddy share preview requires interactive Pi UI. Run /buddy share in the TUI.', isError: true, details: { companion } }
   })
 }
 

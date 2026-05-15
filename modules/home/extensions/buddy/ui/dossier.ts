@@ -12,9 +12,9 @@ const COLUMN_GAP = '  '
 
 type StatEmphasis = 'peak' | 'dump' | 'normal'
 
-type ShareTheme = Pick<Theme, 'fg'>
+type DossierTheme = Pick<Theme, 'fg'>
 
-export function renderSharePreview(companion: Companion, width = 56, theme?: ShareTheme): readonly string[] {
+export function renderBuddyDossier(companion: Companion, width = 56, theme?: DossierTheme): readonly string[] {
   const safeWidth = Math.max(MIN_WIDTH, width)
   const peak = getPeakStat(companion.stats)
   const dump = getDumpStat(companion.stats)
@@ -59,7 +59,7 @@ function joinColumns(
   return lines
 }
 
-function renderStatLine(stat: StatName, value: number, emphasis: StatEmphasis, theme: ShareTheme | undefined): string {
+function renderStatLine(stat: StatName, value: number, emphasis: StatEmphasis, theme: DossierTheme | undefined): string {
   const clamped = Math.max(0, Math.min(100, value))
   const line = `${stat.padEnd(9)}  ${bar(clamped / 100, BAR_WIDTH)} ${String(clamped).padStart(3)}`
   if (!theme) return line

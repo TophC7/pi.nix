@@ -9,7 +9,6 @@ import {
   buddyReasoningStatus,
   buddyRemember,
   buddyRespawn,
-  buddyShareHeadless,
   buddyStatus,
   buddyUnmute,
   type BuddyActionResult
@@ -68,8 +67,6 @@ function dispatch(parsed: ParsedCommand): BuddyActionResult {
       return dispatchReasoning(parsed)
     case 'forget':
       return buddyForget({ scope: option(parsed, 'scope') ?? parsed.rest[0] })
-    case 'share':
-      return buddyShareHeadless()
     case 'help':
       return buddyHelp()
     default:
@@ -138,7 +135,6 @@ function buddyUsage(): string {
     '  reasoning status [cwd=<path>]',
     '  reasoning purge [session|all] [session_id=<id>]',
     '  forget [memories|progress|all]',
-    '  share',
     '  respawn'
   ].join('\n')
 }

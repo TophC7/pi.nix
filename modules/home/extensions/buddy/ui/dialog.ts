@@ -1,5 +1,5 @@
 import type { ExtensionCommandContext, Theme } from '@mariozechner/pi-coding-agent'
-import { Key, matchesKey, truncateToWidth, type Component } from '@mariozechner/pi-tui'
+import { Key, matchesKey, truncateToWidth } from '@mariozechner/pi-tui'
 import {
   fitLine,
   openDialog,
@@ -11,12 +11,10 @@ import {
 } from '@pi/lib/ui'
 import { buddyHatch, buddyMode, buddyMute, buddyPet, buddyUnmute, type BuddyActionResult } from '../actions.ts'
 import { getCompanion } from '../core/companion.ts'
-import { levelProgress } from '../core/leveling.ts'
-import { getDumpStat, getPeakStat, RARITY_STARS, STAT_NAMES, type Companion } from '../core/types.ts'
+import type { Companion } from '../core/types.ts'
 import { getActiveReaction } from '../core/reactions.ts'
-import { renderBuddyPresenceSprite } from './render.ts'
 import { getBuddyDatabase } from '../db/index.ts'
-import { openBuddySharePreview } from './share-dialog.ts'
+import { renderBuddyDossier } from './dossier.ts'
 
 const FOOTER_KEYS = [
   { key: '↑/↓', label: 'row' },
@@ -38,12 +36,11 @@ export function openBuddyDialog(ctx: unknown): BuddyActionResult {
   }
 
   openDialog(ctx, ({ theme, close }) => new BuddyDialog(ctx, theme, close), {
-    width: '86%',
-    maxHeight: '90%',
-    minWidth: 54,
-    maxWidth: 82,
-    padding: 1,
-    borderStyle: 'rounded'
+    width: '96%',
+    maxHeight: '94%',
+    minWidth: 60,
+    padding: 0,
+    borderStyle: 'square'
   })
 
   return { text: 'Buddy dialog opened.' }
@@ -105,19 +102,10 @@ class BuddyDialog implements DialogContent {
       ]
     }
 
-    const progress = levelProgress(companion.xp)
-    const stats = STAT_NAMES.map((name) => `${name}:${companion.stats[name]}`).join(' ')
-    const reaction = state.reaction?.text ? `“${state.reaction.text}”` : companion.personalityBio
-    const sprite = renderBuddyPresenceSprite(companion, { includeName: false, shiftDown: false }).map((line) => `  ${this.theme.fg('accent', line)}`)
-    const meta = [
-      `  ${this.theme.bold(`${companion.name}`)} ${this.theme.fg('muted', `${companion.species} ${RARITY_STARS[companion.rarity]}`)}  ${this.theme.fg('dim', `mood ${companion.mood}`)}`,
-      `  ${this.theme.fg('muted', levelText(progress))}  ${this.theme.fg('dim', `voice ${companion.observerMode} · guard ${companion.guardMode ? 'on' : 'off'}`)}`,
-      `  ${this.theme.fg('dim', `peak ${getPeakStat(companion.stats)} · dump ${getDumpStat(companion.stats)}`)}`,
-      `  ${this.theme.fg('dim', fitLine(stats, Math.max(8, width - 4)))}`,
-      `  ${fitLine(reaction, Math.max(8, width - 4))}`
-    ]
-
-    return [...sprite, ...meta]
+    const bodyWidth = Math.max(44, width - 4)
+    const lines = renderBuddyDossier(companion, bodyWidth, this.theme).map((line) => `  ${line}`)
+    if (state.reaction?.text) lines.push(`  ${fitLine(`“${state.reaction.text}”`, bodyWidth)}`)
+    return lines
   }
 
   private renderRows(companion: Companion | null, width: number): string[] {
@@ -172,22 +160,6 @@ class BuddyDialog implements DialogContent {
         value: companion.mood === 'muted' ? 'muted' : 'active',
         hint: 'Mute keeps state but quiets Buddy reactions.',
         run: () => (companion.mood === 'muted' ? buddyUnmute() : buddyMute())
-      },
-      {
-        label: 'Share preview',
-        value: 'overlay',
-        hint: 'Open terminal card preview for manual screenshot.',
-        run: () => {
-          this.close()
-          queueMicrotask(() => openBuddySharePreview(this.ctx))
-          return { text: 'Opening share preview.' }
-        }
-      },
-      {
-        label: 'Presence',
-        value: 'slab + footer',
-        hint: 'Buddy publishes a footerRight widget through @pi/lib/ui.',
-        disabled: true
       }
     ]
   }
@@ -227,12 +199,6 @@ function nextVoiceMode(mode: string): string {
   if (mode === 'backseat') return 'skillcoach'
   if (mode === 'skillcoach') return 'both'
   return 'backseat'
-}
-
-function levelText(progress: ReturnType<typeof levelProgress>): string {
-  if (progress.level >= 50) return 'Lv.50 MAX'
-  const pct = Math.round(progress.progress * 100)
-  return `Lv.${progress.level} · ${progress.currentXp}/${progress.neededXp} XP · ${pct}%`
 }
 
 function summarizeResult(result: BuddyActionResult): string {

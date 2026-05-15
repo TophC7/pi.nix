@@ -193,14 +193,17 @@ export async function runGitAction(
   }
 
   const restore = pendingRestore
-  await handoff({
+  const outcome = await handoff({
     pi,
     ctx,
     label: `/${action}`,
     prompt: buildPrompt(action, basePrompt, userPrompt),
     policy: 'confirm',
-    reason: `${fireAndForgetHandoffReason()} Model/thinking config is restored after the handoff choice returns; edit/manual paths may need a rerun if a custom /git model is required.`
+    reason: `${fireAndForgetHandoffReason()} Model/thinking config stays active until the queued handoff turn reaches agent_end; edit/manual paths restore immediately and may need a rerun if a custom /git model is required.`
   })
+
+  if (outcome.kind === 'queued_unverified') return
+
   pendingRestore = undefined
   await restoreGitActionConfig(pi, restore)
 }
