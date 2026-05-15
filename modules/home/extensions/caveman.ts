@@ -7,8 +7,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type { ExtensionAPI, ExtensionCommandContext } from '@mariozechner/pi-coding-agent'
-import { DynamicBorder, getSelectListTheme } from '@mariozechner/pi-coding-agent'
-import { Container, SelectList } from '@mariozechner/pi-tui'
+import { ListDialog } from './pi-lib/ui/components.ts'
 
 const LEVELS = ['off', 'lite', 'full', 'ultra', 'micro'] as const
 type Level = (typeof LEVELS)[number]
@@ -176,30 +175,29 @@ export default function caveman(pi: ExtensionAPI) {
   })
 
   async function openLevelPicker(ctx: ExtensionCommandContext, current: Level): Promise<Level | undefined> {
-    return ctx.ui.custom<Level | undefined>((tui, _theme, _keybindings, done) => {
-      const items = LEVEL_OPTIONS.map((option) => ({
-        value: option.value,
-        label: option.label,
-        description: option.description
-      }))
-      const container = new Container()
-      container.addChild(new DynamicBorder())
-      const list = new SelectList(items, items.length, getSelectListTheme(), {
-        minPrimaryColumnWidth: 8,
-        maxPrimaryColumnWidth: 12
+    return ctx.ui.custom<Level | undefined>((tui, theme, _keybindings, done) => {
+      const currentIndex = Math.max(
+        0,
+        LEVEL_OPTIONS.findIndex((item) => item.value === current)
+      )
+      const list = new ListDialog({
+        title: theme.fg('accent', theme.bold('Caveman level')),
+        items: LEVEL_OPTIONS.map((option) => ({
+          value: option.value,
+          label: `${option.value === current ? theme.fg('accent', '●') : ' '} ${option.label}`,
+          description: option.description
+        })),
+        visibleRows: LEVEL_OPTIONS.length,
+        initialIndex: currentIndex,
+        dim: (text) => theme.fg('dim', text),
+        onSelect: done,
+        onCancel: () => done(undefined)
       })
-      const currentIndex = items.findIndex((item) => item.value === current)
-      if (currentIndex !== -1) list.setSelectedIndex(currentIndex)
-      list.onSelect = (item) => done(item.value as Level)
-      list.onCancel = () => done(undefined)
-      container.addChild(list)
-      container.addChild(new DynamicBorder())
       return {
-        render: (width: number) => container.render(width),
-        invalidate: () => container.invalidate(),
+        render: (width: number) => list.render(width),
+        invalidate: () => list.invalidate(),
         handleInput: (data: string) => {
-          list.handleInput(data)
-          tui.requestRender()
+          if (list.handleInput(data)) tui.requestRender()
         }
       }
     })

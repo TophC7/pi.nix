@@ -3,8 +3,7 @@
 // and SelectList/SettingsList for full list components. This module adds a
 // tiny ListNav state machine that other extensions can adopt without
 // instantiating a full pi-tui Component — for cases where you just need a
-// cursor over a custom-rendered row list with consistent up/down/wrap and
-// j/k aliases.
+// cursor over a custom-rendered row list with consistent up/down/wrap.
 
 import { matchesKey } from '@mariozechner/pi-tui'
 
@@ -43,10 +42,10 @@ export function createListNav(options: ListNavOptions): ListNavState {
       return index
     },
     handleInput(data) {
-      if (matchesKey(data, 'up') || data === 'k') return updateIndex(index - 1)
-      if (matchesKey(data, 'down') || data === 'j') return updateIndex(index + 1)
-      if (matchesKey(data, 'home') || data === 'g') return updateIndex(0)
-      if (matchesKey(data, 'end') || data === 'G') return updateIndex(Math.max(0, count - 1))
+      if (matchesKey(data, 'up')) return updateIndex(index - 1)
+      if (matchesKey(data, 'down')) return updateIndex(index + 1)
+      if (matchesKey(data, 'home')) return updateIndex(0)
+      if (matchesKey(data, 'end')) return updateIndex(Math.max(0, count - 1))
       return false
     },
     moveTo(next) {

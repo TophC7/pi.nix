@@ -67,8 +67,8 @@ export class SearchableTable<T> implements UiComponentLike {
   }
 
   handleInput(data: string): void {
-    if (matchesKey(data, Key.up) || data === 'k') this.move(-1)
-    else if (matchesKey(data, Key.down) || data === 'j') this.move(1)
+    if (matchesKey(data, Key.up)) this.move(-1)
+    else if (matchesKey(data, Key.down)) this.move(1)
   }
 
   render(width: number): string[] {

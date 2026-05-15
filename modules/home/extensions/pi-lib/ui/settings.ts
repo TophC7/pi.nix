@@ -149,14 +149,6 @@ class SettingsDialogBody implements DialogContent {
       this.move(1)
       return
     }
-    if (matchesKey(data, Key.left)) {
-      this.cycle(-1)
-      return
-    }
-    if (matchesKey(data, Key.right) || matchesKey(data, Key.tab)) {
-      this.cycle(1)
-      return
-    }
     if (matchesKey(data, Key.enter) || matchesKey(data, Key.space) || data === ' ') {
       this.cycle(1)
       return

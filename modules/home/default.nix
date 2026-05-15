@@ -17,7 +17,7 @@ let
   piBunPackage = pkgs.stdenvNoCC.mkDerivation {
     pname = "pi";
     version = piNodePackage.version or "bun-runtime";
-    nativeBuildInputs = [ pkgs.makeWrapper ];
+    nativeBuildInputs = [ pkgs.makeWrapper pkgs.patch ];
     dontUnpack = true;
 
     installPhase = ''
@@ -27,6 +27,10 @@ let
       cp -R --no-preserve=mode,ownership \
         ${piNodePackage}/lib/node_modules/@earendil-works/pi-coding-agent \
         $out/lib/node_modules/@earendil-works/pi-coding-agent
+
+      patch -p1 \
+        -d $out/lib/node_modules/@earendil-works/pi-coding-agent \
+        < ${./patches/pi-command-models-compact.patch}
 
       while IFS= read -r file; do
         substituteInPlace "$file" \
@@ -49,8 +53,8 @@ let
     sworm-issues.source = ./extensions/sworm-issues.ts;
 
     # Directory-shaped extension: Pi settings intentionally point at the
-    # directory, not git/index.ts.
-    git.source = ./extensions/git;
+    # directory, not commands/index.ts.
+    commands.source = ./extensions/commands;
 
     # Runtime support modules are linked beside extension packages but are not
     # registered as extension entrypoints.

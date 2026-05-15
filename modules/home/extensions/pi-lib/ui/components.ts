@@ -60,6 +60,7 @@ export interface ListDialogOptions<T> {
   readonly title: string
   readonly items: readonly ListItem<T>[]
   readonly visibleRows?: number
+  readonly initialIndex?: number
   readonly accent?: TextStyle
   readonly dim?: TextStyle
   readonly onSelect?: (value: T) => void
@@ -70,13 +71,19 @@ export class ListDialog<T> implements UiComponentLike {
   private selected = 0
   private offset = 0
 
-  constructor(private readonly options: ListDialogOptions<T>) {}
+  constructor(private readonly options: ListDialogOptions<T>) {
+    this.selected = Math.max(0, Math.min(options.items.length - 1, options.initialIndex ?? 0))
+  }
 
-  handleInput(data: string): void {
-    if (matchesKey(data, Key.up) || data === 'k') this.move(-1)
-    else if (matchesKey(data, Key.down) || data === 'j') this.move(1)
-    else if (matchesKey(data, Key.enter)) this.select()
-    else if (matchesKey(data, Key.escape) || matchesKey(data, Key.ctrl('c'))) this.options.onCancel?.()
+  handleInput(data: string): boolean {
+    if (matchesKey(data, Key.up)) return this.move(-1)
+    if (matchesKey(data, Key.down)) return this.move(1)
+    if (matchesKey(data, Key.enter)) return this.select()
+    if (matchesKey(data, Key.escape) || matchesKey(data, Key.ctrl('c'))) {
+      this.options.onCancel?.()
+      return true
+    }
+    return false
   }
 
   render(width: number): string[] {
@@ -92,21 +99,26 @@ export class ListDialog<T> implements UiComponentLike {
       lines.push(`${prefix}${item.label}${description}`)
     }
     if (this.options.items.length === 0) lines.push(this.style('No items', this.options.dim))
-    lines.push(this.style('↑↓/j/k move • enter select • esc cancel', this.options.dim))
+    lines.push(this.style('↑↓ move • enter select • esc cancel', this.options.dim))
     return lines.map((line) => fitLine(line, width))
   }
 
   invalidate(): void {}
 
-  private move(delta: number): void {
+  private move(delta: number): boolean {
     const last = this.options.items.length - 1
-    if (last < 0) return
-    this.selected = Math.max(0, Math.min(last, this.selected + delta))
+    if (last < 0) return false
+    const next = Math.max(0, Math.min(last, this.selected + delta))
+    if (next === this.selected) return false
+    this.selected = next
+    return true
   }
 
-  private select(): void {
+  private select(): boolean {
     const item = this.options.items[this.selected]
-    if (item) this.options.onSelect?.(item.value)
+    if (!item) return false
+    this.options.onSelect?.(item.value)
+    return true
   }
 
   private syncOffset(rows: number): void {

@@ -39,6 +39,10 @@ If you touch a region and notice duplication or muddled concerns, fix it as part
 
   Pair this with the `ctx_execute` / `ctx_execute_file` sandbox tools when you have them: reach for `ctx_execute` for ephemeral analysis where the script is one-shot and only the result matters; reach for a Java source-file script (or Fish) when the work should live in the repo as a real tool you can run again.
 
+## Interface defaults for Pi extensions
+
+- Do not add Vim motion keybindings by default. Use obvious native controls (arrow keys, enter, escape).
+
 ## How you collaborate
 
 - Ask when intent is ambiguous; Toph appreciates it.
