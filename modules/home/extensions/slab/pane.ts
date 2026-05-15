@@ -12,11 +12,11 @@ import {
   padLine,
   renderDialogDivider,
   renderDialogFooter,
-  renderDialogHeader,
-  renderFooterBridgeLines
+  renderDialogHeader
 } from '@pi/lib/ui'
 import { cloneSlabConfig, defaultSlabConfig, moveSlabSegment, toggleSlabSegment } from './config.ts'
 import { type SlabEditorState, wrapSlabEditorLines } from './editor.ts'
+import { renderSlabFooterLines } from './footer.ts'
 import { parseGitStatus } from './git.ts'
 import type { SlabConfig, SlabSegmentId } from './types.ts'
 
@@ -212,10 +212,16 @@ function sampleState(config: SlabConfig): SlabEditorState {
 }
 
 export function renderSlabConfigPreview(config: SlabConfig, width: number): string[] {
+  const footer = renderSlabFooterLines(
+    new Map([['mcp', 'MCP: 3/4 servers']]),
+    ['Harbordrift [◉_◉]'],
+    width,
+    { color: true, unicode: true }
+  )
   if (!config.enabled)
     return [
       'stock Pi input (slab disabled)',
-      ...renderFooterBridgeLines(['typed footer widget'], ['legacy status'], width, { color: true, unicode: true })
+      ...footer
     ]
   return [
     ...wrapSlabEditorLines(['╭────╮', 'Ask Pi to refactor this module', '╰────╯', 'autocomplete preview'], {
@@ -224,7 +230,7 @@ export function renderSlabConfigPreview(config: SlabConfig, width: number): stri
       capabilities: { color: true, unicode: true },
       focused: true
     }),
-    ...renderFooterBridgeLines(['typed footer widget'], ['legacy status'], width, { color: true, unicode: true })
+    ...footer
   ]
 }
 

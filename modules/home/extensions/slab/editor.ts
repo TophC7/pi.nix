@@ -19,6 +19,7 @@ import type { SlabConfig, SlabRuntimeState, SlabSegmentRenderContext, SlabSegmen
 const CONTENT_PADDING_X = 1
 const AUTOCOMPLETE_INDENT = CONTENT_PADDING_X
 const INPUT_RIGHT_GAP = 2
+const MIN_EDITOR_WIDTH_WITH_INPUT_RIGHT = 48
 const ANSI_PATTERN = /\x1b\[[0-9;]*m/g
 
 const HORIZONTAL = '─'
@@ -340,7 +341,7 @@ function inputRightWidth(width: number): number {
 }
 
 function canRenderInputRight(totalWidth: number, rightWidth: number): boolean {
-  return totalWidth - rightWidth - INPUT_RIGHT_GAP >= 24
+  return totalWidth - rightWidth - INPUT_RIGHT_GAP >= MIN_EDITOR_WIDTH_WITH_INPUT_RIGHT
 }
 
 function inputRightContentWidth(lines: readonly string[], maxWidth: number): number {
@@ -353,6 +354,43 @@ function leftPadVisible(line: string, width: number): string {
   return `${' '.repeat(extra)}${line}`
 }
 
+interface RightRailLayout {
+  readonly topLine?: string
+  readonly editorLines: readonly string[]
+  readonly footerLine?: string
+}
+
+function layoutRightRail(widgetLines: readonly string[], editorRows: number): RightRailLayout {
+  if (widgetLines.length === 0 || editorRows <= 0) return { editorLines: [] }
+  if (widgetLines.length <= editorRows) return { editorLines: widgetLines }
+
+  const extraRows = widgetLines.length - editorRows
+  if (extraRows === 1) {
+    return {
+      editorLines: widgetLines.slice(0, editorRows),
+      footerLine: widgetLines[editorRows]
+    }
+  }
+
+  return {
+    topLine: widgetLines[0],
+    editorLines: widgetLines.slice(1, 1 + editorRows),
+    footerLine: widgetLines[1 + editorRows]
+  }
+}
+
+function joinRightOnlyLine(
+  rightLine: string,
+  editorWidth: number,
+  widgetWidth: number,
+  caps: UiRenderCapabilities
+): string {
+  const gap = ' '.repeat(INPUT_RIGHT_GAP)
+  const left = ' '.repeat(Math.max(0, editorWidth))
+  const right = leftPadVisible(fit(rightLine, widgetWidth, caps), widgetWidth)
+  return `${left}${gap}${right}`
+}
+
 function joinInputAdjacent(
   editorLines: readonly string[],
   widgetLines: readonly string[],
@@ -360,11 +398,10 @@ function joinInputAdjacent(
   widgetWidth: number,
   caps: UiRenderCapabilities
 ): string[] {
-  const rows = Math.max(editorLines.length, widgetLines.length)
   const gap = ' '.repeat(INPUT_RIGHT_GAP)
   const lines: string[] = []
 
-  for (let index = 0; index < rows; index++) {
+  for (let index = 0; index < editorLines.length; index++) {
     const left = padLine(fit(editorLines[index] ?? '', editorWidth, caps), editorWidth)
     const right = leftPadVisible(fit(widgetLines[index] ?? '', widgetWidth, caps), widgetWidth)
     lines.push(`${left}${gap}${right}`)
@@ -387,6 +424,13 @@ export interface SlabEditorHooks {
   onTextChange?(text: string, match: SlashCommandMatch | undefined): void
 }
 
+export interface SlabRightRailState {
+  footerLine?: string
+  leftWidth?: number
+  railWidth?: number
+  gapWidth?: number
+}
+
 export class SlabEditor extends CustomEditor {
   private currentSlashMatch: SlashCommandMatch | undefined
 
@@ -396,6 +440,7 @@ export class SlabEditor extends CustomEditor {
     keybindings: KeybindingsManager,
     private readonly getState: () => SlabEditorState,
     private readonly widgetHost: UiWidgetHost,
+    private readonly rightRail: SlabRightRailState,
     private readonly hooks: SlabEditorHooks
   ) {
     super(tui, theme, keybindings)
@@ -422,6 +467,10 @@ export class SlabEditor extends CustomEditor {
       caps,
       state.clock
     )
+    this.rightRail.footerLine = undefined
+    this.rightRail.leftWidth = undefined
+    this.rightRail.railWidth = undefined
+    this.rightRail.gapWidth = undefined
     const rightWidth = inputRightContentWidth(rightWidgets, desiredRightWidth)
     const useInputRight = rightWidgets.length > 0 && canRenderInputRight(safeWidth, rightWidth)
     const editorWidth = useInputRight ? safeWidth - rightWidth - INPUT_RIGHT_GAP : safeWidth
@@ -437,9 +486,19 @@ export class SlabEditor extends CustomEditor {
       shimmerPhase: state.clock.tick,
       paintThinkingBorder: this.hooks.paintThinkingBorder
     })
-    const mainSurface = useInputRight
-      ? joinInputAdjacent(editorSurface, rightWidgets, editorWidth, rightWidth, caps)
+    const rightRail = useInputRight ? layoutRightRail(rightWidgets, editorSurface.length) : { editorLines: [] }
+    if (useInputRight) {
+      this.rightRail.footerLine = rightRail.footerLine
+      this.rightRail.leftWidth = editorWidth
+      this.rightRail.railWidth = rightWidth
+      this.rightRail.gapWidth = INPUT_RIGHT_GAP
+    }
+    const joinedSurface = useInputRight
+      ? joinInputAdjacent(editorSurface, rightRail.editorLines, editorWidth, rightWidth, caps)
       : editorSurface
+    const mainSurface = rightRail.topLine && useInputRight
+      ? [joinRightOnlyLine(rightRail.topLine, editorWidth, rightWidth, caps), ...joinedSurface]
+      : joinedSurface
     const above = renderWidgetLines(
       this.widgetHost,
       state.snapshot.widgets,
@@ -456,9 +515,6 @@ export class SlabEditor extends CustomEditor {
       caps,
       state.clock
     )
-    const fallbackInputRight = rightWidgets.length > 0 && !useInputRight
-      ? rightWidgets.map((line) => fit(line, safeWidth, caps))
-      : []
-    return [...above, ...mainSurface, ...fallbackInputRight, ...below]
+    return [...above, ...mainSurface, ...below]
   }
 }

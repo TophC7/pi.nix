@@ -1,0 +1,194 @@
+diff --git a/init.ts b/init.ts
+index 1111111..2222222 100644
+--- a/init.ts
++++ b/init.ts
+@@ -20,5 +20,6 @@ import { UiResourceHandler } from "./ui-resource-handler.ts";
+ import { openUrl, parallelLimit } from "./utils.ts";
+ import { logger } from "./logger.ts";
+ import { getMissingConfiguredDirectToolServers } from "./direct-tools.ts";
++import { clearSlabStatus, writeSlabStatus } from "./slab-status.ts";
+ 
+ const FAILURE_BACKOFF_MS = 60 * 1000;
+@@ -58,5 +59,6 @@ export async function initializeMcp(
+ 
+   const serverEntries = Object.entries(config.mcpServers);
+   if (serverEntries.length === 0) {
++    clearSlabStatus();
+     return state;
+   }
+@@ -113,8 +115,11 @@ export async function initializeMcp(
+       });
+ 
+   if (ctx.hasUI && startupServers.length > 0) {
++    const serverName = startupServers.length === 1 ? startupServers[0]?.[0] : undefined;
++    writeSlabStatus(state, { kind: "connecting", serverName });
+     ctx.ui.setStatus("mcp", `MCP: connecting to ${startupServers.length} servers...`);
+   }
++  if (!ctx.hasUI) writeSlabStatus(state);
+ 
+   const results = await parallelLimit(startupServers, 10, async ([name, definition]) => {
+     try {
+@@ -303,10 +310,12 @@ export async function lazyConnect(state: McpExtensionState, serverName: string):
+ 
+   try {
+     if (state.ui) {
++      writeSlabStatus(state, { kind: "connecting", serverName });
+       state.ui.setStatus("mcp", `MCP: connecting to ${serverName}...`);
+     }
+     const newConnection = await state.manager.connect(serverName, definition);
+     if (newConnection.status === "needs-auth") {
++      updateStatusBar(state);
+       return false;
+     }
+     state.failureTracker.delete(serverName);
+diff --git a/index.ts b/index.ts
+index 3333333..4444444 100644
+--- a/index.ts
++++ b/index.ts
+@@ -10,4 +10,5 @@ import { getConfigPathFromArgv, truncateAtWord } from "./utils.ts";
+ import { initializeOAuth, shutdownOAuth } from "./mcp-auth-flow.ts";
+ import { renderMcpToolResult } from "./tool-result-renderer.ts";
++import { clearSlabStatus } from "./slab-status.ts";
+ 
+ export default function mcpAdapter(pi: ExtensionAPI) {
+@@ -42,5 +43,7 @@ export default function mcpAdapter(pi: ExtensionAPI) {
+     if (flushError) {
+       throw flushError;
+     }
++
++    clearSlabStatus();
+   }
+ 
+   const earlyConfigPath = getConfigPathFromArgv();
+diff --git a/slab-status.ts b/slab-status.ts
+new file mode 100644
+index 0000000..5555555
+--- /dev/null
++++ b/slab-status.ts
+@@ -0,0 +1,126 @@
++import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
++import { dirname } from "node:path";
++import type { McpExtensionState } from "./state.ts";
++import { getAgentPath } from "./agent-dir.ts";
++
++export type SlabMcpServerStatus = "connected" | "needs-auth" | "failed" | "cached" | "not-connected";
++
++export interface SlabMcpServerSnapshot {
++  name: string;
++  status: SlabMcpServerStatus;
++  toolCount: number;
++  failedAgeSeconds?: number;
++}
++
++export interface SlabMcpActivitySnapshot {
++  kind: "connecting";
++  serverName?: string;
++}
++
++export interface SlabMcpStatusSnapshot {
++  version: 1;
++  updatedAt: number;
++  total: number;
++  connected: number;
++  ok: number;
++  cached: number;
++  needsAuth: number;
++  failed: number;
++  totalTools: number;
++  servers: SlabMcpServerSnapshot[];
++  activity?: SlabMcpActivitySnapshot;
++}
++
++const FAILED_STATUS_MAX_AGE_MS = 60 * 1000;
++
++export function getSlabStatusPath(): string {
++  return getAgentPath("mcp-status.json");
++}
++
++export function clearSlabStatus(): void {
++  const path = getSlabStatusPath();
++  try {
++    if (existsSync(path)) rmSync(path);
++  } catch {
++    // best-effort status file cleanup
++  }
++}
++
++export function writeSlabStatus(
++  state: McpExtensionState,
++  activity?: SlabMcpActivitySnapshot
++): SlabMcpStatusSnapshot {
++  const snapshot = buildSlabStatus(state, activity);
++  writeSnapshot(snapshot);
++  return snapshot;
++}
++
++function buildSlabStatus(
++  state: McpExtensionState,
++  activity?: SlabMcpActivitySnapshot
++): SlabMcpStatusSnapshot {
++  const now = Date.now();
++  const servers = Object.keys(state.config.mcpServers).map((name) => {
++    const connection = state.manager.getConnection(name);
++    const metadata = state.toolMetadata.get(name);
++    const failedAgeSeconds = failureAgeSeconds(state, name, now);
++    let status: SlabMcpServerStatus = "not-connected";
++
++    if (connection?.status === "connected") {
++      status = "connected";
++    } else if (connection?.status === "needs-auth") {
++      status = "needs-auth";
++    } else if (failedAgeSeconds !== undefined) {
++      status = "failed";
++    } else if (metadata !== undefined) {
++      status = "cached";
++    }
++
++    return {
++      name,
++      status,
++      toolCount: metadata?.length ?? 0,
++      ...(failedAgeSeconds !== undefined ? { failedAgeSeconds } : {}),
++    } satisfies SlabMcpServerSnapshot;
++  });
++
++  const connected = servers.filter((server) => server.status === "connected").length;
++  const cached = servers.filter((server) => server.status === "cached").length;
++  const needsAuth = servers.filter((server) => server.status === "needs-auth").length;
++  const failed = servers.filter((server) => server.status === "failed").length;
++
++  return {
++    version: 1,
++    updatedAt: now,
++    total: servers.length,
++    connected,
++    ok: connected + cached,
++    cached,
++    needsAuth,
++    failed,
++    totalTools: servers.reduce((sum, server) => sum + server.toolCount, 0),
++    servers,
++    ...(activity ? { activity } : {}),
++  };
++}
++
++function failureAgeSeconds(
++  state: McpExtensionState,
++  serverName: string,
++  now: number
++): number | undefined {
++  const failedAt = state.failureTracker.get(serverName);
++  if (!failedAt) return undefined;
++  const ageMs = now - failedAt;
++  if (ageMs > FAILED_STATUS_MAX_AGE_MS) return undefined;
++  return Math.round(ageMs / 1000);
++}
++
++function writeSnapshot(snapshot: SlabMcpStatusSnapshot): void {
++  const path = getSlabStatusPath();
++  const dir = dirname(path);
++  mkdirSync(dir, { recursive: true });
++  const tmpPath = `${path}.${process.pid}.tmp`;
++  writeFileSync(tmpPath, JSON.stringify(snapshot, null, 2), "utf-8");
++  renameSync(tmpPath, path);
++}

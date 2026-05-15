@@ -1,7 +1,7 @@
 import { visibleWidth } from '@mariozechner/pi-tui'
 import { fitLine, padLine } from '@pi/lib/ui'
 import type { StoredReaction } from '../core/reactions.ts'
-import { renderSprite } from '../core/species.ts'
+import { renderFace, renderSprite } from '../core/species.ts'
 import type { Companion, Eye } from '../core/types.ts'
 
 export interface BuddyRenderContext {
@@ -23,6 +23,8 @@ export interface BuddyInputSpriteOptions {
   readonly maxWidth?: number
 }
 
+const FOOTER_BUDDY_MAX_TERMINAL_WIDTH = 62
+
 let cachedCompanion: Companion | null = null
 let cachedReaction: StoredReaction | null = null
 
@@ -41,6 +43,15 @@ export function renderBuddyInput(context: BuddyRenderContext): readonly string[]
     frame: context.tick ?? 0,
     maxWidth: context.width
   })
+}
+
+export function renderBuddyFooter(context: BuddyRenderContext): readonly string[] {
+  if (!cachedCompanion) return []
+
+  const reaction = activeReaction(cachedCompanion)
+  const eye = (reaction?.eyeOverride as Eye | undefined) ?? cachedCompanion.eye
+  const compactFace = context.width < FOOTER_BUDDY_MAX_TERMINAL_WIDTH ? ` ${renderFace({ ...cachedCompanion, eye })}` : ''
+  return [fitPlain(`${cachedCompanion.name}${compactFace}`, context.width)]
 }
 
 export function renderBuddyInputSprite(

@@ -6,22 +6,13 @@ import { getBuddyDatabase } from './db/index.ts'
 import { buildBuddyContext } from './prompts.ts'
 import { refreshBuddyRenderState } from './ui/render.ts'
 
-const STATUS_KEY = 'buddy'
 let activePi: ExtensionAPI | undefined
-let lastStatusText: string | undefined
 
 export function refreshBuddyStatus(pi: ExtensionAPI = activePi as ExtensionAPI, companion?: Companion | null): void {
   if (!pi) return
   const db = maybeBuddyDatabase()
   const current = companion === undefined ? (db ? getCompanion(db) : null) : companion
   refreshBuddyRenderState(current, db && current ? getActiveReaction(db, current.id) : null)
-
-  const setStatus = (pi as { ui?: { setStatus?: (key: string, text: string | undefined) => void } }).ui?.setStatus
-  if (typeof setStatus !== 'function') return
-  const statusText = current ? current.name : undefined
-  if (statusText === lastStatusText) return
-  lastStatusText = statusText
-  setStatus(STATUS_KEY, statusText)
 }
 
 interface BeforeAgentStartEvent {

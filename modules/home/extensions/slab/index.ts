@@ -4,7 +4,6 @@ import {
   createUiRenderDriver,
   getUiStatusStore,
   openDialog,
-  renderFooterBridgeLines,
   ThinkingTonePainter,
   type UiRenderCapabilities,
   type UiRenderClock,
@@ -14,8 +13,10 @@ import {
   UiWidgetHost
 } from '@pi/lib/ui'
 import { cloneSlabConfig, defaultSlabConfig, loadSlabConfig, saveSlabConfig } from './config.ts'
-import { SlabEditor, type SlashCommandMatch } from './editor.ts'
+import { SlabEditor, type SlabRightRailState, type SlashCommandMatch } from './editor.ts'
+import { renderSlabFooterLines } from './footer.ts'
 import { collectGitSnapshot } from './git.ts'
+import { readMcpStatusSnapshot } from './mcp.ts'
 import { SlabConfigPane } from './pane.ts'
 import { createSlabRuntimeState } from './state.ts'
 import type { SlabConfig, SlabGitSnapshot, SlabRuntimeState } from './types.ts'
@@ -117,17 +118,22 @@ class SlabFooter implements Component {
   constructor(
     private readonly footerData: ReadonlyFooterDataProvider,
     private readonly getState: () => SlabState,
-    private readonly widgetHost: UiWidgetHost
+    private readonly widgetHost: UiWidgetHost,
+    private readonly rightRail: SlabRightRailState
   ) {}
 
   render(width: number): string[] {
     const caps = capabilities()
     const state = this.getState()
-    const widgetLines = renderWidgetLines(this.widgetHost, state.snapshot.widgets, 'footer', width, caps, state.clock)
     const rightWidgetLines = renderWidgetLines(this.widgetHost, state.snapshot.widgets, 'footerRight', width, caps, state.clock)
-    return renderFooterBridgeLines(widgetLines, this.footerData.getExtensionStatuses().values(), width, caps, {
-      rightWidgetLines
-    })
+    return renderSlabFooterLines(
+      this.footerData.getExtensionStatuses(),
+      rightWidgetLines,
+      width,
+      caps,
+      this.rightRail,
+      readMcpStatusSnapshot(state.clock.now)
+    )
   }
 
   invalidate(): void {}
@@ -194,6 +200,7 @@ export default function slab(pi: ExtensionAPI): void {
   let state: SlabState | undefined
   let driver: UiRenderDriverHandle | undefined
   let widgetHost: UiWidgetHost | undefined
+  let rightRail: SlabRightRailState = {}
   let thinkingTonePainter: ThinkingTonePainter | undefined
   let renderRequested = false
   let applyConfigChain = Promise.resolve()
@@ -298,6 +305,7 @@ export default function slab(pi: ExtensionAPI): void {
     gitSnapshot = undefined
     state = createState(ctx, config, undefined, undefined, undefined, readThinkingLevel())
     widgetHost = new UiWidgetHost({ onInvalidate: () => requestRender() })
+    rightRail = {}
     thinkingTonePainter?.dispose()
     thinkingTonePainter = new ThinkingTonePainter({
       onInput: (handler) => ctx.ui.onTerminalInput(handler),
@@ -321,7 +329,7 @@ export default function slab(pi: ExtensionAPI): void {
         requestRender()
       }
       if (!widgetHost) throw new Error('slab widget host not initialized')
-      return new SlabFooter(footerData, getState, widgetHost)
+      return new SlabFooter(footerData, getState, widgetHost, rightRail)
     })
     ctx.ui.setEditorComponent((tui, theme, keybindings) => {
       requestRender = () => tui.requestRender()
@@ -330,7 +338,7 @@ export default function slab(pi: ExtensionAPI): void {
         requestRender()
       }
       if (!widgetHost) throw new Error('slab widget host not initialized')
-      return new SlabEditor(tui, theme, keybindings, getState, widgetHost, {
+      return new SlabEditor(tui, theme, keybindings, getState, widgetHost, rightRail, {
         recognizedCommands: () => {
           refreshCommandRegistry()
           return recognizedCommands
@@ -353,6 +361,7 @@ export default function slab(pi: ExtensionAPI): void {
     }
     widgetHost?.dispose()
     widgetHost = undefined
+    rightRail = {}
     thinkingTonePainter?.dispose()
     thinkingTonePainter = undefined
     currentCtx = undefined

@@ -8,10 +8,11 @@ import { fileURLToPath } from 'node:url'
 import { getCompanion, hatchCompanion, observeCompanion, petCompanion } from '../core/companion.ts'
 import { initBuddySchema } from '../db/schema.ts'
 import { renderSprite, SPECIES_LIST } from '../core/species.ts'
-import { renderBuddyInputSprite, renderBuddyPresenceSprite } from '../ui/render.ts'
+import { refreshBuddyRenderState, renderBuddyFooter, renderBuddyInputSprite, renderBuddyPresenceSprite } from '../ui/render.ts'
 import { renderSharePreview } from '../ui/share-preview.ts'
 import { resolveBuddyStatePaths } from '../db/paths.ts'
 import { buildBuddyContext } from '../prompts.ts'
+import { registerBuddyTools } from '../tools.ts'
 import { buddyHatch, buddyMode, buddyObserve, buddyStatus } from '../actions.ts'
 import { getBuddyDatabase } from '../db/index.ts'
 import {
@@ -71,6 +72,14 @@ check('core companion hatch, pet, observe, and prompt context', () => {
   const context = buildBuddyContext(guarded)
   assert(context.includes('Guard mode: on.'), 'prompt context missing guard mode')
   assert(context.includes('Never fabricate claims or edges'), 'prompt context missing no-fabrication guidance')
+})
+
+check('agent tool surface stays minimal', () => {
+  const names: string[] = []
+  registerBuddyTools({
+    registerTool: (tool: { readonly name: string }) => { names.push(tool.name) }
+  } as never)
+  assert(names.join(',') === 'buddy_remember,buddy_observe', 'Buddy should expose only memory and observe as agent tools')
 })
 
 check('reasoning detector suite and unverified hedge detector', () => {
@@ -166,19 +175,21 @@ check('UI placement static gates', () => {
   const slabFooter = readFileSync(join(root, 'modules/home/extensions/slab/index.ts'), 'utf8')
   const footerCompat = readFileSync(join(root, 'modules/home/extensions/pi-lib/ui/footer-compat.ts'), 'utf8')
   assert(contracts.includes('inputRight') && contracts.includes('footerRight'), 'pi-lib placements missing')
-  assert(buddyUi.includes("placement: 'inputRight'") && !buddyUi.includes("placement: 'inputFooter'") && !buddyUi.includes("placement: 'footerRight'"), 'Buddy should only own inputRight; name lives in the Pi status row via setStatus')
+  assert(buddyUi.includes("placement: 'inputRight'") && buddyUi.includes("placement: 'footerRight'") && !buddyUi.includes("placement: 'inputFooter'"), 'Buddy should own inputRight presence plus footerRight name')
   assert(buddyCommands.includes('openBuddyDialog') && buddyCommands.includes('getArgumentCompletions'), 'Buddy command missing native dialog/completions')
   assert(buddyDialog.includes('renderDialogHeader') && buddyDialog.includes('renderDialogFooter'), 'Buddy dialog missing shared dialog chrome')
-  assert(!buddyRender.includes('new Panel') && !buddyRender.includes('levelBar') && !buddyRender.includes('mood:'), 'Buddy input widget should render only pet art')
-  assert(buddyRender.includes('renderSprite') && buddyRender.includes('renderBuddyInputSprite') && !buddyRender.includes('renderBuddyInputFeet'), 'Buddy input widget should render the whole sprite as one unit, no body/feet split')
-  assert(!buddyRender.includes('shiftDown: true') && !buddyUi.includes("placement: 'footerRight'"), 'Buddy must not publish footerRight so feet do not move with Pi footer')
-  assert(buddyEvents.includes('setStatus') && buddyEvents.includes('refreshBuddyStatus'), 'Buddy name should be exposed through ctx.ui.setStatus')
+  assert(!buddyRender.includes('new Panel') && !buddyRender.includes('levelBar') && !buddyRender.includes('mood:'), 'Buddy input/footer rendering should stay lightweight')
+  assert(buddyRender.includes('renderSprite') && buddyRender.includes('renderBuddyInputSprite') && !buddyRender.includes('renderBuddyInputFeet'), 'Buddy sprite helpers should render the whole sprite as one unit, no body/feet split')
+  assert(buddyRender.includes('renderBuddyFooter') && buddyRender.includes('renderFace'), 'Buddy footer widget should render compact face presence')
+  assert(!buddyRender.includes('shiftDown: true'), 'Buddy footer should not move sprite feet with Pi footer')
+  assert(!buddyEvents.includes('setStatus') && buddyEvents.includes('refreshBuddyStatus'), 'Buddy should not use legacy Pi status footer')
   assert(buddyCommandRouter.includes('refreshBuddyStatus'), 'Slash command path should refresh Buddy status after each action')
   assert(!sharePreview.includes('renderCard') && sharePreview.includes('joinColumns') && sharePreview.includes('renderStatLine'), 'Buddy share preview should use dossier layout without nested card box')
   assert(sharePreview.includes("theme.fg('success'") && sharePreview.includes("theme.fg('warning'") && sharePreview.includes('wrapText'), 'Buddy share preview should color peak/dump stats and wrap description text')
-  assert(slabEditor.includes('inputRight') && !slabEditor.includes('inputFooter') && !slabEditor.includes('inputFooterRight'), 'Slab editor should only manage inputRight; name belongs to Pi status row')
+  assert(slabEditor.includes('inputRight') && !slabEditor.includes('inputFooter') && !slabEditor.includes('inputFooterRight'), 'Slab editor should only manage inputRight; compact name belongs to footerRight')
   assert(slabEditor.includes('visibleWidth(line)') && !slabEditor.includes('visibleWidth(stripControls(line))'), 'Slab inputRight width must include visible padding to avoid overflow')
-  assert(slabFooter.includes('footerRight'), 'Slab footer missing footerRight handling')
+  assert(slabEditor.includes('layoutRightRail') && slabEditor.includes('footerLine') && !slabEditor.includes('Math.max(editorLines.length, widgetLines.length)'), 'Slab inputRight must not add rows below the editor; spillover belongs to footer line')
+  assert(slabFooter.includes('footerRight') && slabFooter.includes('renderSlabFooterLines') && slabFooter.includes('mergeFooterRightRail') && !slabFooter.includes('getExtensionStatuses().values()'), 'Slab footer should render mcp-aware footerRight, not legacy compat values')
   assert(!footerCompat.includes('visibleWidth(stripControls(cleanRight))') && !footerCompat.includes('visibleWidth(stripControls(cleanLeft))'), 'Footer right layout must preserve spaces when measuring widget widths')
   assert(slabFooter.includes('refreshCommandRegistry()') && slabFooter.includes('recognizedCommands'), 'Slab command registry not refreshed for extension commands')
   assert(!productionBuddySource().some((entry) => entry.text.includes('ctx.ui.set' + 'Footer') || entry.text.includes('ctx.ui.set' + 'EditorComponent')), 'Buddy directly owns Pi footer/editor UI')
@@ -197,6 +208,11 @@ check('sprite canvas and share header layout stay deterministic', () => {
   assert(input.length >= 4, `input sprite should render hat/body/feet rows as one canvas, got ${input.length}`)
   assert(input[0]?.includes('(') && input[0]?.includes(')'), 'hat should occupy Slab info row')
   assert(input.at(-1)?.includes("'-vvvv-'"), 'feet should remain the last row of the sprite canvas')
+  refreshBuddyRenderState(dataDrake, null)
+  const footerWide = renderBuddyFooter({ width: 80, tick: 0 })
+  const footerTight = renderBuddyFooter({ width: 40, tick: 0 })
+  assert(footerWide[0] === 'Deltaflare', 'footer Buddy should show name on roomy terminals')
+  assert(footerTight[0]?.startsWith('Deltaflare ') && footerTight[0].includes('>'), 'compact footer Buddy should show name before face on tight terminals')
   const goose = { ...dataDrake, name: 'Stormwarden', species: 'Goose', hat: 'tophat' as const }
   const gooseInput = renderBuddyInputSprite(goose, { maxWidth: 80 })
   const gooseWidths = gooseInput.map((line) => visibleWidth(line))

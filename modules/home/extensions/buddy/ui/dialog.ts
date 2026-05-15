@@ -186,7 +186,7 @@ class BuddyDialog implements DialogContent {
       {
         label: 'Presence',
         value: 'slab + footer',
-        hint: 'Buddy publishes inputRight and footerRight widgets through @pi/lib/ui.',
+        hint: 'Buddy publishes a footerRight widget through @pi/lib/ui.',
         disabled: true
       }
     ]

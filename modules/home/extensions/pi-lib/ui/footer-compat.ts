@@ -4,8 +4,8 @@ import type { UiRenderCapabilities } from './contracts.ts'
 
 // ABOUT: Pure rendering for the legacy footer-status compatibility row. Moved
 // from slab/footer-bridge.ts in §T015 with no behavior change. Now uses the
-// shared `stripControls` from ./ansi.ts. Slab calls `renderFooterBridgeLines`
-// to merge new typed footer widgets with legacy status strings.
+// shared `stripControls` from ./ansi.ts. `renderFooterColumns` remains the
+// generic left/right footer layout helper used by Slab's custom footer.
 
 const ANSI_PATTERN = /\x1b\[[0-9;]*m/g
 
@@ -47,13 +47,26 @@ export function renderFooterBridgeLines(
   const legacy = renderLegacyStatusRow(legacyStatuses, width, capabilities)
   if (legacy) leftLines.push(legacy)
 
-  const rightLines = (options.rightWidgetLines ?? []).map((line) => fit(line, width, capabilities))
-  if (rightLines.length === 0) return leftLines
+  return renderFooterColumns(leftLines, options.rightWidgetLines ?? [], width, capabilities)
+}
 
-  const rows = Math.max(leftLines.length, rightLines.length)
+export function renderFooterColumns(
+  leftLines: readonly string[],
+  rightLines: readonly string[],
+  width: number,
+  capabilities: UiRenderCapabilities
+): string[] {
+  const fittedLeft = leftLines.map((line) => fit(line, width, capabilities))
+  const fittedRight = rightLines.map((line) => fit(line, width, capabilities))
+  if (fittedRight.length === 0) return fittedLeft
+
+  const rows = Math.max(fittedLeft.length, fittedRight.length)
   const lines: string[] = []
   for (let index = 0; index < rows; index++) {
-    lines.push(joinFooterLine(leftLines[index] ?? '', rightLines[index] ?? '', width, capabilities))
+    const left = fittedLeft[index] ?? ''
+    const right = fittedRight[index] ?? ''
+    if (visibleWidth(left) === 0 && visibleWidth(right) === 0) continue
+    lines.push(joinFooterLine(left, right, width, capabilities))
   }
   return lines
 }
