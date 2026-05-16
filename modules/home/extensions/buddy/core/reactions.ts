@@ -5,7 +5,7 @@ import type { Companion } from './types.ts'
 
 export const REACTION_STATES = ['impressed', 'concerned', 'amused', 'excited', 'thinking', 'happy', 'neutral'] as const
 export type ReactionState = (typeof REACTION_STATES)[number]
-export type ReactionSource = 'prompt:name' | 'prompt:frustration' | 'prompt:excitement' | 'prompt:tone' | 'observe' | 'tool:error' | 'pet' | 'level-up'
+export type ReactionSource = 'prompt:name' | 'prompt:frustration' | 'prompt:excitement' | 'prompt:tone' | 'assistant:completion' | 'observe' | 'tool:error' | 'pet' | 'level-up'
 
 export interface ReactionSpec {
   readonly source: ReactionSource
@@ -149,6 +149,8 @@ function reactionPriority(source: ReactionSource): number {
       return 60
     case 'observe':
       return 50
+    case 'assistant:completion':
+      return 45
     case 'prompt:frustration':
       return 40
     case 'prompt:name':

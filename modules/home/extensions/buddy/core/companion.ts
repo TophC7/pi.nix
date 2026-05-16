@@ -56,6 +56,7 @@ export interface PetResult {
   readonly companion: Companion
   readonly xp: XpResult
   readonly bubble: string
+  readonly xpAwarded: boolean
 }
 
 export interface MemoryResult {
@@ -185,8 +186,9 @@ export function petCompanion(db: Database): PetResult {
   const row = getPrimaryCompanionRow(db)
   if (!row) throw new Error('Hatch a companion first')
 
-  const xp = awardXp(db, row.id, 'session')
-  const companion = refreshMood(db, row.id, xp.leveledUp)
+  const xpAwarded = canAwardPetXp(db, row.id)
+  const xp = xpAwarded ? awardXp(db, row.id, 'pet') : currentXpResult(row)
+  const companion = xpAwarded ? refreshMood(db, row.id, xp.leveledUp) : loadCompanion(db, row)!
   const art = renderSprite(companion)
   const hearts = ['   ♥    ♥   ', '  ♥  ♥   ♥  ', ' ♥   ♥  ♥   ']
   const reactions = petReactions[companion.species] ?? ['*accepts the attention with quiet dignity*']
@@ -197,6 +199,7 @@ export function petCompanion(db: Database): PetResult {
   return {
     companion,
     xp,
+    xpAwarded,
     bubble: renderMarkdownBubble(reaction, hearts.concat(art), companion.name)
   }
 }
@@ -331,6 +334,18 @@ export function awardXp(db: Database, companionId: string, eventType: string): X
   db.query('UPDATE companions SET xp = ?, level = ? WHERE id = ?').run(newXp, newLevel, companionId)
 
   return { xpGained, newXp, newLevel, leveledUp, levelInfo: levelBar(newXp) }
+}
+
+function canAwardPetXp(db: Database, companionId: string): boolean {
+  const row = db.query("SELECT 1 FROM xp_events WHERE companion_id = ? AND event_type = 'pet' AND created_at > datetime('now', '-1 hour') LIMIT 1")
+    .get(companionId) as Record<string, unknown> | null
+  return row === null
+}
+
+function currentXpResult(row: CompanionRow): XpResult {
+  const newXp = row.xp ?? 0
+  const newLevel = levelFromXp(newXp)
+  return { xpGained: 0, newXp, newLevel, leveledUp: false, levelInfo: levelBar(newXp) }
 }
 
 export function recalculateMood(db: Database, companionId: string, leveledUp = false): string {

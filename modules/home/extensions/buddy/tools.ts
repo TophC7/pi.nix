@@ -1,6 +1,8 @@
 import type { ExtensionAPI } from '@mariozechner/pi-coding-agent'
+import { emptyComponent } from '@pi/lib/ui'
 import { Type } from 'typebox'
 import { buddyObserve, buddyRemember, type BuddyActionResult } from './actions.ts'
+import { publishBuddySpeech } from './ui/speech.ts'
 
 const Basis = Type.Union([
   Type.Literal('research'),
@@ -50,7 +52,14 @@ export function registerBuddyTools(pi: ExtensionAPI): void {
       edges: Type.Optional(Type.Array(ReasoningEdge)),
       cwd: Type.Optional(Type.String({ description: 'Workspace path hint for guard-mode session scoping.' }))
     }),
-    execute: async (_id, params) => toolResult(buddyObserve(params))
+    renderShell: 'self',
+    renderCall: () => emptyComponent(),
+    renderResult: () => emptyComponent(),
+    execute: async (_id, params) => {
+      const result = buddyObserve(params)
+      publishBuddySpeech(result)
+      return toolResult(result)
+    }
   })
 }
 

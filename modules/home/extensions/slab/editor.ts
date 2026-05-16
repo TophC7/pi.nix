@@ -340,6 +340,10 @@ function inputRightWidth(width: number): number {
   return Math.min(34, Math.max(16, Math.floor(width * 0.3)))
 }
 
+function inputRightTopWidth(width: number): number {
+  return Math.min(64, Math.max(24, Math.floor(width * 0.45)))
+}
+
 function canRenderInputRight(totalWidth: number, rightWidth: number): boolean {
   return totalWidth - rightWidth - INPUT_RIGHT_GAP >= MIN_EDITOR_WIDTH_WITH_INPUT_RIGHT
 }
@@ -410,6 +414,14 @@ function joinInputAdjacent(
   return lines
 }
 
+function joinRightAlignedLine(
+  rightLine: string,
+  width: number,
+  caps: UiRenderCapabilities
+): string {
+  return leftPadVisible(fit(rightLine, width, caps), width)
+}
+
 function capabilities(): UiRenderCapabilities {
   const lang = process.env.LC_ALL || process.env.LANG || ''
   return {
@@ -459,6 +471,15 @@ export class SlabEditor extends CustomEditor {
     const state = this.getState()
     const safeWidth = Math.max(1, width)
     const desiredRightWidth = inputRightWidth(safeWidth)
+    const desiredTopRightWidth = inputRightTopWidth(safeWidth)
+    const topRightWidgets = renderWidgetLines(
+      this.widgetHost,
+      state.snapshot.widgets,
+      'inputRightTop',
+      desiredTopRightWidth,
+      caps,
+      state.clock
+    )
     const rightWidgets = renderWidgetLines(
       this.widgetHost,
       state.snapshot.widgets,
@@ -496,9 +517,10 @@ export class SlabEditor extends CustomEditor {
     const joinedSurface = useInputRight
       ? joinInputAdjacent(editorSurface, rightRail.editorLines, editorWidth, rightWidth, caps)
       : editorSurface
+    const topSurface = topRightWidgets.map((line) => joinRightAlignedLine(line, safeWidth, caps))
     const mainSurface = rightRail.topLine && useInputRight
-      ? [joinRightOnlyLine(rightRail.topLine, editorWidth, rightWidth, caps), ...joinedSurface]
-      : joinedSurface
+      ? [...topSurface, joinRightOnlyLine(rightRail.topLine, editorWidth, rightWidth, caps), ...joinedSurface]
+      : [...topSurface, ...joinedSurface]
     const above = renderWidgetLines(
       this.widgetHost,
       state.snapshot.widgets,

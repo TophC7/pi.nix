@@ -105,7 +105,7 @@ function fit(line: string, width: number): string {
   return width <= 0 ? '' : fitLine(line, width)
 }
 
-function wrapText(text: string, width: number): string[] {
+export function wrapText(text: string, width: number): string[] {
   const words = text.split(/\s+/).filter(Boolean)
   const lines: string[] = []
   let current = ''

@@ -2,6 +2,7 @@ export const MAX_LEVEL = 50
 
 export const XP_REWARDS: Record<string, number> = {
   observe: 5,
+  pet: 1,
   commit: 10,
   bug_fix: 15,
   deploy: 25,

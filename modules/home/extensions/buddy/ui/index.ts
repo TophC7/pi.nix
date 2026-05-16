@@ -1,12 +1,22 @@
 import { clearUiOwner, publishWidget } from '@pi/lib/ui'
-import { renderBuddyFooter, renderBuddyInput } from './render.ts'
+import { renderBuddyFooter, renderBuddyInput, renderBuddyPetTop } from './render.ts'
 
 const OWNER = 'buddy'
+const PET_TOP_WIDGET_ID = 'buddy:pet-top'
 const INPUT_WIDGET_ID = 'buddy:input'
 const FOOTER_WIDGET_ID = 'buddy:footer'
 
 export function publishBuddyWidgets(): void {
   clearUiOwner(OWNER)
+  publishWidget({
+    id: PET_TOP_WIDGET_ID,
+    owner: OWNER,
+    placement: 'inputRightTop',
+    priority: 'high',
+    order: 0,
+    schedule: { animateEveryMs: 600 },
+    content: (context) => renderBuddyPetTop(context)
+  })
   publishWidget({
     id: INPUT_WIDGET_ID,
     owner: OWNER,
@@ -27,4 +37,4 @@ export function publishBuddyWidgets(): void {
   })
 }
 
-export { renderBuddyFooter, renderBuddyInput }
+export { renderBuddyFooter, renderBuddyInput, renderBuddyPetTop }

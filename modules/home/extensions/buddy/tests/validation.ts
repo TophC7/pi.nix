@@ -50,7 +50,9 @@ check('core companion hatch, pet, observe, and prompt context', () => {
   const hatched = hatchCompanion(db, { name: 'Core', species: 'PiDuck' }).companion
   assert(hatched.name === 'Core', 'hatch name mismatch')
   const petted = petCompanion(db)
-  assert(petted.companion.xp > hatched.xp, 'pet should award XP')
+  assert(petted.companion.xp > hatched.xp && petted.xpAwarded === true && petted.xp.xpGained === 1, 'first pet should award 1 XP')
+  const secondPet = petCompanion(db)
+  assert(secondPet.companion.xp === petted.companion.xp && secondPet.xpAwarded === false && secondPet.xp.xpGained === 0, 'second pet inside cooldown should animate without XP')
   const observed = observeCompanion(db, 'Validation finished', 'both')
   assert(observed.xp.xpGained > 0, 'observe should award XP')
   const storedSeed = db.query('SELECT user_id FROM companions WHERE id = ?').get(hatched.id) as { user_id?: string } | null

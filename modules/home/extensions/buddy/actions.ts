@@ -80,6 +80,7 @@ export function buddyObserve(input: BuddyObserveInput): BuddyActionResult {
     const result = observeCompanion(db, input.summary, input.mode)
     let guardDetails: unknown = undefined
     let guardText = ''
+    let speechReaction = phraseBaseObservation(result.reaction, result.summary)
     if (before?.guardMode) {
       try {
         const guard = runGuardPipeline(db, { companionId: result.companion.id, cwd: input.cwd, claims: input.claims, edges: input.edges })
@@ -94,7 +95,14 @@ export function buddyObserve(input: BuddyObserveInput): BuddyActionResult {
           suppression: guard.suppression,
           extractionInstruction: guard.extractionInstruction
         }
-        if (guard.finding) guardText = '\n\nGuard note: ' + guard.finding.type + ' — ' + guard.finding.claim_text
+        if (guard.finding) {
+          const findingPhrase = phraseGuardFinding(guard.finding)
+          speechReaction = `${phraseBaseObservation(result.reaction, result.summary)} ${findingPhrase}`
+          guardText = '\n\nGuard note: ' + guard.finding.type + ' — ' + guard.finding.claim_text
+        } else {
+          const guardPhrase = phraseGuardNoFinding(guard.writeResult, guard.suppression)
+          if (guardPhrase) speechReaction = `${speechReaction} ${guardPhrase}`
+        }
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
         guardDetails = { fallback: true, error: message }
@@ -108,7 +116,7 @@ export function buddyObserve(input: BuddyObserveInput): BuddyActionResult {
         companion: result.companion,
         mode: result.mode,
         summary: result.summary,
-        reaction: result.reaction,
+        reaction: speechReaction,
         xpGained: result.xp.xpGained,
         levelInfo: result.xp.levelInfo,
         guardMode: before?.guardMode === true,
@@ -123,7 +131,15 @@ export function buddyPet(): BuddyActionResult {
   return capture(() => {
     const { db } = getBuddyDatabase()
     const result = petCompanion(db)
-    return { text: result.bubble, details: { companion: result.companion, xpGained: result.xp.xpGained, levelInfo: result.xp.levelInfo } }
+    return {
+      text: result.bubble,
+      details: {
+        companion: result.companion,
+        xpGained: result.xp.xpGained,
+        xpAwarded: result.xpAwarded,
+        levelInfo: result.xp.levelInfo
+      }
+    }
   })
 }
 
@@ -203,6 +219,47 @@ function parseForgetScope(scope: string | undefined): ForgetScope {
 
 function parseReasoningScope(scope: string | undefined): PurgeScope {
   return scope === 'all' ? 'all' : 'session'
+}
+
+function phraseBaseObservation(reaction: string, summary: string): string {
+  const cleanReaction = reaction.replace(/^\*([^*]+)\*$/, '$1')
+  return `${cleanReaction}. ${claimSnippet(summary, 80)}`
+}
+
+function phraseGuardFinding(finding: { readonly type: string; readonly claim_text: string; readonly downstream_count?: number; readonly chain_length?: number }): string {
+  const claim = claimSnippet(finding.claim_text, 70)
+  switch (finding.type) {
+    case 'load_bearing_vibes':
+      return `That spine still wants evidence: “${claim}.”`
+    case 'unchallenged_chain':
+      return `Long chain here; stress-test “${claim}.”`
+    case 'echo_chamber':
+      return `Too much nodding around “${claim}.” Push one counterexample.`
+    case 'unverified_hedge':
+      return `Hedge spotted: “${claim}.” Nail it down or cut it.`
+    case 'well_sourced_load_bearer':
+      return `Good anchor: “${claim}” is carrying weight with evidence.`
+    case 'productive_stress_test':
+      return `Useful pressure on “${claim}.” Keep that edge sharp.`
+    case 'grounded_premise_adopted':
+      return `Grounded premise adopted: “${claim}.” Good soil.`
+    default:
+      return `Worth noticing: “${claim}.”`
+  }
+}
+
+function phraseGuardNoFinding(writeResult: { readonly claimsWritten?: number; readonly edgesWritten?: number }, suppression: string | null): string {
+  const claims = writeResult.claimsWritten ?? 0
+  const edges = writeResult.edgesWritten ?? 0
+  if (suppression === 'cooldown') return 'Same thorn is on cooldown; not repeating it.'
+  if (suppression === 'budget') return 'Guard pass ran hot; no note trusted.'
+  if (claims > 0 || edges > 0) return `Guard saw ${claims} claim${claims === 1 ? '' : 's'} and ${edges} edge${edges === 1 ? '' : 's'}; no thorn worth surfacing.`
+  return ''
+}
+
+function claimSnippet(text: string, max: number): string {
+  const clean = text.replace(/\s+/g, ' ').trim()
+  return clean.length <= max ? clean : clean.slice(0, Math.max(0, max - 1)).trimEnd() + '…'
 }
 
 function hatchFirst(text: string): BuddyActionResult { return { text, isError: true } }

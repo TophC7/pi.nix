@@ -45,6 +45,9 @@ const schemaSql = `
     FOREIGN KEY(companion_id) REFERENCES companions(id)
   );
 
+  CREATE INDEX IF NOT EXISTS idx_xp_events_companion_type_created
+    ON xp_events (companion_id, event_type, created_at);
+
   CREATE TABLE IF NOT EXISTS evolution_history (
     id TEXT PRIMARY KEY,
     companion_id TEXT,

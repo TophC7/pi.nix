@@ -3,6 +3,7 @@ import type { DefinedCommand } from '@pi/lib/command'
 import type { ExtensionCommandContext } from '@mariozechner/pi-coding-agent'
 import { dispatchBuddyCommand } from './command-router.ts'
 import { openBuddyDialog } from './ui/dialog.ts'
+import { publishBuddySpeech } from './ui/speech.ts'
 
 const BUDDY_ACTIONS = [
   { value: 'status', label: 'status', description: 'Show current companion card.' },
@@ -38,7 +39,16 @@ async function runBuddyCommand(ctx: ExtensionCommandContext, args: string): Prom
   }
 
   const result = dispatchBuddyCommand(args)
-  ctx.ui.notify(summarizeCommandResult(action, result.text, result.details), result.isError ? 'warning' : 'info')
+  if (result.isError) {
+    ctx.ui.notify(summarizeCommandResult(action, result.text, result.details), 'warning')
+    return
+  }
+  if (action === 'pet') return
+  if (action === 'observe') {
+    publishBuddySpeech(result)
+    return
+  }
+  ctx.ui.notify(summarizeCommandResult(action, result.text, result.details), 'info')
 }
 
 function completeBuddyArguments(argumentPrefix: string) {

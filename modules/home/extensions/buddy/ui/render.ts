@@ -50,6 +50,15 @@ export function renderBuddyInput(context: BuddyRenderContext): readonly string[]
   })
 }
 
+export function renderBuddyPetTop(context: BuddyRenderContext): readonly string[] {
+  if (!cachedCompanion) return []
+  const reaction = activeReaction(cachedCompanion)
+  if (reaction?.source !== 'pet') return []
+  const spriteWidth = Math.max(...renderBuddyInputSprite(cachedCompanion, { maxWidth: context.width }).map((line) => visibleWidth(line)), 1)
+  const hearts = ['♥   ♥', ' ♥ ♥ ', '♥ ♥ ♥']
+  return [centerPlain(hearts[(context.tick ?? 0) % hearts.length]!, Math.min(context.width, spriteWidth))]
+}
+
 export function renderBuddyFooter(context: BuddyRenderContext): readonly string[] {
   if (!cachedCompanion) return []
 
