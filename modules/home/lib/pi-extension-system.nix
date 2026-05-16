@@ -19,12 +19,6 @@ let
         '';
       };
 
-      agentsDir = mkOption {
-        type = types.nullOr types.str;
-        default = "agents";
-        description = "Optional directory of package-owned agent markdown files, relative to `source`.";
-      };
-
       supportOnly = mkOption {
         type = types.bool;
         default = false;
@@ -94,24 +88,6 @@ let
 
   extensionLinks = builtins.listToAttrs (map extensionLink packageRecords);
 
-  packageAgentFiles = record:
-    let
-      agentsDir = record.package.agentsDir;
-      agentsPath = record.package.source + "/${agentsDir}";
-    in
-    if record.directory && agentsDir != null && builtins.pathExists agentsPath then
-      builtins.filter (file: lib.hasSuffix ".md" file) (builtins.attrNames (builtins.readDir agentsPath))
-    else
-      [ ];
-
-  packageAgentEntries = record:
-    builtins.listToAttrs (map (file: {
-      name = ".pi/agent/agents/${record.name}/${file}";
-      value.source = "${extensionBundle}/${record.bundleName}/${record.package.agentsDir}/${file}";
-    }) (packageAgentFiles record));
-
-  agentLinks = lib.foldl' (acc: record: acc // packageAgentEntries record) { } packageRecords;
-
   topLevelPiLibResolverLink = lib.optionalAttrs hasPiLib {
     ".pi/agent/extensions/node_modules/@pi/lib".source = "${extensionBundle}/pi-lib";
   };
@@ -135,7 +111,7 @@ let
 
   packageEntries = map (entry: "~/.pi/agent/packages/${entry.name}") cfg.externalPackages;
 
-  generatedHomeFiles = extensionLinks // agentLinks // topLevelPiLibResolverLink // externalPackageLinks;
+  generatedHomeFiles = extensionLinks // topLevelPiLibResolverLink // externalPackageLinks;
 in
 {
   options.programs.pi = {
@@ -169,7 +145,7 @@ in
       homeFiles = mkOption {
         type = types.attrs;
         readOnly = true;
-        description = "Home Manager file entries for local extensions, package agents, resolver symlinks, and external packages.";
+        description = "Home Manager file entries for local extensions, resolver symlinks, and external packages.";
       };
 
       extensionPaths = mkOption {

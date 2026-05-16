@@ -31,6 +31,12 @@ let
       patch -p1 \
         -d $out/lib/node_modules/@earendil-works/pi-coding-agent \
         < ${./patches/pi-command-models-compact.patch}
+      patch -p1 \
+        -d $out/lib/node_modules/@earendil-works/pi-coding-agent \
+        < ${./patches/pi-agent-core-persist-run-failures.patch}
+      patch -p1 \
+        -d $out/lib/node_modules/@earendil-works/pi-coding-agent \
+        < ${./patches/pi-ai-discard-failed-tool-continuations.patch}
 
       while IFS= read -r file; do
         substituteInPlace "$file" \
@@ -61,14 +67,12 @@ let
     pi-lib = {
       source = ./extensions/pi-lib;
       supportOnly = true;
-      agentsDir = null;
     };
 
     # Multi-file extension packages: each owns index.ts and optional agents/*.md.
     slab = {
       source = ./extensions/slab;
       entry = "index.ts";
-      agentsDir = null;
     };
     buddy = {
       source = lib.cleanSourceWith {
@@ -78,12 +82,10 @@ let
           && !(lib.hasInfix "/tests/" (toString path));
       };
       entry = "index.ts";
-      agentsDir = null;
     };
     burden = {
       source = ./extensions/burden;
       entry = "index.ts";
-      agentsDir = null;
     };
     spec = {
       source = ./extensions/spec;

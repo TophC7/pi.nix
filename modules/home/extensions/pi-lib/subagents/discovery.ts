@@ -73,22 +73,25 @@ export function mergeAgentsByPrecedence(agents: readonly DiscoveredAgent[]): Dis
 
 function buildAgentRoots(options: DiscoverAgentsOptions, agentDir: string, scope: AgentScope): AgentRoot[] {
   const roots: AgentRoot[] = []
+  const seenRootDirs = new Set<string>()
+  const addRoot = (root: AgentRoot) => {
+    if (seenRootDirs.has(root.dir)) return
+    seenRootDirs.add(root.dir)
+    roots.push(root)
+  }
   const sharedAgentsDir = options.packageAgentsDir ?? join(agentDir, 'agents')
-  roots.push({ dir: sharedAgentsDir, source: 'package', packageRoot: true })
+  addRoot({ dir: sharedAgentsDir, source: 'package', packageRoot: true })
   if (options.localPackagesDir) {
     for (const pkg of safeReadDir(options.localPackagesDir)) {
       const agentsDir = join(options.localPackagesDir, pkg, 'agents')
-      if (safeIsDirectory(agentsDir)) roots.push({ dir: agentsDir, source: 'package' })
+      if (safeIsDirectory(agentsDir)) addRoot({ dir: agentsDir, source: 'package' })
     }
   }
-  if ((scope === 'user' || scope === 'both') && options.userAgentsDir && options.userAgentsDir !== sharedAgentsDir) {
-    roots.push({ dir: options.userAgentsDir, source: 'user' })
+  if ((scope === 'user' || scope === 'both') && options.userAgentsDir) {
+    addRoot({ dir: options.userAgentsDir, source: 'user' })
   }
   if (scope === 'project' || scope === 'both') {
-    roots.push({
-      dir: options.projectAgentsDir ?? join(options.cwd, '.pi', 'agents'),
-      source: 'project'
-    })
+    addRoot({ dir: options.projectAgentsDir ?? join(options.cwd, '.pi', 'agents'), source: 'project' })
   }
   return roots
 }

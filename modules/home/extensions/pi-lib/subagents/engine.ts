@@ -20,6 +20,17 @@ import {
 } from './types.ts'
 
 const BUILTIN_TOOLS = ['read', 'bash', 'edit', 'write', 'grep', 'find', 'ls'] as const
+const TOOL_ALIASES: Record<string, (typeof BUILTIN_TOOLS)[number]> = {
+  read: 'read',
+  bash: 'bash',
+  edit: 'edit',
+  write: 'write',
+  grep: 'grep',
+  glob: 'find',
+  find: 'find',
+  ls: 'ls',
+  list: 'ls'
+}
 
 interface PiRuntimeModule {
   AuthStorage: { create(): unknown }
@@ -357,8 +368,13 @@ function resolveModel(agent: DiscoveredAgent, modelRegistry: { find(provider: st
 function resolveToolNames(agent: DiscoveredAgent): string[] | undefined {
   if (agent.tools === 'none') return []
   if (agent.tools === 'builtins') return [...BUILTIN_TOOLS]
-  if (Array.isArray(agent.tools)) return [...agent.tools]
+  if (Array.isArray(agent.tools)) return [...new Set(agent.tools.map(normalizeToolName))]
   return undefined
+}
+
+function normalizeToolName(tool: string): string {
+  const normalized = TOOL_ALIASES[tool.trim().toLowerCase()]
+  return normalized ?? tool
 }
 
 function validateActiveTools(agent: DiscoveredAgent, session: RunnerSession): void {
@@ -561,7 +577,7 @@ function buildRunResult(request: SubagentRunRequest, state: SubagentRunState): S
     mode: state.mode,
     status: state.status,
     label: state.label,
-    request,
+    request: stripRuntimeRequestFields(request),
     slots: state.slots,
     usage: combineSubagentUsage(state.slots.map((slot) => slot.usage)),
     duration,
@@ -572,6 +588,12 @@ function buildRunResult(request: SubagentRunRequest, state: SubagentRunState): S
     rerun: state.rerun,
     truncation: finalText.truncation
   }
+}
+
+function stripRuntimeRequestFields(request: SubagentRunRequest): SubagentRunRequest {
+  const serializableRequest = { ...request }
+  delete serializableRequest.parentSignal
+  return serializableRequest
 }
 
 function normalizeAgentMap(agents: RunSubagentsOptions['agents']): Map<string, DiscoveredAgent> {

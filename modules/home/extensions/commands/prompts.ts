@@ -2,7 +2,9 @@ export const COMMIT_PROMPT = `Create a conventional commit from currently staged
 
 Workflow:
 1. Run \`git diff --cached --stat\` and \`git diff --cached\`.
-2. If nothing is staged, tell the user and stop.
+2. If the cached diff is empty, tell the user nothing is staged and stop.
+   - Decide staged state only from \`git diff --cached\` output.
+   - Do not use \`git status --short\` for this check; its two columns are easy to misread.
 3. Draft a conventional commit message from the staged diff only.
    - First line: \`type(scope): summary\`
    - Keep summary under 72 characters.
@@ -20,6 +22,7 @@ git commit -m "$commit_message"
 
 Rules:
 - Commit only already-staged changes.
+- Do not run \`git status\`; it is irrelevant to the staged-only commit decision.
 - Do not edit files, stage files, unstage files, amend, retry, or bypass hooks.
 - If commit fails, show error output and exact attempted commit message, then stop.
 - If commit succeeds, show commit hash and summary briefly.`

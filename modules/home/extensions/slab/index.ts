@@ -195,7 +195,7 @@ export default function slab(pi: ExtensionAPI): void {
   }
   let gitRefreshTimer: ReturnType<typeof setTimeout> | undefined
   let gitRefreshInFlightCwd: string | undefined
-  let gitRefreshQueuedCtx: ExtensionContext | undefined
+  let gitRefreshQueuedCwd: string | undefined
   let gitRefreshGeneration = 0
   let state: SlabState | undefined
   let driver: UiRenderDriverHandle | undefined
@@ -211,6 +211,15 @@ export default function slab(pi: ExtensionAPI): void {
   function getState(): SlabState {
     if (!state) throw new Error('slab state not initialized')
     return state
+  }
+
+  function currentCtxCwd(): string | undefined {
+    try {
+      return currentCtx?.cwd
+    } catch {
+      currentCtx = undefined
+      return undefined
+    }
   }
 
   function refresh(ctx: ExtensionContext, thinkingOverride?: string): void {
@@ -233,7 +242,7 @@ export default function slab(pi: ExtensionAPI): void {
   function configNeedsGitRefresh(previous: SlabConfig, next: SlabConfig, ctx: ExtensionContext): boolean {
     if (!gitSegmentEnabled(next)) return false
     return (
-      currentCtx?.cwd !== ctx.cwd ||
+      currentCtxCwd() !== ctx.cwd ||
       gitSegmentEnabled(previous) !== gitSegmentEnabled(next) ||
       configKey(previous.git) !== configKey(next.git)
     )
@@ -267,32 +276,35 @@ export default function slab(pi: ExtensionAPI): void {
   }
 
   function requestGitRefresh(ctx: ExtensionContext): void {
-    gitRefreshQueuedCtx = ctx
+    requestGitRefreshForCwd(ctx.cwd)
+  }
+
+  function requestGitRefreshForCwd(cwd: string): void {
+    gitRefreshQueuedCwd = cwd
     if (gitRefreshTimer || gitRefreshInFlightCwd) return
     gitRefreshTimer = setTimeout(
       () => {
         gitRefreshTimer = undefined
-        const next = gitRefreshQueuedCtx
-        gitRefreshQueuedCtx = undefined
+        const next = gitRefreshQueuedCwd
+        gitRefreshQueuedCwd = undefined
         if (next) void runGitRefresh(next, gitRefreshGeneration)
       },
       Math.max(0, config.git.refreshDebounceMs)
     )
   }
 
-  async function runGitRefresh(ctx: ExtensionContext, generation: number): Promise<void> {
-    const cwd = ctx.cwd
+  async function runGitRefresh(cwd: string, generation: number): Promise<void> {
     gitRefreshInFlightCwd = cwd
     try {
       const snapshot = await collectGitSnapshot(cwd, config.git)
-      if (generation !== gitRefreshGeneration || currentCtx?.cwd !== cwd) return
+      if (generation !== gitRefreshGeneration || currentCtxCwd() !== cwd) return
       gitSnapshot = snapshot
-      refresh(ctx)
+      if (currentCtx) refresh(currentCtx)
     } finally {
       gitRefreshInFlightCwd = undefined
-      const next = gitRefreshQueuedCtx
-      gitRefreshQueuedCtx = undefined
-      if (next && generation === gitRefreshGeneration) requestGitRefresh(next)
+      const next = gitRefreshQueuedCwd
+      gitRefreshQueuedCwd = undefined
+      if (next && generation === gitRefreshGeneration) requestGitRefreshForCwd(next)
     }
   }
 
@@ -370,7 +382,7 @@ export default function slab(pi: ExtensionAPI): void {
     if (gitRefreshTimer) clearTimeout(gitRefreshTimer)
     gitRefreshTimer = undefined
     gitRefreshInFlightCwd = undefined
-    gitRefreshQueuedCtx = undefined
+    gitRefreshQueuedCwd = undefined
   }
 
   pi.registerCommand('slab', {
