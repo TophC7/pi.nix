@@ -1,11 +1,9 @@
 import type { ExtensionAPI } from '@mariozechner/pi-coding-agent'
-import { installCommandRuntime, runCommit, runPr } from './actions'
+import { runCommit, runPr } from './actions'
 import { formatConfigStatus } from './config'
 import { openCommandsConfigDialog } from './dialog'
 
 export default function commandsExtension(pi: ExtensionAPI) {
-  installCommandRuntime(pi)
-
   pi.registerCommand('commit', {
     description: 'Commit staged changes. Optional prompt adds instructions. Configure with `/config`.',
     handler: async (args, ctx) => runCommit(pi, ctx, args)

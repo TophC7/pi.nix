@@ -87,8 +87,8 @@ let
       source = ./extensions/burden;
       entry = "index.ts";
     };
-    spec = {
-      source = ./extensions/spec;
+    sdd = {
+      source = ./extensions/sdd;
       entry = "index.ts";
     };
     cleanup = {

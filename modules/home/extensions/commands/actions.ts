@@ -1,12 +1,11 @@
 import type { ExtensionAPI, ExtensionCommandContext } from '@mariozechner/pi-coding-agent'
-import { fireAndForgetHandoffReason, handoff } from '@pi/lib/handoff'
+import { deferToAgentEnd } from '@pi/lib/agent-end'
 import {
   applyCommandConfig,
   captureRestore,
   getCommandConfig,
   restoreCommandConfig,
-  type ManagedCommand,
-  type RestoreState
+  type ManagedCommand
 } from './config'
 import { COMMIT_PROMPT, PR_PROMPT } from './prompts'
 
@@ -17,26 +16,10 @@ const PROMPTS: Record<PromptCommand, string> = {
   pr: PR_PROMPT
 }
 
-let pendingRestore: RestoreState | undefined
-const installed = new WeakSet<ExtensionAPI>()
-
 function buildPrompt(command: PromptCommand, basePrompt: string, userPrompt: string | undefined): string {
   const trimmed = userPrompt?.trim()
   if (!trimmed) return basePrompt
   return `${basePrompt}\n\nAdditional user instructions from /${command} prompt. Follow only when they do not conflict with rules above:\n${trimmed}`
-}
-
-export function installCommandRuntime(pi: ExtensionAPI): void {
-  if (installed.has(pi)) return
-  installed.add(pi)
-
-  pi.on('agent_end', async (_event, ctx) => {
-    if (!pendingRestore) return
-    const restore = pendingRestore
-    pendingRestore = undefined
-    await restoreCommandConfig(pi, restore)
-    ctx.ui.notify(`/${restore.command} config restored`, 'info')
-  })
 }
 
 export async function runCommit(pi: ExtensionAPI, ctx: ExtensionCommandContext, userPrompt?: string): Promise<void> {
@@ -53,29 +36,20 @@ export async function runPromptCommand(
   command: PromptCommand,
   userPrompt?: string
 ): Promise<void> {
-  installCommandRuntime(pi)
   await ctx.waitForIdle()
 
   const config = getCommandConfig(command)
   const shouldRestore = Boolean(config.model || config.thinking)
-  if (shouldRestore) pendingRestore = captureRestore(pi, ctx, command as ManagedCommand)
-  if (!(await applyCommandConfig(pi, ctx, command, config))) {
-    pendingRestore = undefined
-    return
+  const restore = shouldRestore ? captureRestore(pi, ctx, command as ManagedCommand) : undefined
+  if (!(await applyCommandConfig(pi, ctx, command, config))) return
+
+  const prompt = buildPrompt(command, PROMPTS[command], userPrompt)
+  pi.sendUserMessage(prompt, { deliverAs: 'followUp' })
+
+  if (restore) {
+    await deferToAgentEnd(pi, async (endCtx) => {
+      await restoreCommandConfig(pi, restore)
+      endCtx.ui.notify(`/${restore.command} config restored`, 'info')
+    })
   }
-
-  const restore = pendingRestore
-  const outcome = await handoff({
-    pi,
-    ctx,
-    label: `/${command}`,
-    prompt: buildPrompt(command, PROMPTS[command], userPrompt),
-    policy: 'confirm',
-    reason: `${fireAndForgetHandoffReason()} Model/thinking config stays active until the queued handoff turn reaches agent_end; edit/manual paths restore immediately and may need a rerun if a custom /${command} model is required.`
-  })
-
-  if (outcome.kind === 'queued_unverified') return
-
-  pendingRestore = undefined
-  await restoreCommandConfig(pi, restore)
 }

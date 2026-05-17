@@ -1,6 +1,6 @@
 export interface CleanupApplyArgs {
-  diffPath: string
-  findingsPath: string
+  diff: string
+  findings: string
   focus?: string
 }
 
@@ -8,11 +8,17 @@ function focusLine(focus?: string): string {
   return focus ? `\nAdditional focus: ${focus}\n` : ''
 }
 
-export function cleanupReuseTask(diffPath: string, focus?: string): string {
-  return `Run the /cleanup reuse pass.
+function fencedDiff(diff: string): string {
+  return `\`\`\`diff\n${diff}\n\`\`\``
+}
 
-Diff under review: ${diffPath}${focusLine(focus)}
-Read the diff file. Search the repository for existing utilities, helpers, hooks, or primitives that the diff duplicates or reinvents.
+export function cleanupReuseTask(diff: string, focus?: string): string {
+  return `Run the /cleanup reuse pass.
+${focusLine(focus)}
+Diff under review:
+${fencedDiff(diff)}
+
+Search the repository for existing utilities, helpers, hooks, or primitives that the diff duplicates or reinvents.
 
 Rules:
 - Read-only.
@@ -27,11 +33,13 @@ Return concise findings only. For each finding include:
 - severity: blocking / required / suggestion.`
 }
 
-export function cleanupQualityTask(diffPath: string, focus?: string): string {
+export function cleanupQualityTask(diff: string, focus?: string): string {
   return `Run the /cleanup quality pass.
+${focusLine(focus)}
+Diff under review:
+${fencedDiff(diff)}
 
-Diff under review: ${diffPath}${focusLine(focus)}
-Read the diff file. Flag dead code, debug remnants, slop, hacky patterns, and over-engineering in the changed scope.
+Flag dead code, debug remnants, slop, hacky patterns, and over-engineering in the changed scope.
 
 Rules:
 - Read-only.
@@ -46,11 +54,13 @@ Return concise findings only. For each finding include:
 - severity: blocking / required / suggestion.`
 }
 
-export function cleanupEfficiencyTask(diffPath: string, focus?: string): string {
+export function cleanupEfficiencyTask(diff: string, focus?: string): string {
   return `Run the /cleanup efficiency pass.
+${focusLine(focus)}
+Diff under review:
+${fencedDiff(diff)}
 
-Diff under review: ${diffPath}${focusLine(focus)}
-Read the diff file. Flag wasted work, missed concurrency, hot-path bloat, no-op updates, and memory issues in the changed scope.
+Flag wasted work, missed concurrency, hot-path bloat, no-op updates, and memory issues in the changed scope.
 
 Rules:
 - Read-only.
@@ -65,18 +75,26 @@ Return concise findings only. For each finding include:
 }
 
 export function cleanupApplyPrompt(args: CleanupApplyArgs): string {
-  return `Apply /cleanup findings to the working tree.
+  // CLAUDE: Do NOT lead this prompt with slash-command-shaped text (e.g.
+  // `/cleanup ...`). Pi's command parser will hijack the first token and
+  // corrupt the prompt body. Lead with prose.
+  return `Apply cleanup findings to the working tree.
 
-Inputs (read these files; do not re-derive):
-- Diff under review: ${args.diffPath}
-- Combined findings from cleanup.cleanup-reuse-scout, cleanup.cleanup-quality-scout, cleanup.cleanup-efficiency-scout: ${args.findingsPath}
+Inputs are inline below. Do not re-derive the findings unless needed to verify safety.
 ${args.focus ? `\nUser focus: ${args.focus}\n` : ''}
+Diff under review:
+${fencedDiff(args.diff)}
+
+Combined findings from cleanup.cleanup-reuse-scout, cleanup.cleanup-quality-scout, cleanup.cleanup-efficiency-scout:
+\`\`\`md
+${args.findings}
+\`\`\`
+
 Mode rules:
-1. Read both input files.
-2. Apply only findings that are clearly correct and worth doing now. Skip false positives without arguing.
-3. Stay in lane: change only the lines a finding identifies; do not refactor surrounding code.
-4. Preserve behavior, error handling, and existing abstraction boundaries.
-5. Do not stage, commit, or push. The user reviews before committing.
+1. Apply only findings that are clearly correct and worth doing now. Skip false positives without arguing.
+2. Stay in lane: change only the lines a finding identifies; do not refactor surrounding code.
+3. Preserve behavior, error handling, and existing abstraction boundaries.
+4. Do not stage, commit, or push. The user reviews before committing.
 
 After applying, return one tight summary block:
 - Applied: bulleted list, one short line per fix with file:line.
