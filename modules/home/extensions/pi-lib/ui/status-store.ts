@@ -21,6 +21,7 @@ export interface PublishStatusInput {
   readonly id?: UiEntryId
   readonly owner: string
   readonly label?: string
+  readonly icon?: string
   readonly text: UiRenderableText
   readonly tone?: UiTone
   readonly priority?: UiPriority
@@ -146,6 +147,7 @@ function sameStatusRenderData(a: UiStatusEntry, b: UiStatusEntry): boolean {
   return (
     a.owner === b.owner &&
     a.label === b.label &&
+    a.icon === b.icon &&
     Object.is(a.text, b.text) &&
     a.tone === b.tone &&
     sameOrdering(a.ordering, b.ordering) &&
@@ -259,6 +261,7 @@ class SharedUiStatusStore implements UiStatusStoreWriter {
       id: input.id ?? newId(input.owner),
       owner: input.owner,
       label: input.label,
+      icon: input.icon,
       text: input.text,
       tone: input.tone,
       ordering: ordering(input.priority, input.order),

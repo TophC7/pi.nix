@@ -54,7 +54,7 @@ export const SLAB_ICONS: Record<SlabSegmentId, string> = {
   context: '󰔟',
   tokens: '󰄨',
   cost: '󰈸',
-  status: '󰐊'
+  status: ''
 }
 
 // Conflict/dirty marks for the git segment. Always nerd-style — slab requires

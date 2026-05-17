@@ -117,7 +117,9 @@ function statusText(ctx: SlabSegmentRenderContext): string[] {
           : entry.text
       const text = stripControls(raw).trim()
       if (!text) return ''
-      return entry.label ? `${entry.label}: ${text}` : text
+      const labelled = entry.label ? `${entry.label}: ${text}` : text
+      const icon = ctx.render.unicode && entry.icon ? `${entry.icon} ` : ''
+      return `${icon}${labelled}`.trim()
     })
     .filter(Boolean)
 }

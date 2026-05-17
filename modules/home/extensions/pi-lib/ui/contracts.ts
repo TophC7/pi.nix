@@ -70,6 +70,7 @@ export interface UiStatusEntry {
   readonly id: UiEntryId
   readonly owner: UiOwner
   readonly label?: string
+  readonly icon?: string
   readonly text: UiRenderableText
   readonly tone?: UiTone
   readonly ordering: UiOrdering
