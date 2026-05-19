@@ -177,6 +177,7 @@ in
           defaultModel = cfg.model;
           defaultThinkingLevel = "high";
           theme = "terminal";
+          quietStartup = true;
 
           extensions = cfg.extensionSystem.extensionPaths;
 
