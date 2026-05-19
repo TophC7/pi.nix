@@ -20,22 +20,28 @@ export function renderSlabFooterLines(
   rightRail: SlabFooterRightRail = {},
   mcpState?: SlabMcpStatusSnapshot
 ): string[] {
-  const leftWidth = rightRail.leftWidth && rightRail.leftWidth < width ? rightRail.leftWidth : width
+  const safeWidth = Math.max(0, width)
+  const railGapWidth = Math.max(0, rightRail.gapWidth ?? 0)
+  const railWidth = Math.max(0, rightRail.railWidth ?? 0)
+  const requestedLeftWidth = Math.max(0, rightRail.leftWidth ?? 0)
+  const canUseRightRail = Boolean(
+    rightRail.footerLine && railWidth > 0 && requestedLeftWidth > 0 && requestedLeftWidth + railGapWidth + railWidth <= safeWidth
+  )
+  const leftWidth = canUseRightRail ? requestedLeftWidth : safeWidth
   const innerLeftWidth = footerInnerWidth(leftWidth)
   const mcpLine = renderMcpFooterLine(extensionStatuses, capabilities, innerLeftWidth, mcpState)
   const leftLines = mcpLine ? [mcpLine] : []
   const lines = renderFooterColumns(leftLines, rightWidgetLines, innerLeftWidth, capabilities)
     .map((line) => padFooterSurface(line, leftWidth))
-  if (!rightRail.footerLine || !rightRail.railWidth) {
-    return leftWidth < width ? lines.map((line) => padLine(line, width)) : lines
-  }
+  if (!canUseRightRail) return lines.map((line) => padLine(line, safeWidth))
 
   const rows = Math.max(1, lines.length)
-  const gap = ' '.repeat(rightRail.gapWidth ?? 0)
+  const gap = ' '.repeat(railGapWidth)
   const result: string[] = []
   for (let index = 0; index < rows; index++) {
     const left = lines[index] ?? padFooterSurface('', leftWidth)
-    result.push(index === 0 ? `${left}${gap}${padLine(rightRail.footerLine, rightRail.railWidth)}` : left)
+    const line = index === 0 ? `${left}${gap}${padLine(rightRail.footerLine ?? '', railWidth)}` : left
+    result.push(padLine(line, safeWidth))
   }
   return result
 }

@@ -5,10 +5,7 @@ import type { UiComponentLike } from './contracts.ts'
 export function fitLine(text: string, width: number, ellipsis = '…'): string {
   const safeWidth = Math.max(0, width)
   if (visibleWidth(text) <= safeWidth) return text
-  const ellipsisWidth = ellipsis ? visibleWidth(ellipsis) : 0
-  const truncWidth = safeWidth - ellipsisWidth + 1 // +1 compensates truncLine's internal maxWidth-1
-  const truncated = truncLine(text, Math.max(1, truncWidth))
-  return truncated + ellipsis
+  return truncLine(text, safeWidth, ellipsis)
 }
 
 export function padLine(text: string, width: number): string {

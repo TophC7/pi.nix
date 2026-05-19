@@ -537,6 +537,6 @@ export class SlabEditor extends CustomEditor {
       caps,
       state.clock
     )
-    return [...above, ...mainSurface, ...below]
+    return [...above, ...mainSurface, ...below].map((line) => fit(line, safeWidth, caps))
   }
 }

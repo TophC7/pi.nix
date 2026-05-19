@@ -20,9 +20,14 @@ export function stripControls(text: string): string {
     .trim()
 }
 
-export function truncLine(text: string, maxWidth: number): string {
-  if (visibleWidth(text) <= maxWidth) return text
-  const targetWidth = Math.max(0, maxWidth - 1)
+export function truncLine(text: string, maxWidth: number, ellipsis = '…'): string {
+  const safeWidth = Math.max(0, maxWidth)
+  if (visibleWidth(text) <= safeWidth) return text
+  if (safeWidth === 0) return ''
+
+  const ellipsisWidth = visibleWidth(ellipsis)
+  const suffix = ellipsisWidth <= safeWidth ? ellipsis : ''
+  const targetWidth = Math.max(0, safeWidth - visibleWidth(suffix))
   let result = ''
   let currentWidth = 0
   let activeStyles: string[] = []
@@ -41,13 +46,13 @@ export function truncLine(text: string, maxWidth: number): string {
     const end = nextAnsi === -1 ? text.length : Math.max(i + 1, nextAnsi)
     for (const seg of segmenter.segment(text.slice(i, end))) {
       const w = visibleWidth(seg.segment)
-      if (currentWidth + w > targetWidth) return finishTruncated(result, activeStyles)
+      if (currentWidth + w > targetWidth) return finishTruncated(result, activeStyles, suffix)
       result += seg.segment
       currentWidth += w
     }
     i = end
   }
-  return finishTruncated(result, activeStyles)
+  return finishTruncated(result, activeStyles, suffix)
 }
 
 function ansiAt(text: string, index: number): string | undefined {
@@ -55,6 +60,7 @@ function ansiAt(text: string, index: number): string | undefined {
   return ANSI_PATTERN.exec(text)?.[0]
 }
 
-function finishTruncated(result: string, activeStyles: readonly string[]): string {
-  return activeStyles.length > 0 ? `${result}${activeStyles.join('')}…${ANSI_RESET}` : `${result}…`
+function finishTruncated(result: string, activeStyles: readonly string[], ellipsis: string): string {
+  if (activeStyles.length === 0) return `${result}${ellipsis}`
+  return `${result}${ellipsis}${ANSI_RESET}`
 }
