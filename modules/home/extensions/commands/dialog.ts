@@ -18,17 +18,20 @@ import {
   type ManagedCommand,
   type ThinkingLevel
 } from './config'
+import { QA_CONFIG_PATH, getQaTargetUrl, isLocalhostQaTarget, saveQaTargetUrl } from '../agentic-qa/config.ts'
 
 const COMMAND_LABELS: Record<ManagedCommand, string> = {
   commit: '/commit',
   pr: '/pr',
-  compact: '/compact'
+  compact: '/compact',
+  qa: '/qa'
 }
 
 const COMMAND_DESCRIPTIONS: Record<ManagedCommand, string> = {
   commit: 'One-shot prompt that commits currently staged changes.',
   pr: 'One-shot prompt that creates pull request text from current branch changes.',
-  compact: 'Builtin context compaction. Pi applies this config before compacting, then restores.'
+  compact: 'Builtin context compaction. Pi applies this config before compacting, then restores.',
+  qa: 'Agentic QA mission, staged, and freehand commands.'
 }
 
 const FOOTER_KEYS = [
@@ -46,10 +49,21 @@ const MODEL_PICKER_FOOTER = [
   { key: 'Esc', label: 'back' }
 ] as const
 
-interface ConfigRow {
-  readonly command: ManagedCommand
-  readonly field: 'model' | 'thinking'
-}
+const TARGET_FOOTER = [
+  { key: 'type', label: 'URL' },
+  { key: 'Enter', label: 'save' },
+  { key: 'Esc', label: 'back' }
+] as const
+
+type ConfigRow =
+  | {
+      readonly kind: 'command'
+      readonly command: ManagedCommand
+      readonly field: 'model' | 'thinking'
+    }
+  | {
+      readonly kind: 'qaTarget'
+    }
 
 interface ModelChoice {
   readonly value: string
@@ -67,11 +81,19 @@ type DialogMode =
       readonly choices?: readonly ModelChoice[]
       readonly error?: string
     }
+  | {
+      readonly kind: 'target'
+      readonly input: Input
+      readonly error?: string
+    }
 
-const CONFIG_ROWS: readonly ConfigRow[] = MANAGED_COMMANDS.flatMap((command) => [
-  { command, field: 'model' as const },
-  { command, field: 'thinking' as const }
-])
+const CONFIG_ROWS: readonly ConfigRow[] = [
+  ...MANAGED_COMMANDS.flatMap((command) => [
+    { kind: 'command' as const, command, field: 'model' as const },
+    { kind: 'command' as const, command, field: 'thinking' as const }
+  ]),
+  { kind: 'qaTarget' as const }
+]
 
 export function openCommandsConfigDialog(ctx: ExtensionCommandContext): void {
   openDialog(ctx, ({ tui, theme, close }) => new CommandsConfigDialog(ctx, tui, theme, close), {
@@ -85,6 +107,7 @@ export function openCommandsConfigDialog(ctx: ExtensionCommandContext): void {
 
 class CommandsConfigDialog implements DialogContent {
   private config = getCommandsConfig()
+  private qaTargetUrl = getQaTargetUrl()
   private selectedRowIndex = 0
   private mode: DialogMode = { kind: 'config' }
   private status: string | undefined
@@ -100,6 +123,7 @@ class CommandsConfigDialog implements DialogContent {
   render(width: number): string[] {
     const safeWidth = Math.max(1, width)
     if (this.mode.kind === 'model') return this.renderModelPicker(safeWidth, this.mode)
+    if (this.mode.kind === 'target') return this.renderTargetInput(safeWidth, this.mode)
     return this.renderConfig(safeWidth)
   }
 
@@ -108,6 +132,10 @@ class CommandsConfigDialog implements DialogContent {
   handleInput(data: string): void {
     if (this.mode.kind === 'model') {
       this.handleModelInput(data, this.mode)
+      return
+    }
+    if (this.mode.kind === 'target') {
+      this.handleTargetInput(data, this.mode)
       return
     }
     this.handleConfigInput(data)
@@ -156,6 +184,21 @@ class CommandsConfigDialog implements DialogContent {
       ...padRows(rows, bodyRows, width),
       renderDialogDivider({ theme: this.theme, width }),
       renderDialogFooter({ theme: this.theme, width, keys: MODEL_PICKER_FOOTER, status })
+    ]
+  }
+
+  private renderTargetInput(width: number, mode: Extract<DialogMode, { kind: 'target' }>): string[] {
+    const bodyRows = rowBudget()
+    const rows = [
+      this.theme.fg('muted', fitRaw('Enter a localhost http(s) URL for /qa, or leave empty to clear.', width)),
+      this.theme.fg('dim', fitRaw('Examples: http://localhost:5173, http://127.0.0.1:49173', width))
+    ]
+    return [
+      renderDialogHeader({ title: '/qa target', theme: this.theme, width, searchInput: mode.input }),
+      renderDialogDivider({ theme: this.theme, width }),
+      ...padRows(rows, bodyRows, width),
+      renderDialogDivider({ theme: this.theme, width }),
+      renderDialogFooter({ theme: this.theme, width, keys: TARGET_FOOTER, status: mode.error ?? 'Enter saves, Esc backs out' })
     ]
   }
 
@@ -213,6 +256,25 @@ class CommandsConfigDialog implements DialogContent {
     this.tui.requestRender()
   }
 
+  private handleTargetInput(data: string, mode: Extract<DialogMode, { kind: 'target' }>): void {
+    if (matchesKey(data, Key.ctrl('c'))) {
+      this.close()
+      return
+    }
+    if (matchesKey(data, Key.escape)) {
+      this.mode = { kind: 'config' }
+      this.tui.requestRender()
+      return
+    }
+    if (matchesKey(data, Key.enter)) {
+      this.saveTargetChoice(mode.input.getValue())
+      return
+    }
+    mode.input.handleInput(data)
+    this.mode = { ...mode, error: undefined }
+    this.tui.requestRender()
+  }
+
   private moveRow(delta: number): void {
     this.selectedRowIndex = clamp(this.selectedRowIndex + delta, 0, CONFIG_ROWS.length - 1)
     this.status = undefined
@@ -222,12 +284,25 @@ class CommandsConfigDialog implements DialogContent {
   private async editSelectedRow(): Promise<void> {
     const row = CONFIG_ROWS[this.selectedRowIndex]
     if (!row) return
+    if (row.kind === 'qaTarget') {
+      this.openTargetInput()
+      return
+    }
     if (row.field === 'thinking') {
       this.cycleThinking(row.command)
       this.tui.requestRender()
       return
     }
     await this.openModelPicker(row.command)
+  }
+
+  private openTargetInput(): void {
+    const input = new Input()
+    input.focused = true
+    input.setValue?.(this.qaTargetUrl ?? '')
+    this.mode = { kind: 'target', input }
+    this.status = undefined
+    this.tui.requestRender()
   }
 
   private async openModelPicker(command: ManagedCommand): Promise<void> {
@@ -290,6 +365,30 @@ class CommandsConfigDialog implements DialogContent {
     this.tui.requestRender()
   }
 
+  private saveTargetChoice(value: string): void {
+    const target = value.trim()
+    if (!target || target === 'default' || target === 'unset' || target === 'clear') {
+      this.qaTargetUrl = saveQaTargetUrl(undefined)
+      this.status = '/qa target → unset'
+      this.mode = { kind: 'config' }
+      this.tui.requestRender()
+      return
+    }
+    if (!isLocalhostQaTarget(target)) {
+      this.mode = {
+        kind: 'target',
+        input: this.mode.kind === 'target' ? this.mode.input : new Input(),
+        error: 'Target must be a localhost http(s) URL.'
+      }
+      this.tui.requestRender()
+      return
+    }
+    this.qaTargetUrl = saveQaTargetUrl(target)
+    this.status = `/qa target → ${target}`
+    this.mode = { kind: 'config' }
+    this.tui.requestRender()
+  }
+
   private cycleThinking(command: ManagedCommand): void {
     const current = this.config[command].thinking ?? 'default'
     const values = ['default', ...THINKING_LEVELS] as const
@@ -302,6 +401,12 @@ class CommandsConfigDialog implements DialogContent {
   private defaultSelectedField(): void {
     const row = CONFIG_ROWS[this.selectedRowIndex]
     if (!row) return
+    if (row.kind === 'qaTarget') {
+      this.qaTargetUrl = saveQaTargetUrl(undefined)
+      this.status = '/qa target → unset'
+      this.tui.requestRender()
+      return
+    }
     const current = this.config[row.command]
     if (row.field === 'model') this.save(row.command, { ...current, model: undefined })
     else this.save(row.command, { ...current, thinking: undefined })
@@ -312,6 +417,12 @@ class CommandsConfigDialog implements DialogContent {
   private defaultSelectedCommand(): void {
     const row = CONFIG_ROWS[this.selectedRowIndex]
     if (!row) return
+    if (row.kind === 'qaTarget') {
+      this.qaTargetUrl = saveQaTargetUrl(undefined)
+      this.status = '/qa target → unset'
+      this.tui.requestRender()
+      return
+    }
     this.save(row.command, {})
     this.status = `${COMMAND_LABELS[row.command]} → defaults`
     this.tui.requestRender()
@@ -322,6 +433,15 @@ class CommandsConfigDialog implements DialogContent {
   }
 
   private configRowLine(row: ConfigRow, selected: boolean, width: number): string {
+    if (row.kind === 'qaTarget') {
+      const cursor = selected ? this.theme.fg('accent', this.theme.bold('>')) : ' '
+      const commandText = '/qa'.padEnd(9)
+      const command = selected ? this.theme.bold(commandText) : commandText
+      const field = selected ? this.theme.fg('accent', 'target  ') : 'target  '
+      const value = this.qaTargetUrl ?? 'unset'
+      const renderedValue = selected ? this.theme.fg('accent', value) : this.theme.fg('muted', value)
+      return fit(`${cursor} ${command} ${field} ${renderedValue}`, width, this.theme)
+    }
     const value = row.field === 'model' ? this.config[row.command].model ?? 'default' : this.config[row.command].thinking ?? 'default'
     const cursor = selected ? this.theme.fg('accent', this.theme.bold('>')) : ' '
     const commandText = COMMAND_LABELS[row.command].padEnd(9)
@@ -332,6 +452,14 @@ class CommandsConfigDialog implements DialogContent {
   }
 
   private detailLines(row: ConfigRow, width: number): string[] {
+    if (row.kind === 'qaTarget') {
+      return [
+        this.theme.fg('accent', fitRaw(' [ /qa target ]', width)),
+        this.theme.fg('muted', fitRaw(' Localhost URL used by /qa, /qa:staged, and /qa:freehand.', width)),
+        this.theme.fg('dim', fitRaw(' Enter edits target. d or D clears it.', width)),
+        this.theme.fg('dim', fitRaw(` ${QA_CONFIG_PATH}`, width))
+      ]
+    }
     const action = row.field === 'model' ? 'Enter opens searchable model list.' : 'Enter cycles thinking level.'
     return [
       this.theme.fg('accent', fitRaw(` [ ${COMMAND_LABELS[row.command]} ${row.field} ]`, width)),

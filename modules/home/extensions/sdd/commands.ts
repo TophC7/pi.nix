@@ -1,6 +1,6 @@
 // ## COMMANDS ## //
-// Registers /spec, /spec:check, /spec:ship, /spec:work, /spec:close,
-// /spec:freehand. Handlers are thin; real work lives in the sibling modules.
+// Registers /spec, /spec:check, /spec:ship, /spec:work, /spec:visual,
+// /spec:close, /spec:freehand. Handlers are thin; real work lives in the sibling modules.
 
 import type { ExtensionAPI, ExtensionCommandContext } from '@mariozechner/pi-coding-agent'
 import { clearActiveSpec, getActiveSpec, pickSpec, setActiveSpec } from './active-spec.ts'
@@ -8,6 +8,7 @@ import { runCheck } from './check.ts'
 import { specExists } from './files.ts'
 import { closeAll, getFreehand, setFreehand } from './lock.ts'
 import { runShip } from './ship.ts'
+import { runVisual } from './visual.ts'
 import { runWork } from './work.ts'
 
 export function registerSddCommands(pi: ExtensionAPI): void {
@@ -29,6 +30,11 @@ export function registerSddCommands(pi: ExtensionAPI): void {
   pi.registerCommand('spec:work', {
     description: 'Run the autonomous work loop on the active spec until done or blocked.',
     handler: async (args, ctx) => runWork(pi, ctx, args)
+  })
+
+  pi.registerCommand('spec:visual', {
+    description: 'Hand the active spec or explicit <slug|path> to the agent to create and open a visual HTML brief.',
+    handler: async (args, ctx) => runVisual(pi, ctx, args)
   })
 
   pi.registerCommand('spec:close', {

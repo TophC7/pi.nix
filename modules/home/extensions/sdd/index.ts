@@ -6,10 +6,11 @@
 import type { ExtensionAPI } from '@mariozechner/pi-coding-agent'
 import { defineExtension } from '@pi/lib'
 import { installLockInterceptor } from '@pi/lib/lock'
-import { getActiveSpec } from './active-spec.ts'
+import { getActiveCwd, getActiveSpec } from './active-spec.ts'
 import { registerSddCommands } from './commands.ts'
-import { SPEC_ROOT } from './files.ts'
+import { readSpec, SPEC_ROOT, specPath } from './files.ts'
 import { installDraftBlock } from './lock.ts'
+import { buildActiveSpecPrompt } from './prompt.ts'
 
 export default defineExtension({
   name: 'sdd',
@@ -29,10 +30,30 @@ function maybeAppendActiveSpec(event: AgentStartEvent): { systemPrompt: string }
   const slug = getActiveSpec()
   if (!slug) return undefined
   return {
-    systemPrompt:
-      event.systemPrompt +
-      `\n\nActive sdd spec: ${slug} (${SPEC_ROOT}/${slug}.md).\n` +
-      `This is the working spec for this conversation. Read it when editing or discussing.\n` +
-      `Reach for the sdd commands (/spec, /spec:check, /spec:ship, /spec:work) for spec-scoped actions.`
+    systemPrompt: event.systemPrompt + `\n\n${buildTurnStartPrompt(slug)}`
   }
+}
+
+function buildTurnStartPrompt(slug: string): string {
+  const cwd = getActiveCwd()
+  if (cwd) {
+    try {
+      const spec = readSpec(cwd, slug)
+      if (spec) {
+        return buildActiveSpecPrompt({
+          slug,
+          path: specPath(cwd, slug),
+          status: spec.frontmatter.status,
+          surface: 'system'
+        })
+      }
+    } catch {
+      // Fall through to conservative generic guidance.
+    }
+  }
+  return (
+    `Active sdd spec: ${slug} (${SPEC_ROOT}/${slug}.md).\n` +
+    `Read it before editing or discussing. Preserve ## Goal and canonical ## Tasks task blocks.\n` +
+    `Use /spec:check to verify, /spec:ship to materialize Sworm tasks, and /spec:work to execute shipped tasks.`
+  )
 }

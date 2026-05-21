@@ -1,4 +1,5 @@
 import type { ExtensionAPI } from '@mariozechner/pi-coding-agent'
+import { formatQaConfigStatus } from '../agentic-qa/config.ts'
 import { runCommit, runPr } from './actions'
 import { formatConfigStatus } from './config'
 import { openCommandsConfigDialog } from './dialog'
@@ -15,22 +16,30 @@ export default function commandsExtension(pi: ExtensionAPI) {
   })
 
   pi.registerCommand('config', {
-    description: 'Configure command model/thinking overrides.',
+    description: 'Configure command model/thinking overrides and QA target URL.',
     handler: async (args, ctx) => {
       const value = args.trim()
       if (value === 'status') {
-        ctx.ui.notify(formatConfigStatus(), 'info')
+        ctx.ui.notify(formatFullConfigStatus(), 'info')
         return
       }
       if (value && value !== 'help' && value !== '--help' && value !== '-h') {
         ctx.ui.notify('Usage:\n/config\n/config status', 'error')
         return
       }
+      if (value === 'help' || value === '--help' || value === '-h') {
+        ctx.ui.notify('Usage:\n/config\n/config status', 'info')
+        return
+      }
       if (!ctx.hasUI) {
-        ctx.ui.notify(formatConfigStatus(), 'info')
+        ctx.ui.notify(formatFullConfigStatus(), 'info')
         return
       }
       openCommandsConfigDialog(ctx)
     }
   })
+}
+
+function formatFullConfigStatus(): string {
+  return `${formatConfigStatus()}\n${formatQaConfigStatus()}`
 }

@@ -5,6 +5,7 @@ export interface ActiveOperation {
   readonly name: string
   readonly allowed: Set<string>
   readonly pathBlocks?: readonly PathBlock[]
+  readonly writeRoots?: readonly WriteRoot[]
 }
 
 export interface PathBlock {
@@ -16,9 +17,20 @@ export interface PathBlock {
   readonly reason: string
 }
 
+export interface WriteRoot {
+  /** Tool names this rule guards. Usually `write` and/or `edit`. */
+  readonly tools: ReadonlySet<string>
+  /** Path or directory prefix that the tool path must stay under. */
+  readonly allowedPrefix: string
+  /** Human-readable reason for the rejection. */
+  readonly reason: string
+}
+
 export interface OperationOptions {
   /** Optional write-path blocks layered on top of the allow-set. */
   readonly pathBlocks?: readonly PathBlock[]
+  /** Optional write roots; guarded tool paths must stay under one of these roots. */
+  readonly writeRoots?: readonly WriteRoot[]
 }
 
 export interface ToolCallBlock {
@@ -41,7 +53,8 @@ export function startOperation(
   activeOperation = {
     name,
     allowed: new Set(allowedTools),
-    pathBlocks: options.pathBlocks
+    pathBlocks: options.pathBlocks,
+    writeRoots: options.writeRoots
   }
   // INFO: deferToAgentEnd drains all pending callbacks on the next agent_end.
   // One agent turn equals one operation lifetime.
@@ -74,10 +87,26 @@ export function installLockInterceptor(pi: ExtensionAPI): void {
         reason: `${toolName} is not allowed during ${activeOperation.name}.`
       }
     }
+    const rootBlocked = matchOperationWriteRoot(activeOperation, toolName, event.input)
+    if (rootBlocked) return { block: true, reason: rootBlocked }
     const blocked = matchOperationPathBlock(activeOperation, toolName, event.input)
     if (blocked) return { block: true, reason: blocked }
     return undefined
   })
+}
+
+function matchOperationWriteRoot(op: ActiveOperation, toolName: string, input: unknown): string | undefined {
+  if (!op.writeRoots) return undefined
+  const path = extractPath(input)
+  if (!path) return undefined
+  const applicable = op.writeRoots.filter((rule) => rule.tools.has(toolName))
+  if (applicable.length === 0) return undefined
+  for (const rule of applicable) {
+    const prefix = stripTrailingSlash(rule.allowedPrefix)
+    if (!prefix) continue
+    if (isInsideDir(path, prefix)) return undefined
+  }
+  return applicable[0]?.reason
 }
 
 function matchOperationPathBlock(op: ActiveOperation, toolName: string, input: unknown): string | undefined {
@@ -99,7 +128,8 @@ function matchOperationPathBlock(op: ActiveOperation, toolName: string, input: u
 export function isInsideDir(path: string, dir: string): boolean {
   if (!dir) return false
   const norm = path.replace(/^\.\//, '')
-  return norm.startsWith(dir + '/') || norm.includes('/' + dir + '/')
+  const target = stripTrailingSlash(dir.replace(/^\.\//, ''))
+  return norm === target || norm.startsWith(target + '/') || norm.includes('/' + target + '/')
 }
 
 export function stripTrailingSlash(s: string): string {

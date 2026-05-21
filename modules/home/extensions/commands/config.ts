@@ -3,7 +3,7 @@ import { dirname, join } from 'node:path'
 import type { Api, Model } from '@mariozechner/pi-ai'
 import type { ExtensionAPI, ExtensionCommandContext } from '@mariozechner/pi-coding-agent'
 
-export const MANAGED_COMMANDS = ['commit', 'pr', 'compact'] as const
+export const MANAGED_COMMANDS = ['commit', 'pr', 'compact', 'qa'] as const
 export type ManagedCommand = (typeof MANAGED_COMMANDS)[number]
 
 export const THINKING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh'] as const
@@ -16,7 +16,7 @@ export interface CommandModelConfig {
 
 export type CommandsConfig = Record<ManagedCommand, CommandModelConfig>
 
-type ConfigFile = Record<string, unknown> & Partial<Record<ManagedCommand | 'git', CommandModelConfig>>
+export type ConfigFile = Record<string, unknown> & Partial<Record<ManagedCommand | 'git', CommandModelConfig>>
 
 export interface RestoreState {
   readonly command: ManagedCommand
@@ -31,7 +31,7 @@ function isThinkingLevel(value: unknown): value is ThinkingLevel {
   return typeof value === 'string' && THINKING_LEVELS.includes(value as ThinkingLevel)
 }
 
-function readConfig(): ConfigFile {
+export function readConfig(): ConfigFile {
   try {
     const config = JSON.parse(readFileSync(CONFIG_PATH, 'utf8'))
     if (typeof config === 'object' && config !== null && !Array.isArray(config)) return config as ConfigFile
@@ -49,7 +49,7 @@ function errorCode(error: unknown): string | undefined {
   return typeof code === 'string' ? code : undefined
 }
 
-function writeConfig(config: ConfigFile | CommandsConfig): void {
+export function writeConfig(config: ConfigFile | CommandsConfig): void {
   mkdirSync(dirname(CONFIG_PATH), { recursive: true })
   writeFileSync(CONFIG_PATH, `${JSON.stringify(config, null, '\t')}\n`)
 }
@@ -69,7 +69,8 @@ export function getCommandsConfig(): CommandsConfig {
   return {
     commit: { ...legacyGit, ...sanitizeConfig(file.commit) },
     pr: { ...legacyGit, ...sanitizeConfig(file.pr) },
-    compact: sanitizeConfig(file.compact)
+    compact: sanitizeConfig(file.compact),
+    qa: sanitizeConfig(file.qa)
   }
 }
 
@@ -78,9 +79,9 @@ export function getCommandConfig(command: ManagedCommand): CommandModelConfig {
 }
 
 export function saveCommandConfig(command: ManagedCommand, commandConfig: CommandModelConfig): CommandsConfig {
-  const next: CommandsConfig = { ...getCommandsConfig(), [command]: sanitizeConfig(commandConfig) }
+  const next: ConfigFile = { ...readConfig(), [command]: sanitizeConfig(commandConfig) }
   writeConfig(next)
-  return next
+  return getCommandsConfig()
 }
 
 export function formatConfigStatus(config: CommandsConfig = getCommandsConfig()): string {

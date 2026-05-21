@@ -98,7 +98,7 @@ function tailBytes(text: string, maxBytes: number): CappedText {
   }
 }
 
-function headBytes(text: string, maxBytes: number, suffix = ''): CappedText {
+export function headBytes(text: string, maxBytes: number, suffix = ''): CappedText {
   const bytes = Buffer.byteLength(text, 'utf8')
   if (bytes <= maxBytes) return { text }
   const suffixText = suffix ? `\n\n${suffix}` : ''

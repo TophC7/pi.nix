@@ -8,6 +8,7 @@
 import type { ExtensionAPI, ExtensionCommandContext } from '@mariozechner/pi-coding-agent'
 import { listSpecs, readSpec, type SpecListing, specPath, writeNewSpec } from './files.ts'
 import { setFreehand } from './lock.ts'
+import { buildActiveSpecPrompt } from './prompt.ts'
 import { clearActiveSpec as clearStatus, publishActiveSpec } from './status.ts'
 
 let activeSlug: string | undefined
@@ -76,12 +77,7 @@ function postSpecAnchor(
 ): void {
   if (typeof pi.sendUserMessage !== 'function') return
   const path = specPath(ctx.cwd, slug)
-  const anchor =
-    `Active sdd spec is now ${slug} (status: ${status}).\n` +
-    `Spec file: ${path}\n\n` +
-    (status === 'draft'
-      ? `Read the spec. If \`## Goal\` or \`## Tasks\` is empty, draft them from the conversation so far before writing any code. While the spec is in draft, writes outside .sworm/sdd/ are blocked; capture intent first. The user can run /spec:freehand to release the block, or /spec:close to exit the spec entirely.`
-      : `Read the spec for context. Reach for /spec:ship to materialize tasks or /spec:work to execute them.`)
+  const anchor = buildActiveSpecPrompt({ slug, path, status, surface: 'followUp' })
   try {
     pi.sendUserMessage(anchor, { deliverAs: 'followUp' })
   } catch {

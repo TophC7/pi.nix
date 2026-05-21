@@ -13,6 +13,7 @@ import {
   isInsideDir,
   type OperationOptions,
   type PathBlock,
+  type WriteRoot,
   startOperation,
   getActiveOperation
 } from '@pi/lib/lock'
@@ -20,7 +21,7 @@ import { getActiveCwd, getActiveSpec } from './active-spec.ts'
 import { readSpec, SPEC_ROOT } from './files.ts'
 
 export { getActiveOperation, startOperation }
-export type { OperationOptions, PathBlock }
+export type { OperationOptions, PathBlock, WriteRoot }
 
 let freehandReleased = false
 const draftBlockInstalled = new WeakSet<ExtensionAPI>()
@@ -101,6 +102,16 @@ export const WORK_TOOLS: readonly string[] = [
   'sworm_issue_update',
   'sworm_comment_add',
   'sworm_dependency_list'
+]
+
+export const VISUAL_TOOLS: readonly string[] = [
+  'read',
+  'grep',
+  'find',
+  'ls',
+  'write',
+  'context_mode_ctx_search',
+  'ctx_search'
 ]
 
 export function makeSpecPathBlock(specRoot: string): PathBlock {

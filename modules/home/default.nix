@@ -91,8 +91,16 @@ let
       source = ./extensions/sdd;
       entry = "index.ts";
     };
+    agentic-qa = {
+      source = ./extensions/agentic-qa;
+      entry = "index.ts";
+    };
     cleanup = {
       source = ./extensions/cleanup;
+      entry = "index.ts";
+    };
+    review = {
+      source = ./extensions/review;
       entry = "index.ts";
     };
     subagents = {
@@ -185,9 +193,9 @@ in
         };
 
         # MCP server registry. pi-mcp-adapter consumes this on session start
-        # and registers every server's tools through pi.registerTool(). The
-        # `command` is the Nix-pinned start.mjs from the context-mode build,
-        # so resolution does not depend on PATH.
+        # and registers every server's tools through pi.registerTool(). Command
+        # paths come from Nix packages, so resolution does not depend on PATH,
+        # npx, global npm, or runtime network fetches.
         ".pi/agent/mcp.json".text = builtins.toJSON {
           mcpServers = {
             context-mode = {
@@ -195,6 +203,16 @@ in
               args = [ "${piPackages.context-mode}/start.mjs" ];
               directTools = true;
               lifecycle = "keep-alive";
+            };
+            playwright = {
+              command = "${piPackages.playwright-mcp}/bin/playwright-mcp";
+              args = [
+                "--browser"
+                "chromium"
+                "--isolated"
+              ];
+              directTools = true;
+              lifecycle = "lazy";
             };
           };
         };

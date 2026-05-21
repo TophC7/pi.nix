@@ -22,8 +22,15 @@ export async function runCheck(pi: ExtensionAPI, ctx: ExtensionCommandContext, a
     ctx.ui.notify(`/spec:check: spec ${slug} not found under ${SPEC_ROOT}.`, 'error')
     return
   }
+  if (!spec.goal.trim()) {
+    ctx.ui.notify(`/spec:check: ${slug} has no goal. Fill ## Goal before verifying.`, 'warning')
+    return
+  }
   if (spec.tasks.length === 0) {
-    ctx.ui.notify(`/spec:check: ${slug} has no tasks. Add tasks before verifying.`, 'warning')
+    ctx.ui.notify(
+      `/spec:check: ${slug} has no canonical tasks. Add ### task blocks with <!-- sworm: slug=... --> and **Acceptance:** before verifying.`,
+      'warning'
+    )
     return
   }
   try {

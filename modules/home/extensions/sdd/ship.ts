@@ -21,8 +21,15 @@ export async function runShip(pi: ExtensionAPI, ctx: ExtensionCommandContext, ar
     ctx.ui.notify(`/spec:ship: spec ${slug} not found under ${SPEC_ROOT}.`, 'error')
     return
   }
+  if (!spec.goal.trim()) {
+    ctx.ui.notify(`/spec:ship refused: ${slug} has no goal. Fill ## Goal before shipping.`, 'warning')
+    return
+  }
   if (spec.tasks.length === 0) {
-    ctx.ui.notify(`/spec:ship refused: ${slug} has no tasks. Add tasks before shipping.`, 'warning')
+    ctx.ui.notify(
+      `/spec:ship refused: ${slug} has no canonical tasks. Add ### task blocks with <!-- sworm: slug=... --> and **Acceptance:** before shipping.`,
+      'warning'
+    )
     return
   }
   const confirmed = await confirmShip(ctx, slug, spec)
