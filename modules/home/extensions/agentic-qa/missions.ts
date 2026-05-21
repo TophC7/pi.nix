@@ -5,11 +5,13 @@
 import { closeSync, type Dirent, openSync, readdirSync, readFileSync, readSync } from 'node:fs'
 import path from 'node:path'
 import type { ExtensionAPI, ExtensionCommandContext } from '@mariozechner/pi-coding-agent'
+import { runCappedShellCommand, runRtkOptimizedCommand } from '../pi-lib/rtk.ts'
 import { parseAgentFile } from '../pi-lib/subagents/discovery.ts'
 
 const MISSION_SUFFIX = '.qa.md'
 const SKIP_DIRS = new Set(['.git', '.hg', '.svn', 'node_modules', '.next', 'dist', 'build', 'result'])
 const MAX_FRONTMATTER_BYTES = 64 * 1024
+const MAX_STAGED_DIFF_BYTES = 160 * 1024
 
 export interface QaGitRunner {
   exec: ExtensionAPI['exec']
@@ -186,10 +188,28 @@ async function getStagedFiles(pi: QaGitRunner, ctx: QaCommandContext): Promise<{
 }
 
 async function getStagedDiff(pi: QaGitRunner, ctx: QaCommandContext): Promise<{ readonly output: string; readonly error?: string }> {
-  const result = await runGit(pi, ctx, ['diff', '--cached'])
+  const rtk = await runRtkOptimizedCommand(pi, 'git diff --cached', {
+    cwd: ctx.cwd,
+    signal: ctx.signal,
+    maxStdoutBytes: MAX_STAGED_DIFF_BYTES,
+    timeout: 30_000
+  })
+  if (rtk.used) {
+    return {
+      output: rtk.stdout.trim() || '<no staged diff>',
+      ...(rtk.code === 0 ? {} : { error: rtk.stderr || `RTK staged diff failed with exit ${rtk.code}` })
+    }
+  }
+
+  const fallback = await runCappedShellCommand(pi, 'git diff --cached', {
+    cwd: ctx.cwd,
+    signal: ctx.signal,
+    maxStdoutBytes: MAX_STAGED_DIFF_BYTES,
+    timeout: 30_000
+  })
   return {
-    output: result.output.trim() || '<no staged diff>',
-    ...(result.error ? { error: result.error } : {})
+    output: fallback.stdout.trim() || '<no staged diff>',
+    ...((fallback.code ?? 1) === 0 ? {} : { error: fallback.stderr || 'git diff --cached failed' })
   }
 }
 

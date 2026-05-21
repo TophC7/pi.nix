@@ -8,7 +8,20 @@ import { reviewReportPrompt, reviewScoutTask } from './prompts.ts'
 import { REVIEW_AGENT_REGISTRY } from './schema.ts'
 import { synthesizeReview } from './synthesis.ts'
 
-const REVIEW_REPORT_TOOLS = ['ask_user'] as const
+const REVIEW_TRIAGE_TOOLS = [
+  'read',
+  'grep',
+  'find',
+  'ls',
+  'bash',
+  'edit',
+  'write',
+  'ask_user',
+  'context_mode_ctx_execute',
+  'context_mode_ctx_execute_file',
+  'ctx_execute',
+  'ctx_execute_file'
+] as const
 
 interface ReviewRunArgs {
   context: ReviewContextCapture
@@ -150,9 +163,9 @@ async function runReviewPipeline(pi: ExtensionAPI, ctx: ExtensionCommandContext,
     })
 
     try {
-      startOperation(pi, 'review', REVIEW_REPORT_TOOLS)
+      startOperation(pi, 'review', REVIEW_TRIAGE_TOOLS)
     } catch (error) {
-      ctx.ui.notify(`/review cannot start report turn: ${error instanceof Error ? error.message : String(error)}`, 'error')
+      ctx.ui.notify(`/review cannot start triage turn: ${error instanceof Error ? error.message : String(error)}`, 'error')
       return
     }
 
@@ -170,12 +183,12 @@ async function runReviewPipeline(pi: ExtensionAPI, ctx: ExtensionCommandContext,
 
 export function registerReviewCommands(pi: ExtensionAPI): void {
   pi.registerCommand('review', {
-    description: 'Run a read-only adversarial review of staged changes.',
+    description: 'Run adversarial review of staged changes, triage findings, and apply selected fixes.',
     handler: async (args, ctx) => runReview(pi, ctx, args)
   })
 
   pi.registerCommand('review:freehand', {
-    description: 'Run a read-only adversarial review from a prompt that names the target/scope.',
+    description: 'Run adversarial review from a prompt, triage findings, and apply selected fixes.',
     handler: async (args, ctx) => runReviewFreehand(pi, ctx, args)
   })
 }

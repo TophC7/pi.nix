@@ -1,5 +1,6 @@
 import type { ExtensionAPI, ExtensionCommandContext } from '@mariozechner/pi-coding-agent'
 import { startOperation } from '@pi/lib/lock'
+import { runCappedShellCommand, runRtkOptimizedCommand } from '@pi/lib/rtk'
 import { extractSubagentText, runSubagent } from '@pi/lib/subagents'
 import {
   cleanupApplyPrompt,
@@ -10,6 +11,12 @@ import {
 } from './prompts.ts'
 
 const CLEANUP_TOOLS = ['read', 'grep', 'find', 'ls', 'bash', 'edit', 'write'] as const
+const MAX_CLEANUP_DIFF_BYTES = 160 * 1024
+
+interface DiffCapture {
+  readonly text: string
+  readonly error?: string
+}
 
 export async function runCleanup(pi: ExtensionAPI, ctx: ExtensionCommandContext, args?: string): Promise<void> {
   await ctx.waitForIdle()
@@ -31,11 +38,12 @@ export async function runCleanup(pi: ExtensionAPI, ctx: ExtensionCommandContext,
     ctx.ui.notify('/cleanup: no working-tree changes to review.', 'info')
     return
   }
-  const diff = await pi.exec('git', ['diff', 'HEAD'], {
-    cwd: ctx.cwd,
-    signal: ctx.signal
-  })
-  const diffText = (diff.stdout || '').trim()
+  const diff = await captureWorkingTreeDiff(pi, ctx)
+  if (diff.error) {
+    ctx.ui.notify(`/cleanup could not read working-tree diff: ${diff.error}`, 'error')
+    return
+  }
+  const diffText = diff.text.trim()
   if (!diffText) {
     ctx.ui.notify('/cleanup: working tree changes produced an empty diff.', 'warning')
     return
@@ -84,6 +92,29 @@ export async function runCleanup(pi: ExtensionAPI, ctx: ExtensionCommandContext,
     ctx.ui.notify(`/cleanup error: ${message}`, 'error')
     throw error
   }
+}
+
+async function captureWorkingTreeDiff(pi: ExtensionAPI, ctx: ExtensionCommandContext): Promise<DiffCapture> {
+  const rtk = await runRtkOptimizedCommand(pi, 'git diff HEAD', {
+    cwd: ctx.cwd,
+    signal: ctx.signal,
+    maxStdoutBytes: MAX_CLEANUP_DIFF_BYTES,
+    timeout: 30_000
+  })
+  if (rtk.used) {
+    if (rtk.code !== 0) return { text: '', error: rtk.stderr || `RTK diff failed with exit ${rtk.code}` }
+    return { text: rtk.stdout }
+  }
+
+  const fallback = await runCappedShellCommand(pi, 'git diff HEAD', {
+    cwd: ctx.cwd,
+    signal: ctx.signal,
+    maxStdoutBytes: MAX_CLEANUP_DIFF_BYTES,
+    timeout: 30_000
+  })
+  if ((fallback.code ?? 1) !== 0) return { text: '', error: fallback.stderr || 'git diff HEAD failed' }
+
+  return { text: fallback.stdout }
 }
 
 export async function runCleanupQuick(pi: ExtensionAPI, ctx: ExtensionCommandContext): Promise<void> {
