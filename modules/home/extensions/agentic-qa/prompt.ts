@@ -22,15 +22,18 @@ Evidence rules:
 - Evidence can be an accessibility snapshot, screenshot, console log, network request, or explicit browser observation.
 - If evidence is missing, mark the result inconclusive instead of inventing certainty.
 - Use the qa_report tool for final QA reports; it marks unsupported pass/fail/bug claims inconclusive.
-- Failed reports require screenshot evidence. Do not include credentials, tokens, cookies, API keys, passwords, or PHI in report text or evidence summaries.
+- Failed reports require screenshot evidence with a screenshot artifact path. Do not include credentials, tokens, cookies, API keys, passwords, or PHI in report text or evidence summaries.
+- Save screenshot MCP artifacts under the run artifact directory from the command prompt when possible, and include those local paths in screenshot evidence artifactPaths.
 
 Final report format:
 Status: pass | fail | inconclusive
 Target: <localhost URL or missing>
 Mode: mission | staged | freehand
+Slug: <qa_report slug from command prompt>
+Run ID: <qa_report runId from command prompt>
 Summary: <one or two sentences>
 Evidence:
-- E1: <what was observed and how>
+- E1: <what was observed and how; include artifactPaths for screenshots>
 Checks:
 - pass|fail|inconclusive: <claim> [E1]
 Bugs:

@@ -9,6 +9,7 @@ export interface QaEvidence {
   readonly id: string
   readonly type: QaEvidenceType
   readonly summary: string
+  readonly artifactPaths?: readonly string[]
 }
 
 export interface QaCheck {
@@ -26,6 +27,8 @@ export interface QaReportInput {
   readonly status: QaReportStatus
   readonly target?: string
   readonly mode: 'mission' | 'staged' | 'freehand'
+  readonly slug?: string
+  readonly runId?: string
   readonly summary: string
   readonly evidence: readonly QaEvidence[]
   readonly checks: readonly QaCheck[]

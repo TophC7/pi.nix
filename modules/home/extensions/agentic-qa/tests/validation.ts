@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { isSafeArtifactPath, writeQaArtifacts } from '../artifacts.ts'
@@ -19,6 +19,17 @@ await check('mission parser reads frontmatter slug/title and body', () => {
     assert(missions[0]?.slug === 'login-smoke', 'frontmatter slug not parsed')
     assert(missions[0]?.title === 'Login Smoke', 'frontmatter title not parsed')
     assert(missions[0]?.body.includes('Check the login page.'), 'body not parsed')
+  })
+})
+
+await check('mission parser accepts plain .qa.md with filename slug', () => {
+  withWorkspace((root) => {
+    write(root, 'src/routes/login.qa.md', '# Login QA\n\nCheck the login page.')
+    const missions = discoverQaMissions(root)
+    assert(missions.length === 1, `expected 1 mission, got ${missions.length}`)
+    assert(missions[0]?.slug === 'login', `expected filename slug, got ${missions[0]?.slug}`)
+    assert(missions[0]?.title === undefined, 'plain mission should not invent title')
+    assert(missions[0]?.body.includes('Check the login page.'), 'plain body not parsed')
   })
 })
 
@@ -78,35 +89,69 @@ await check('localhost target enforcement accepts only phase-one local URLs', ()
   assert(!isLocalhostQaTarget('file:///tmp/index.html'), 'non-http target should fail')
 })
 
-await check('artifact gates reject unsafe paths, non-localhost targets, credentials, and missing failure screenshots', () => {
-  assert(isSafeArtifactPath('/tmp/qa-root', '/tmp/qa-root/report.md'), 'safe artifact path rejected')
-  assert(!isSafeArtifactPath('/tmp/qa-root', '/tmp/qa-root/../escape/report.md'), 'escaped artifact path accepted')
+await check('artifact gates reject unsafe paths, non-localhost targets, credentials, and missing failure screenshots', async () => {
+  await withWorkspaceAsync(async (root) => {
+    assert(isSafeArtifactPath('/tmp/qa-root', '/tmp/qa-root/report.md'), 'safe artifact path rejected')
+    assert(!isSafeArtifactPath('/tmp/qa-root', '/tmp/qa-root/../escape/report.md'), 'escaped artifact path accepted')
 
-  const base = failReport([{ id: 'E1', type: 'screenshot', summary: 'safe screenshot' }])
-  assert(writeQaArtifacts(process.cwd(), { ...base, target: undefined }, normalizeQaReport(base)).blocked, 'missing target artifact not blocked')
-  assert(writeQaArtifacts(process.cwd(), { ...base, target: 'https://example.com' }, normalizeQaReport(base)).blocked, 'non-localhost artifact not blocked')
-  const credential = { ...base, summary: 'token: abc123' }
-  assert(writeQaArtifacts(process.cwd(), credential, normalizeQaReport(credential)).blocked, 'credential-looking report not blocked')
-  const noScreenshot = failReport([{ id: 'E1', type: 'observation', summary: 'safe observation' }])
-  assert(writeQaArtifacts(process.cwd(), noScreenshot, normalizeQaReport(noScreenshot)).blocked, 'failed report without screenshot not blocked')
+    const screenshot = screenshotArtifact(root)
+    const base = failReport([{ id: 'E1', type: 'screenshot', summary: 'safe screenshot', artifactPaths: [screenshot] }])
+    assert((await writeQaArtifacts(root, { ...base, target: undefined }, normalizeQaReport(base))).blocked, 'missing target artifact not blocked')
+    assert((await writeQaArtifacts(root, { ...base, target: 'https://example.com' }, normalizeQaReport(base))).blocked, 'non-localhost artifact not blocked')
+    const credential = { ...base, summary: 'token: abc123' }
+    assert((await writeQaArtifacts(root, credential, normalizeQaReport(credential))).blocked, 'credential-looking report not blocked')
+    const noScreenshot = failReport([{ id: 'E1', type: 'observation', summary: 'safe observation' }])
+    assert((await writeQaArtifacts(root, noScreenshot, normalizeQaReport(noScreenshot))).blocked, 'failed report without screenshot not blocked')
+    const noScreenshotPath = failReport([{ id: 'E1', type: 'screenshot', summary: 'safe screenshot' }])
+    assert((await writeQaArtifacts(root, noScreenshotPath, normalizeQaReport(noScreenshotPath))).blocked, 'failed report without screenshot artifact not blocked')
+  })
 })
 
-await check('failed localhost report with screenshot writes local/private artifacts', () => {
-  withWorkspace((root) => {
-    const artifactRoot = path.join(root, 'artifacts')
-    const previousArtifactRoot = process.env.PI_QA_ARTIFACT_DIR
+await check('artifact gates reject screenshot paths outside the workspace without partial writes', async () => {
+  await withWorkspaceAsync(async (root) => {
+    const outside = path.join(tmpdir(), `agentic-qa-outside-${Date.now()}.png`)
+    writeFileSync(outside, 'fake png bytes')
     try {
-      process.env.PI_QA_ARTIFACT_DIR = artifactRoot
-      const input = failReport([{ id: 'E1', type: 'screenshot', summary: 'safe screenshot' }])
-      const artifacts = writeQaArtifacts(root, input, normalizeQaReport(input))
-      assert(artifacts.written === true && artifacts.blocked === false, 'artifact write failed')
-      assert(artifacts.reportPath?.startsWith(artifactRoot), 'report path outside artifact root')
-      assert(artifacts.evidencePath?.startsWith(artifactRoot), 'evidence path outside artifact root')
-      assert(readFileSync(artifacts.reportPath!, 'utf8').includes('Status: fail'), 'report content missing')
+      const input = failReport([
+        { id: 'E1', type: 'screenshot', summary: 'safe screenshot', artifactPaths: [screenshotArtifact(root)] },
+        { id: 'E2', type: 'screenshot', summary: 'outside screenshot', artifactPaths: [outside] }
+      ])
+      const artifacts = await writeQaArtifacts(root, input, normalizeQaReport(input))
+      assert(artifacts.blocked, 'outside screenshot path not blocked')
+      assert(!isSafeArtifactPath(root, outside), 'outside test path unexpectedly inside workspace')
+      assert(!existsSync(path.join(root, '.sworm', 'qa', 'checkout', 'run-1', 'artifacts', 'E1.png')), 'blocked run copied partial screenshot')
+      assert(!artifacts.written, 'blocked outside screenshot wrote report')
     } finally {
-      if (previousArtifactRoot === undefined) delete process.env.PI_QA_ARTIFACT_DIR
-      else process.env.PI_QA_ARTIFACT_DIR = previousArtifactRoot
+      rmSync(outside, { force: true })
     }
+  })
+})
+
+await check('failed localhost report bundles screenshot under project .sworm qa run and inlines it', async () => {
+  await withWorkspaceAsync(async (root) => {
+    const screenshot = screenshotArtifact(root)
+    const input = failReport([{ id: 'E1', type: 'screenshot', summary: 'safe screenshot', artifactPaths: [screenshot] }])
+    const artifacts = await writeQaArtifacts(root, input, normalizeQaReport(input))
+    const expectedRun = path.join(root, '.sworm', 'qa', 'checkout', 'run-1')
+    assert(artifacts.written === true && artifacts.blocked === false, 'artifact write failed')
+    assert(artifacts.reportPath === path.join(expectedRun, 'report.md'), 'report path outside project qa run')
+    assert(artifacts.evidencePath === path.join(expectedRun, 'evidence.json'), 'evidence path outside project qa run')
+    assert(artifacts.artifactPaths?.[0] === path.join(expectedRun, 'artifacts', 'E1.png'), 'screenshot not copied into artifacts folder')
+    const report = readFileSync(artifacts.reportPath!, 'utf8')
+    assert(report.includes('Status: fail'), 'report content missing')
+    assert(report.includes('![E1 screenshot](artifacts/E1.png)'), 'report did not inline screenshot')
+  })
+})
+
+await check('pre-saved screenshot in qa artifact directory is accepted and inlined', async () => {
+  await withWorkspaceAsync(async (root) => {
+    write(root, '.sworm/qa/checkout/run-1/artifacts/E1.png', 'fake png bytes')
+    const input = failReport([
+      { id: 'E1', type: 'screenshot', summary: 'safe screenshot', artifactPaths: ['.sworm/qa/checkout/run-1/artifacts/E1.png'] }
+    ])
+    const artifacts = await writeQaArtifacts(root, input, normalizeQaReport(input))
+    assert(artifacts.written === true && artifacts.blocked === false, 'pre-saved artifact write failed')
+    assert(readFileSync(artifacts.reportPath!, 'utf8').includes('![E1 screenshot](artifacts/E1.png)'), 'pre-saved screenshot not inlined')
   })
 })
 
@@ -120,11 +165,18 @@ function failReport(evidence: QaReportInput['evidence']): QaReportInput {
     status: 'fail',
     target: 'http://localhost:5173',
     mode: 'freehand',
+    slug: 'checkout',
+    runId: 'run-1',
     summary: 'failed safely',
     evidence,
     checks: [{ status: 'fail', claim: 'visible failure', evidenceIds: ['E1'] }],
     bugs: []
   }
+}
+
+function screenshotArtifact(root: string): string {
+  write(root, 'mcp-output/E1.png', 'fake png bytes')
+  return path.join(root, 'mcp-output', 'E1.png')
 }
 
 function withWorkspace(run: (root: string) => void): void {
