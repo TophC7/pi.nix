@@ -189,12 +189,17 @@ class CommandsConfigDialog implements DialogContent {
 
   private renderTargetInput(width: number, mode: Extract<DialogMode, { kind: 'target' }>): string[] {
     const bodyRows = rowBudget()
+    const inputWidth = Math.max(12, width - 2)
+    const renderedInput = mode.input.render(inputWidth)[0] ?? '> '
     const rows = [
       this.theme.fg('muted', fitRaw('Enter a localhost http(s) URL for /qa, or leave empty to clear.', width)),
-      this.theme.fg('dim', fitRaw('Examples: http://localhost:5173, http://127.0.0.1:49173', width))
+      this.theme.fg('dim', fitRaw('Examples: http://localhost:5173, http://127.0.0.1:49173', width)),
+      '',
+      this.theme.fg('accent', fitRaw(' Target URL', width)),
+      fitRaw(renderedInput, width)
     ]
     return [
-      renderDialogHeader({ title: '/qa target', theme: this.theme, width, searchInput: mode.input }),
+      renderDialogHeader({ title: '/qa target', theme: this.theme, width }),
       renderDialogDivider({ theme: this.theme, width }),
       ...padRows(rows, bodyRows, width),
       renderDialogDivider({ theme: this.theme, width }),

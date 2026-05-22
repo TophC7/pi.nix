@@ -13,6 +13,7 @@ import {
 import { buildQaArtifactPlan, type QaArtifactPlan } from './artifact-paths.ts'
 import { getQaTargetUrl, isLocalhostQaTarget } from './config.ts'
 import {
+  discoverQaMissions,
   formatMissionList,
   lookupQaMission,
   selectStagedQaMissions,
@@ -26,6 +27,7 @@ type QaMode = 'mission' | 'staged' | 'freehand'
 export function registerQaCommands(pi: ExtensionAPI): void {
   pi.registerCommand('qa', {
     description: 'Run a colocated QA mission by exact slug.',
+    getArgumentCompletions: completeQaMissionArguments,
     handler: async (args, ctx) => runMissionQa(pi, ctx, args)
   })
 
@@ -48,31 +50,13 @@ export function registerQaCommands(pi: ExtensionAPI): void {
 async function runMissionQa(pi: ExtensionAPI, ctx: ExtensionCommandContext, args: string): Promise<void> {
   await ctx.waitForIdle()
 
+  const request = parseMissionRequest(args)
+  const mission = request.slug ? lookupRequestedMission(ctx, request.slug) : await pickMission(ctx)
+  if (!mission) return
+
   const run = await prepareQaRun(pi, ctx)
   if (!run) return
 
-  const request = parseMissionRequest(args)
-  if (!request.slug) {
-    const lookup = lookupQaMission(ctx.cwd, '')
-    ctx.ui.notify(`Usage: /qa <slug> [extra instructions]\n\nAvailable missions:\n${formatMissionList(lookup.available)}`, 'warning')
-    return
-  }
-
-  const lookup = lookupQaMission(ctx.cwd, request.slug)
-  if (lookup.kind === 'missing') {
-    ctx.ui.notify(`Unknown QA mission '${request.slug}'.\n\nAvailable missions:\n${formatMissionList(lookup.available)}`, 'warning')
-    return
-  }
-  if (lookup.kind === 'ambiguous') {
-    ctx.ui.notify(`Ambiguous QA mission '${request.slug}'.\n\nMatches:\n${formatMissionList(lookup.matches)}`, 'error')
-    return
-  }
-
-  const mission = lookup.mission
-  if (!mission) {
-    ctx.ui.notify(`QA mission '${request.slug}' could not be loaded.`, 'error')
-    return
-  }
   pi.sendUserMessage(buildMissionPrompt(run.targetUrl, mission, request.extra, buildQaArtifactPlan(mission.slug)), {
     deliverAs: 'followUp'
   })
@@ -117,11 +101,63 @@ async function runNewQaMission(pi: ExtensionAPI, ctx: ExtensionCommandContext, a
   pi.sendUserMessage(buildNewMissionPrompt(ctx.cwd, args.trim()), { deliverAs: 'followUp' })
 }
 
+function completeQaMissionArguments(prefix: string): { value: string; label: string; description: string }[] | null {
+  const trimmed = prefix.trimStart()
+  if (trimmed.includes(' ')) return null
+  const needle = trimmed.toLowerCase()
+  const items = discoverQaMissions(process.cwd())
+    .filter((mission) => mission.slug.toLowerCase().startsWith(needle))
+    .map((mission) => ({
+      value: mission.slug,
+      label: mission.slug,
+      description: mission.title ? `${mission.title} (${mission.relativePath})` : mission.relativePath
+    }))
+  return items.length > 0 ? items : null
+}
+
 function parseMissionRequest(args: string): { slug: string; extra: string } {
   const trimmed = args.trim()
   if (!trimmed) return { slug: '', extra: '' }
   const [slug, ...extra] = trimmed.split(/\s+/)
   return { slug, extra: extra.join(' ').trim() }
+}
+
+function lookupRequestedMission(ctx: ExtensionCommandContext, slug: string): QaMission | undefined {
+  const lookup = lookupQaMission(ctx.cwd, slug)
+  if (lookup.kind === 'missing') {
+    ctx.ui.notify(`Unknown QA mission '${slug}'.\n\nAvailable missions:\n${formatMissionList(lookup.available)}`, 'warning')
+    return undefined
+  }
+  if (lookup.kind === 'ambiguous') {
+    ctx.ui.notify(`Ambiguous QA mission '${slug}'.\n\nMatches:\n${formatMissionList(lookup.matches)}`, 'error')
+    return undefined
+  }
+  if (!lookup.mission) {
+    ctx.ui.notify(`QA mission '${slug}' could not be loaded.`, 'error')
+    return undefined
+  }
+  return lookup.mission
+}
+
+async function pickMission(ctx: ExtensionCommandContext): Promise<QaMission | undefined> {
+  const missions = discoverQaMissions(ctx.cwd)
+  if (missions.length === 0) {
+    ctx.ui.notify('No .qa.md missions found. Create one with /qa:new <what to test>.', 'warning')
+    return undefined
+  }
+  if (!ctx.hasUI) {
+    ctx.ui.notify(`Usage: /qa <slug> [extra instructions]\n\nAvailable missions:\n${formatMissionList(missions)}`, 'warning')
+    return undefined
+  }
+
+  const labels = missions.map(missionPickerLabel)
+  const selected = await ctx.ui.select('Pick QA mission', labels)
+  if (!selected) return undefined
+  return missions[labels.indexOf(selected)]
+}
+
+function missionPickerLabel(mission: QaMission): string {
+  return `${mission.slug}${mission.title ? ` — ${mission.title}` : ''} (${mission.relativePath})`
 }
 
 async function prepareQaRun(
