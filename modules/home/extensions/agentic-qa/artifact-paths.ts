@@ -2,13 +2,18 @@
 // Shared QA artifact path helpers used by command prompts and report writing.
 
 import path from 'node:path'
-import type { QaReportInput } from './report.ts'
 
 export interface QaArtifactPlan {
   readonly slug: string
   readonly runId: string
   readonly relativeRunDir: string
   readonly relativeArtifactDir: string
+}
+
+export interface QaRunPathInput {
+  readonly slug?: string
+  readonly mode: 'mission' | 'staged' | 'freehand'
+  readonly runId?: string
 }
 
 export const QA_ARTIFACT_SUBDIR = 'artifacts'
@@ -25,7 +30,7 @@ export function buildQaArtifactPlan(slug: string): QaArtifactPlan {
   }
 }
 
-export function qaRunDir(cwd: string, input: Pick<QaReportInput, 'slug' | 'mode' | 'runId'>): string {
+export function qaRunDir(cwd: string, input: QaRunPathInput): string {
   return path.join(cwd, qaRelativeRunDir(input.slug ?? input.mode, safeRunId(input.runId)))
 }
 

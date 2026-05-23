@@ -1,6 +1,6 @@
 import type { ExtensionAPI, ExtensionCommandContext } from '@mariozechner/pi-coding-agent'
 import { deferToAgentEnd } from '@pi/lib/agent-end'
-import { runCappedShellCommand, runRtkOptimizedCommand } from '@pi/lib/rtk'
+import { captureOptimizedCommand as captureOptimizedCommandShared, type CommandCapture } from '@pi/lib/rtk'
 import { headBytes } from '@pi/lib/subagents/output'
 import {
   applyCommandConfig,
@@ -19,13 +19,6 @@ const PROMPTS: Record<PromptCommand, string> = {
 }
 
 const MAX_COMMAND_CONTEXT_BYTES = 96 * 1024
-
-interface CommandCapture {
-  readonly label: string
-  readonly output: string
-  readonly error?: string
-  readonly notes: readonly string[]
-}
 
 function buildPrompt(
   command: PromptCommand,
@@ -199,41 +192,18 @@ async function resolvePrBaseBranch(
   return { label: 'PR base branch', output: (originHead.code ?? 1) === 0 && defaultBranch ? defaultBranch : 'main', notes: [] }
 }
 
-async function captureOptimizedCommand(
+function captureOptimizedCommand(
   pi: ExtensionAPI,
   ctx: ExtensionCommandContext,
   command: string,
   maxBytes: number
 ): Promise<CommandCapture> {
-  const rtk = await runRtkOptimizedCommand(pi, command, {
+  return captureOptimizedCommandShared(pi, command, {
     cwd: ctx.cwd,
     signal: ctx.signal,
-    maxStdoutBytes: maxBytes,
+    maxBytes,
     timeout: 30_000
   })
-  if (rtk.used) {
-    return {
-      label: rtk.command,
-      output: rtk.stdout,
-      ...(rtk.code === 0 ? {} : { error: rtk.stderr || `${rtk.command} failed with exit ${rtk.code}` }),
-      notes: rtk.truncated ? [`${rtk.command} truncated at ${maxBytes} bytes.`] : []
-    }
-  }
-
-  const fallback = await runCappedShellCommand(pi, command, {
-    cwd: ctx.cwd,
-    signal: ctx.signal,
-    maxStdoutBytes: maxBytes,
-    timeout: 30_000
-  })
-  if ((fallback.code ?? 1) !== 0) {
-    return { label: command, output: '', error: fallback.stderr || `${command} failed`, notes: [] }
-  }
-  return {
-    label: command,
-    output: fallback.stdout,
-    notes: fallback.truncated ? [`${command} truncated at ${maxBytes} bytes.`] : []
-  }
 }
 
 async function captureRawCommand(

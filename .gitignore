@@ -1,3 +1,5 @@
 .sworm/
 !.sworm/*.json
 *.nfs*
+.playwright-mcp
+temp/

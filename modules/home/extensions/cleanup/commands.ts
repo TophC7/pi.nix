@@ -1,6 +1,6 @@
 import type { ExtensionAPI, ExtensionCommandContext } from '@mariozechner/pi-coding-agent'
+import { captureOptimizedCommand } from '@pi/lib/rtk'
 import { startOperation } from '@pi/lib/lock'
-import { runCappedShellCommand, runRtkOptimizedCommand } from '@pi/lib/rtk'
 import { extractSubagentText, runSubagent } from '@pi/lib/subagents'
 import {
   cleanupApplyPrompt,
@@ -95,26 +95,12 @@ export async function runCleanup(pi: ExtensionAPI, ctx: ExtensionCommandContext,
 }
 
 async function captureWorkingTreeDiff(pi: ExtensionAPI, ctx: ExtensionCommandContext): Promise<DiffCapture> {
-  const rtk = await runRtkOptimizedCommand(pi, 'git diff HEAD', {
+  const result = await captureOptimizedCommand(pi, 'git diff HEAD', {
     cwd: ctx.cwd,
     signal: ctx.signal,
-    maxStdoutBytes: MAX_CLEANUP_DIFF_BYTES,
-    timeout: 30_000
+    maxBytes: MAX_CLEANUP_DIFF_BYTES
   })
-  if (rtk.used) {
-    if (rtk.code !== 0) return { text: '', error: rtk.stderr || `RTK diff failed with exit ${rtk.code}` }
-    return { text: rtk.stdout }
-  }
-
-  const fallback = await runCappedShellCommand(pi, 'git diff HEAD', {
-    cwd: ctx.cwd,
-    signal: ctx.signal,
-    maxStdoutBytes: MAX_CLEANUP_DIFF_BYTES,
-    timeout: 30_000
-  })
-  if ((fallback.code ?? 1) !== 0) return { text: '', error: fallback.stderr || 'git diff HEAD failed' }
-
-  return { text: fallback.stdout }
+  return { text: result.output, ...(result.error ? { error: result.error } : {}) }
 }
 
 export async function runCleanupQuick(pi: ExtensionAPI, ctx: ExtensionCommandContext): Promise<void> {

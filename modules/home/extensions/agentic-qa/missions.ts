@@ -1,11 +1,12 @@
 // ## MISSIONS ## //
-// Colocated .qa.md discovery. Mission files stay near features; commands use
-// exact slugs and staged-change proximity instead of guessing user intent.
+// Colocated .qa.md discovery. Mission files stay near features; /qa and /qa:new
+// use exact slugs. /qa:staged uses staged diff context instead of missions so a
+// staged change drives the plan, not whichever .qa.md happens to be nearby.
 
 import { closeSync, type Dirent, openSync, readdirSync, readFileSync, readSync } from 'node:fs'
 import path from 'node:path'
 import type { ExtensionAPI, ExtensionCommandContext } from '@mariozechner/pi-coding-agent'
-import { runCappedShellCommand, runRtkOptimizedCommand } from '../pi-lib/rtk.ts'
+import { captureOptimizedCommand } from '../pi-lib/rtk.ts'
 import { parseAgentFile } from '../pi-lib/subagents/discovery.ts'
 
 const MISSION_SUFFIX = '.qa.md'
@@ -41,10 +42,9 @@ export interface MissionLookupResult {
   readonly available: readonly QaMissionSummary[]
 }
 
-export interface StagedMissionSelection {
+export interface StagedQaContext {
   readonly stagedFiles: readonly string[]
-  readonly missions: readonly QaMission[]
-  readonly stagedDiff?: string
+  readonly stagedDiff: string
   readonly error?: string
 }
 
@@ -62,26 +62,11 @@ export function lookupQaMission(cwd: string, slug: string): MissionLookupResult 
   return { kind: 'missing', matches, available }
 }
 
-export async function selectStagedQaMissions(pi: QaGitRunner, ctx: QaCommandContext): Promise<StagedMissionSelection> {
-  const staged = await getStagedFiles(pi, ctx)
-  if (staged.error) return { stagedFiles: staged.files, missions: [], error: staged.error }
-
-  const missionByPath = new Map<string, QaMission>()
-  const missionCache = new Map<string, QaMission[]>()
-
-  for (const stagedFile of staged.files) {
-    for (const mission of findNearestMissionsForPath(ctx.cwd, stagedFile, missionCache)) {
-      missionByPath.set(mission.filePath, mission)
-    }
-  }
-
-  const missions = [...missionByPath.values()]
-  if (missions.length > 0) return { stagedFiles: staged.files, missions }
-
-  const diff = await getStagedDiff(pi, ctx)
+export async function collectStagedQaContext(pi: QaGitRunner, ctx: QaCommandContext): Promise<StagedQaContext> {
+  const [staged, diff] = await Promise.all([getStagedFiles(pi, ctx), getStagedDiff(pi, ctx)])
+  if (staged.error) return { stagedFiles: staged.files, stagedDiff: '', error: staged.error }
   return {
     stagedFiles: staged.files,
-    missions,
     stagedDiff: diff.output,
     ...(diff.error ? { error: diff.error } : {})
   }
@@ -153,29 +138,6 @@ function readFrontmatterChunk(filePath: string): string {
   }
 }
 
-function findNearestMissionsForPath(cwd: string, stagedFile: string, missionCache: Map<string, QaMission[]>): QaMission[] {
-  let current = path.dirname(path.resolve(cwd, stagedFile))
-  const root = path.resolve(cwd)
-
-  while (current.startsWith(root)) {
-    const missions = getMissionsInDirectory(cwd, current, missionCache)
-    if (missions.length > 0) return missions
-    if (current === root) break
-    current = path.dirname(current)
-  }
-
-  return []
-}
-
-function getMissionsInDirectory(cwd: string, dir: string, missionCache: Map<string, QaMission[]>): QaMission[] {
-  if (missionCache.has(dir)) return missionCache.get(dir) ?? []
-  const missions = safeReadDir(dir)
-    .filter((entry) => entry.isFile() && entry.name.endsWith(MISSION_SUFFIX))
-    .map((entry) => parseQaMission(cwd, path.join(dir, entry.name)))
-  missionCache.set(dir, missions)
-  return missions
-}
-
 async function getStagedFiles(pi: QaGitRunner, ctx: QaCommandContext): Promise<{ readonly files: string[]; readonly error?: string }> {
   const result = await runGit(pi, ctx, ['diff', '--cached', '--name-only', '--diff-filter=ACMR'])
   return {
@@ -188,28 +150,10 @@ async function getStagedFiles(pi: QaGitRunner, ctx: QaCommandContext): Promise<{
 }
 
 async function getStagedDiff(pi: QaGitRunner, ctx: QaCommandContext): Promise<{ readonly output: string; readonly error?: string }> {
-  const rtk = await runRtkOptimizedCommand(pi, 'git diff --cached', {
-    cwd: ctx.cwd,
-    signal: ctx.signal,
-    maxStdoutBytes: MAX_STAGED_DIFF_BYTES,
-    timeout: 30_000
-  })
-  if (rtk.used) {
-    return {
-      output: rtk.stdout.trim() || '<no staged diff>',
-      ...(rtk.code === 0 ? {} : { error: rtk.stderr || `RTK staged diff failed with exit ${rtk.code}` })
-    }
-  }
-
-  const fallback = await runCappedShellCommand(pi, 'git diff --cached', {
-    cwd: ctx.cwd,
-    signal: ctx.signal,
-    maxStdoutBytes: MAX_STAGED_DIFF_BYTES,
-    timeout: 30_000
-  })
+  const capture = await captureOptimizedCommand(pi, 'git diff --staged', { cwd: ctx.cwd, signal: ctx.signal, maxBytes: MAX_STAGED_DIFF_BYTES })
   return {
-    output: fallback.stdout.trim() || '<no staged diff>',
-    ...((fallback.code ?? 1) === 0 ? {} : { error: fallback.stderr || 'git diff --cached failed' })
+    output: capture.output.trim() || '<no staged diff>',
+    ...(capture.error ? { error: capture.error } : {})
   }
 }
 

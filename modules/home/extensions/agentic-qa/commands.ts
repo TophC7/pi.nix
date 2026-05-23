@@ -1,6 +1,7 @@
 // ## COMMANDS ## //
 // Registers localhost QA commands. Commands assemble mission/staged/freehand
-// context and hand browser-evidence-focused work to the active agent.
+// context, compile a QaRunSpec, and hand a deterministic run-spec block plus
+// browser-evidence rules to the active agent.
 
 import type { ExtensionAPI, ExtensionCommandContext } from '@mariozechner/pi-coding-agent'
 import { deferToAgentEnd } from '@pi/lib/agent-end'
@@ -13,16 +14,23 @@ import {
 import { buildQaArtifactPlan, type QaArtifactPlan } from './artifact-paths.ts'
 import { getQaTargetUrl, isLocalhostQaTarget } from './config.ts'
 import {
+  collectStagedQaContext,
   discoverQaMissions,
   formatMissionList,
   lookupQaMission,
-  selectStagedQaMissions,
   type QaMission,
-  type StagedMissionSelection
+  type StagedQaContext
 } from './missions.ts'
+import { deferQaRestoreUntilFinish } from './model-restore.ts'
 import { QA_SYSTEM_PROMPT } from './prompt.ts'
-
-type QaMode = 'mission' | 'staged' | 'freehand'
+import {
+  compileFreehandRunSpec,
+  compileMissionRunSpec,
+  compileStagedRunSpec,
+  registerActiveRun,
+  renderRunSpec,
+  type QaRunSpec
+} from './run-state.ts'
 
 export function registerQaCommands(pi: ExtensionAPI): void {
   pi.registerCommand('qa', {
@@ -32,7 +40,7 @@ export function registerQaCommands(pi: ExtensionAPI): void {
   })
 
   pi.registerCommand('qa:staged', {
-    description: 'Run agentic QA against staged changes, using nearest colocated missions when present.',
+    description: 'Run agentic QA against staged changes by inspecting the staged diff (does not use .qa.md files).',
     handler: async (args, ctx) => runStagedQa(pi, ctx, args)
   })
 
@@ -42,7 +50,7 @@ export function registerQaCommands(pi: ExtensionAPI): void {
   })
 
   pi.registerCommand('qa:new', {
-    description: 'Create a colocated .qa.md QA mission from a prompt.',
+    description: 'Create a colocated .qa.md QA mission from an optional natural-language prompt.',
     handler: async (args, ctx) => runNewQaMission(pi, ctx, args)
   })
 }
@@ -54,10 +62,14 @@ async function runMissionQa(pi: ExtensionAPI, ctx: ExtensionCommandContext, args
   const mission = request.slug ? lookupRequestedMission(ctx, request.slug) : await pickMission(ctx)
   if (!mission) return
 
-  const run = await prepareQaRun(pi, ctx)
+  const artifacts = buildQaArtifactPlan(mission.slug)
+  const run = await prepareQaRun(pi, ctx, artifacts.runId)
   if (!run) return
 
-  pi.sendUserMessage(buildMissionPrompt(run.targetUrl, mission, request.extra, buildQaArtifactPlan(mission.slug)), {
+  const spec = compileMissionRunSpec({ target: run.targetUrl, artifacts, mission })
+  registerActiveRun(spec)
+
+  pi.sendUserMessage(buildMissionPrompt(spec, mission, request.extra, artifacts), {
     deliverAs: 'followUp'
   })
 }
@@ -65,15 +77,24 @@ async function runMissionQa(pi: ExtensionAPI, ctx: ExtensionCommandContext, args
 async function runStagedQa(pi: ExtensionAPI, ctx: ExtensionCommandContext, args: string): Promise<void> {
   await ctx.waitForIdle()
 
-  const run = await prepareQaRun(pi, ctx)
+  const artifacts = buildQaArtifactPlan('staged')
+  const run = await prepareQaRun(pi, ctx, artifacts.runId)
   if (!run) return
 
-  const selection = await selectStagedQaMissions(pi, ctx)
-  if (selection.error) {
-    ctx.ui.notify(`/qa:staged could not read staged git context: ${selection.error}`, 'error')
+  const staged = await collectStagedQaContext(pi, ctx)
+  if (staged.error) {
+    ctx.ui.notify(`/qa:staged could not read staged git context: ${staged.error}`, 'error')
     return
   }
-  pi.sendUserMessage(buildStagedPrompt(run.targetUrl, selection, args.trim(), buildQaArtifactPlan(stagedArtifactSlug(selection))), {
+
+  const spec = compileStagedRunSpec({
+    target: run.targetUrl,
+    artifacts,
+    stagedFiles: staged.stagedFiles
+  })
+  registerActiveRun(spec)
+
+  pi.sendUserMessage(buildStagedPrompt(spec, staged, args.trim(), artifacts), {
     deliverAs: 'followUp'
   })
 }
@@ -81,22 +102,26 @@ async function runStagedQa(pi: ExtensionAPI, ctx: ExtensionCommandContext, args:
 async function runFreehandQa(pi: ExtensionAPI, ctx: ExtensionCommandContext, args: string): Promise<void> {
   await ctx.waitForIdle()
 
-  const run = await prepareQaRun(pi, ctx)
-  if (!run) return
-
   const prompt = args.trim()
   if (!prompt) {
     ctx.ui.notify('Usage: /qa:freehand <prompt>', 'warning')
     return
   }
 
-  pi.sendUserMessage(buildFreehandPrompt(run.targetUrl, prompt, buildQaArtifactPlan('freehand')), { deliverAs: 'followUp' })
+  const artifacts = buildQaArtifactPlan('freehand')
+  const run = await prepareQaRun(pi, ctx, artifacts.runId)
+  if (!run) return
+
+  const spec = compileFreehandRunSpec({ target: run.targetUrl, artifacts, prompt })
+  registerActiveRun(spec)
+
+  pi.sendUserMessage(buildFreehandPrompt(spec, prompt, artifacts), { deliverAs: 'followUp' })
 }
 
 async function runNewQaMission(pi: ExtensionAPI, ctx: ExtensionCommandContext, args: string): Promise<void> {
   await ctx.waitForIdle()
 
-  if (!(await prepareQaAgent(pi, ctx))) return
+  if (!(await prepareQaAgent(pi, ctx, { kind: 'agent-end' }))) return
 
   pi.sendUserMessage(buildNewMissionPrompt(ctx.cwd, args.trim()), { deliverAs: 'followUp' })
 }
@@ -162,7 +187,8 @@ function missionPickerLabel(mission: QaMission): string {
 
 async function prepareQaRun(
   pi: ExtensionAPI,
-  ctx: ExtensionCommandContext
+  ctx: ExtensionCommandContext,
+  runId: string
 ): Promise<{ readonly targetUrl: string } | undefined> {
   const targetUrl = getQaTargetUrl()
   if (!targetUrl) {
@@ -174,34 +200,40 @@ async function prepareQaRun(
     return undefined
   }
 
-  if (!(await prepareQaAgent(pi, ctx))) return undefined
+  if (!(await prepareQaAgent(pi, ctx, { kind: 'qa-finish', runId }))) return undefined
 
   return { targetUrl }
 }
 
-async function prepareQaAgent(pi: ExtensionAPI, ctx: ExtensionCommandContext): Promise<boolean> {
+type QaRestoreMode =
+  | { readonly kind: 'agent-end' }
+  | { readonly kind: 'qa-finish'; readonly runId: string }
+
+async function prepareQaAgent(pi: ExtensionAPI, ctx: ExtensionCommandContext, restoreMode: QaRestoreMode): Promise<boolean> {
   const config = getCommandConfig('qa')
   const shouldRestore = Boolean(config.model || config.thinking)
   const restore = shouldRestore ? captureRestore(pi, ctx, 'qa') : undefined
   if (!(await applyCommandConfig(pi, ctx, 'qa', config))) return false
 
   if (restore) {
-    await deferToAgentEnd(pi, async (endCtx) => {
-      await restoreCommandConfig(pi, restore)
-      endCtx.ui.notify('/qa config restored', 'info')
-    })
+    if (restoreMode.kind === 'qa-finish') {
+      deferQaRestoreUntilFinish(pi, restoreMode.runId, restore)
+    } else {
+      await deferToAgentEnd(pi, async (endCtx) => {
+        await restoreCommandConfig(pi, restore)
+        endCtx.ui.notify('/qa config restored', 'info')
+      })
+    }
   }
 
   return true
 }
 
-function buildMissionPrompt(targetUrl: string, mission: QaMission, extra: string, artifacts: QaArtifactPlan): string {
+function buildMissionPrompt(spec: QaRunSpec, mission: QaMission, extra: string, artifacts: QaArtifactPlan): string {
   return [
     QA_SYSTEM_PROMPT,
-    qaModeHeader('mission', targetUrl),
-    `Mission slug: ${mission.slug}`,
-    `Mission file: ${mission.relativePath}`,
-    mission.title ? `Mission title: ${mission.title}` : undefined,
+    qaModeHeader(spec.mode, spec.target),
+    renderRunSpec(spec),
     'Mission instructions:',
     mission.body || '<empty mission body>',
     extra ? `Additional user instructions:\n${extra}` : undefined,
@@ -211,21 +243,14 @@ function buildMissionPrompt(targetUrl: string, mission: QaMission, extra: string
     .join('\n\n')
 }
 
-function buildStagedPrompt(
-  targetUrl: string,
-  selection: StagedMissionSelection,
-  extra: string,
-  artifacts: QaArtifactPlan
-): string {
-  const missionContext = selection.missions.length
-    ? ['Nearest colocated missions:', ...selection.missions.map(renderMissionContext)].join('\n\n')
-    : ['No nearest .qa.md mission found for staged files.', 'Use the staged diff to infer a focused QA plan.', fenced('diff', selection.stagedDiff ?? '<no staged diff>')].join('\n\n')
-
+function buildStagedPrompt(spec: QaRunSpec, staged: StagedQaContext, extra: string, artifacts: QaArtifactPlan): string {
   return [
     QA_SYSTEM_PROMPT,
-    qaModeHeader('staged', targetUrl),
-    `Staged files:\n${selection.stagedFiles.length ? selection.stagedFiles.map((file) => `- ${file}`).join('\n') : '- none'}`,
-    missionContext,
+    qaModeHeader(spec.mode, spec.target),
+    renderRunSpec(spec),
+    `Staged files:\n${staged.stagedFiles.length ? staged.stagedFiles.map((file) => `- ${file}`).join('\n') : '- none'}`,
+    'Staged diff (build the QA plan from this; do not pull in any colocated .qa.md mission):',
+    fenced('diff', staged.stagedDiff?.trim() || '<no staged diff>'),
     extra ? `Additional user instructions:\n${extra}` : undefined,
     qaShellNote(artifacts)
   ]
@@ -233,23 +258,32 @@ function buildStagedPrompt(
     .join('\n\n')
 }
 
-function buildFreehandPrompt(targetUrl: string, prompt: string, artifacts: QaArtifactPlan): string {
-  return [QA_SYSTEM_PROMPT, qaModeHeader('freehand', targetUrl), `Freehand prompt:\n${prompt}`, qaShellNote(artifacts)].join('\n\n')
+function buildFreehandPrompt(spec: QaRunSpec, prompt: string, artifacts: QaArtifactPlan): string {
+  return [
+    QA_SYSTEM_PROMPT,
+    qaModeHeader(spec.mode, spec.target),
+    renderRunSpec(spec),
+    `Freehand prompt:\n${prompt}`,
+    qaShellNote(artifacts)
+  ].join('\n\n')
 }
 
 function buildNewMissionPrompt(cwd: string, prompt: string): string {
   return [
     'You are helping Toph create a colocated agentic QA mission file.',
     `Workspace: ${cwd}`,
-    prompt ? `Creation prompt:\n${prompt}` : 'Creation prompt: <missing>',
-    'Goal: create one useful `.qa.md` file that future `/qa` and `/qa:staged` runs can execute.',
+    prompt ? `Creation prompt:\n${prompt}` : 'Creation prompt: <missing — collect it with ask_user before planning>',
+    'Goal: create one useful `.qa.md` file that future `/qa` runs can execute. (/qa:staged does not consume .qa.md; it works from staged diffs.)',
     'Rules:',
-    '- Treat `/qa:new` arguments as a plain natural-language prompt, not a slug, path grammar, or selection list.',
-    '- If the prompt lacks enough information to choose the feature, flow, or expected behavior, ask concise follow-up questions before writing.',
+    '- Treat `/qa:new` arguments as the initial natural-language prompt. Do not treat them as a slug, path grammar, or selection list, and do not ask Toph to restate them.',
+    '- If the creation prompt is missing, first ask what QA mission to create using ask_user. The answer may be entirely freeform text; do not force a menu choice.',
+    '- When using ask_user for missing prompt details or follow-up questions, always pass `allowFreeform: true` and `allowComment: true` so Toph can add context or answer something else in text.',
+    '- If you offer options in ask_user, make them shortcuts only. Accept any freeform/comment text as valid instructions, even when it does not match an option.',
+    '- Ask one focused question per ask_user call. Start with the most blocking unknown: feature/flow, expected behavior, setup, success/failure signals, or required evidence.',
     '- If enough information is present, inspect the project, choose the best colocated location, and create the file.',
     '- Do not ask the user to choose a slug. Prefer no frontmatter; the mission slug will default to the filename.',
     '- Name the file after the feature or flow, for example `login.qa.md`, and place it near the relevant route, component, or feature code.',
-    '- Write browser-observable mission instructions: target flow, setup/state assumptions, steps, assertions, failure signals, and safety notes.',
+    '- Use the structured mission shape below so /qa can compile concrete scenarios and required evidence.',
     '- Use synthetic/local data only. Do not include credentials, tokens, PHI, cookies, passwords, or real user data.',
     '- Do not run QA now; this command creates the mission only.',
     'Recommended file shape:',
@@ -263,53 +297,41 @@ function buildNewMissionPrompt(cwd: string, prompt: string): string {
         'Setup:',
         '- <local preconditions or none>',
         '',
-        'Steps:',
-        '1. <browser action>',
-        '2. <browser action>',
-        '',
+        'Scenario: <short title>',
+        'Given:',
+        '- <starting state>',
+        'When:',
+        '- <browser action>',
+        'Then:',
+        '- <observable outcome>',
         'Checks:',
-        '- <observable pass condition>',
-        '- <console/network/accessibility condition>',
+        '- <pass condition>',
+        'Evidence required:',
+        '- screenshot: <what to capture>',
+        '- console: <expected absence/presence>',
         '',
-        'Safety notes:',
-        '- Use synthetic local data only.'
+        'Out of scope:',
+        '- <flows explicitly skipped>',
+        '',
+        'Tags: smoke, regression'
       ].join('\n')
     )
   ].join('\n\n')
 }
 
-function renderMissionContext(mission: QaMission): string {
-  return [
-    `Mission slug: ${mission.slug}`,
-    `Mission file: ${mission.relativePath}`,
-    mission.title ? `Mission title: ${mission.title}` : undefined,
-    'Mission instructions:',
-    mission.body || '<empty mission body>'
-  ]
-    .filter(Boolean)
-    .join('\n')
-}
-
-function qaModeHeader(mode: QaMode, targetUrl: string): string {
+function qaModeHeader(mode: QaRunSpec['mode'], targetUrl: string): string {
   return `QA mode: ${mode}\nTarget URL: ${targetUrl}`
 }
 
 function qaShellNote(artifacts: QaArtifactPlan): string {
   return [
     'Do not claim browser pass/fail without browser evidence.',
-    'Use qa_report for the final report; it writes local artifacts only when safety gates pass.',
-    `Set qa_report.slug to ${artifacts.slug} and qa_report.runId to ${artifacts.runId}.`,
-    `QA artifacts for this run belong under ${artifacts.relativeRunDir}/.`,
+    `Use runId ${artifacts.runId} for qa_plan, qa_step, and qa_finish.`,
+    `QA artifacts for this run belong under ${artifacts.relativeRunDir}/. Pi will write report.json and report.md there when qa_finish is called.`,
     `Create ${artifacts.relativeArtifactDir}/ before screenshots if the screenshot tool needs the directory to exist.`,
-    `Save screenshot MCP artifacts under ${artifacts.relativeArtifactDir}/ when the screenshot tool supports paths. Use filenames like E1.png, E2.png.`,
-    `For every screenshot evidence item, include artifactPaths with the local screenshot path, for example ${artifacts.relativeArtifactDir}/E1.png.`,
-    'The final report.md will inline bundled screenshots next to their Evidence entries.'
+    `Pass screenshot filenames under ${artifacts.relativeArtifactDir}/ (for example ${artifacts.relativeArtifactDir}/E1.png) so Pi can capture the artifact path automatically and inline screenshots in the report.`,
+    'Pi assigns evidence ids (E1, E2, ...) when Playwright tools run; do not invent them.'
   ].join('\n')
-}
-
-function stagedArtifactSlug(selection: StagedMissionSelection): string {
-  if (selection.missions.length === 1 && selection.missions[0]?.slug) return selection.missions[0].slug
-  return 'staged'
 }
 
 function fenced(language: string, value: string): string {

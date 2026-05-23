@@ -1,7 +1,6 @@
 import type { ExtensionAPI, ExtensionCommandContext } from '@mariozechner/pi-coding-agent'
 import { startOperation } from '@pi/lib/lock'
-import { runRtkOptimizedCommand } from '@pi/lib/rtk'
-import { headBytes } from '@pi/lib/subagents/output'
+import { captureOptimizedCommand } from '@pi/lib/rtk'
 import { extractSubagentText, runSubagent } from '@pi/lib/subagents'
 import { captureFreehandReviewContext, captureStagedReviewContext, MAX_DIFF_BYTES, splitZ, type ReviewContextCapture } from './context.ts'
 import { reviewReportPrompt, reviewScoutTask } from './prompts.ts'
@@ -29,12 +28,6 @@ interface ReviewRunArgs {
   targetRules: string
 }
 
-interface StagedDiffCapture {
-  readonly text: string
-  readonly notes: readonly string[]
-  readonly error?: string
-}
-
 export async function runReview(pi: ExtensionAPI, ctx: ExtensionCommandContext, args?: string): Promise<void> {
   await ctx.waitForIdle()
   const guidance = args?.trim() || undefined
@@ -53,7 +46,7 @@ export async function runReview(pi: ExtensionAPI, ctx: ExtensionCommandContext, 
       cwd: ctx.cwd,
       signal: ctx.signal
     }),
-    captureStagedDiff(pi, ctx)
+    captureOptimizedCommand(pi, 'git diff --staged', { cwd: ctx.cwd, signal: ctx.signal, maxBytes: MAX_DIFF_BYTES })
   ])
   if ((nameOnly.code ?? 1) !== 0) {
     ctx.ui.notify(`/review could not read staged files: ${nameOnly.stderr || 'git diff --staged --name-only failed'}`, 'error')
@@ -65,7 +58,7 @@ export async function runReview(pi: ExtensionAPI, ctx: ExtensionCommandContext, 
     return
   }
 
-  const diffText = diff.text.trim()
+  const diffText = diff.output.trim()
   if (!diffText) {
     ctx.ui.notify('/review: no staged changes to review.', 'info')
     return
@@ -81,30 +74,6 @@ export async function runReview(pi: ExtensionAPI, ctx: ExtensionCommandContext, 
       '- Treat command arguments as guidance, not as a target override.'
     ].join('\n')
   })
-}
-
-async function captureStagedDiff(pi: ExtensionAPI, ctx: ExtensionCommandContext): Promise<StagedDiffCapture> {
-  const rtk = await runRtkOptimizedCommand(pi, 'git diff --staged', {
-    cwd: ctx.cwd,
-    signal: ctx.signal,
-    maxStdoutBytes: MAX_DIFF_BYTES,
-    timeout: 30_000
-  })
-  if (rtk.used) {
-    if (rtk.code !== 0) return { text: '', notes: rtk.notes, error: rtk.stderr || `RTK diff failed with exit ${rtk.code}` }
-    return { text: rtk.stdout, notes: rtk.notes }
-  }
-
-  const fallback = await pi.exec('sh', ['-lc', `git diff --staged | head -c ${MAX_DIFF_BYTES + 1}`], {
-    cwd: ctx.cwd,
-    signal: ctx.signal,
-    timeout: 30_000
-  })
-  if ((fallback.code ?? 1) !== 0) return { text: '', notes: rtk.notes, error: fallback.stderr || 'git diff --staged failed' }
-  const capped = headBytes(fallback.stdout || '', MAX_DIFF_BYTES, `[truncated at ${MAX_DIFF_BYTES} bytes]`)
-  const notes = [...rtk.notes, 'RTK optimized diff unavailable; used byte-limited raw git diff fallback.']
-  if (capped.truncation) notes.push(`Staged diff truncated at ${MAX_DIFF_BYTES} bytes.`)
-  return { text: capped.text, notes }
 }
 
 export async function runReviewFreehand(pi: ExtensionAPI, ctx: ExtensionCommandContext, args?: string): Promise<void> {

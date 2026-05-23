@@ -41,6 +41,20 @@ export interface CappedShellCommandResult {
   readonly truncated: boolean
 }
 
+export interface CommandCapture {
+  readonly label: string
+  readonly output: string
+  readonly error?: string
+  readonly notes: readonly string[]
+}
+
+export interface CaptureCommandOptions {
+  readonly cwd: string
+  readonly signal?: AbortSignal
+  readonly maxBytes: number
+  readonly timeout?: number
+}
+
 export const RTK_CONFIG_PATH = join(getAgentDir(), 'extensions', 'pi-rtk-optimizer', 'config.json')
 
 const DEFAULT_CONFIG: RtkConfig = {
@@ -108,6 +122,43 @@ export async function runCappedShellCommand(
     code: result.code,
     killed: result.killed,
     truncated: capped.truncated
+  }
+}
+
+export async function captureOptimizedCommand(
+  pi: RtkExecHost,
+  command: string,
+  options: CaptureCommandOptions
+): Promise<CommandCapture> {
+  const timeout = options.timeout ?? 30_000
+  const rtk = await runRtkOptimizedCommand(pi, command, {
+    cwd: options.cwd,
+    signal: options.signal,
+    maxStdoutBytes: options.maxBytes,
+    timeout
+  })
+  if (rtk.used) {
+    return {
+      label: rtk.command,
+      output: rtk.stdout,
+      ...(rtk.code === 0 ? {} : { error: rtk.stderr || `${rtk.command} failed with exit ${rtk.code}` }),
+      notes: rtk.truncated ? [`${rtk.command} truncated at ${options.maxBytes} bytes.`] : []
+    }
+  }
+
+  const fallback = await runCappedShellCommand(pi, command, {
+    cwd: options.cwd,
+    signal: options.signal,
+    maxStdoutBytes: options.maxBytes,
+    timeout
+  })
+  if ((fallback.code ?? 1) !== 0) {
+    return { label: command, output: '', error: fallback.stderr || `${command} failed`, notes: [] }
+  }
+  return {
+    label: command,
+    output: fallback.stdout,
+    notes: fallback.truncated ? [`${command} truncated at ${options.maxBytes} bytes.`] : []
   }
 }
 
