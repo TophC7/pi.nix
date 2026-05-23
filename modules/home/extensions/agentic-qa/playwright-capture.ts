@@ -5,7 +5,7 @@
 
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
-import type { ExtensionAPI } from '@mariozechner/pi-coding-agent'
+import type { ExtensionAPI, ExtensionContext } from '@mariozechner/pi-coding-agent'
 import { containsCredentialLeak, isSafeArtifactPath } from './artifacts.ts'
 import {
   appendEvidence,
@@ -95,7 +95,7 @@ const pending = new Map<string, PendingCapture>()
 
 export function registerPlaywrightCapture(pi: ExtensionAPI): void {
   pi.on('tool_execution_start', async (event, ctx) => {
-    const capture = beginCapture(event, ctx?.cwd ?? process.cwd())
+    const capture = beginCapture(event, ctx?.cwd ?? process.cwd(), ctx)
     if (!capture) return
     pending.set(capture.toolCallId, capture.pending)
   })
@@ -119,13 +119,13 @@ interface BeginCaptureResult {
   readonly pending: PendingCapture
 }
 
-export function beginCapture(event: unknown, cwd: string): BeginCaptureResult | undefined {
+export function beginCapture(event: unknown, cwd: string, ctx?: ExtensionContext | object): BeginCaptureResult | undefined {
   const toolName = readStringField(event, 'toolName')
   if (!toolName) return undefined
   const type = mapPlaywrightToolToEvidenceType(toolName)
   if (!type) return undefined
 
-  const runId = getCurrentRunId()
+  const runId = getCurrentRunId(ctx)
   if (!runId || !getActiveRun(runId)) return undefined
 
   const toolCallId = readToolCallId(event)

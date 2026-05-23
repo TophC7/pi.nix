@@ -5,7 +5,7 @@
 
 import { copyFile, mkdir, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
-import { QA_ARTIFACT_SUBDIR, qaRunDir, safePathSegment, toMarkdownPath } from './artifact-paths.ts'
+import { QA_ARTIFACT_SUBDIR, safePathSegment, toMarkdownPath } from './artifact-paths.ts'
 import { isLocalhostQaTarget } from './config.ts'
 import type {
   QaEvidenceRecord,
@@ -50,11 +50,14 @@ export async function writeQaFinishArtifacts(cwd: string, finish: QaFinishResult
   const reasons = finishBlockers(finish)
   if (reasons.length > 0) return { written: false, blocked: true, reasons }
 
-  const runDir = qaRunDir(cwd, { slug: finish.spec.slug, mode: finish.spec.mode, runId: finish.spec.runId })
+  const runDir = path.join(cwd, finish.spec.relativeRunDir)
   const artifactDir = path.join(runDir, QA_ARTIFACT_SUBDIR)
   const reportPath = path.join(runDir, 'report.md')
   const reportJsonPath = path.join(runDir, 'report.json')
 
+  if (!isSafeArtifactPath(cwd, runDir)) {
+    return { written: false, blocked: true, reasons: ['QA run directory escaped the workspace.'] }
+  }
   if (![artifactDir, reportPath, reportJsonPath].every((candidate) => isSafeArtifactPath(runDir, candidate))) {
     return { written: false, blocked: true, reasons: ['QA artifact path escaped the run directory.'] }
   }

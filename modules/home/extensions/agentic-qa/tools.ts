@@ -5,10 +5,14 @@
 
 import type { ExtensionAPI, ExtensionContext } from '@mariozechner/pi-coding-agent'
 import { Type } from 'typebox'
+import { createQaMissionFile, type QaMissionCreateInput } from './mission-create.ts'
 import { writeQaFinishArtifacts } from './artifacts.ts'
 import { restoreQaConfigForRun } from './model-restore.ts'
 import { clearPendingCapturesForRun } from './playwright-capture.ts'
+import { submitQaShardPlanToolInput, type QaShardPlanToolInput } from './shards.ts'
 import {
+  QA_EVIDENCE_TYPE_HELP,
+  bindActiveRunContext,
   clearActiveRun,
   computeQaFinish,
   getActiveRun,
@@ -61,7 +65,72 @@ const FinishBug = Type.Object({
   evidenceIds: Type.Array(Type.String())
 })
 
+const ShardPlanEvidence = Type.Object({
+  type: Type.String({ description: QA_EVIDENCE_TYPE_HELP }),
+  purpose: Type.String(),
+  scenarioId: Type.Optional(Type.String())
+})
+
+const ShardPlanScenario = Type.Object({
+  scenarioId: Type.Optional(Type.String()),
+  title: Type.String(),
+  given: Type.Array(Type.String()),
+  when: Type.Array(Type.String()),
+  then: Type.Array(Type.String()),
+  checks: Type.Array(Type.String()),
+  requiredEvidence: Type.Array(ShardPlanEvidence),
+  safetyNotes: Type.Optional(Type.Array(Type.String()))
+})
+
+const MissionCreateEvidence = Type.Object({
+  type: Type.String({ description: QA_EVIDENCE_TYPE_HELP }),
+  purpose: Type.String()
+})
+
+const MissionCreateScenario = Type.Object({
+  title: Type.String(),
+  given: Type.Array(Type.String()),
+  when: Type.Array(Type.String()),
+  then: Type.Array(Type.String()),
+  checks: Type.Array(Type.String()),
+  requiredEvidence: Type.Array(MissionCreateEvidence)
+})
+
 export function registerQaTools(pi: ExtensionAPI): void {
+  pi.registerTool({
+    name: 'qa_shard_plan',
+    label: 'QA Shard Plan',
+    description:
+      'Submit a typed transient shard plan for /qa:staged or /qa:freehand. Pi validates, normalizes, and writes shards.json plus shard-state.json; do not write JSON files yourself.',
+    promptSnippet:
+      `Planner agents call qa_shard_plan with runId and atomic shards. Every shard needs nonempty given/when/then/checks and requiredEvidence. ${QA_EVIDENCE_TYPE_HELP}`,
+    parameters: Type.Object({
+      runId: Type.String(),
+      shards: Type.Array(ShardPlanScenario),
+      safetyNotes: Type.Optional(Type.Array(Type.String()))
+    }),
+    execute: async (_id, params, _signal, _onUpdate, ctx) => executeQaShardPlan(params, ctx.cwd)
+  })
+
+  pi.registerTool({
+    name: 'qa_mission_create',
+    label: 'QA Mission Create',
+    description:
+      'Create a canonical colocated .qa.md mission from typed scenario fields. Pi renders the Markdown DSL so future /qa runs compile deterministically.',
+    promptSnippet:
+      `Use qa_mission_create for /qa:new instead of Write/Edit. Provide a workspace-relative .qa.md path and complete Scenario/Given/When/Then/Checks/Evidence fields. ${QA_EVIDENCE_TYPE_HELP}`,
+    parameters: Type.Object({
+      path: Type.String({ description: 'Workspace-relative path ending in .qa.md.' }),
+      title: Type.String(),
+      purpose: Type.String(),
+      setup: Type.Optional(Type.Array(Type.String())),
+      scenarios: Type.Array(MissionCreateScenario),
+      outOfScope: Type.Optional(Type.Array(Type.String())),
+      tags: Type.Optional(Type.Array(Type.String()))
+    }),
+    execute: async (_id, params, _signal, _onUpdate, ctx) => executeQaMissionCreate(params, ctx.cwd)
+  })
+
   pi.registerTool({
     name: 'qa_plan',
     label: 'QA Plan',
@@ -76,7 +145,7 @@ export function registerQaTools(pi: ExtensionAPI): void {
       outOfScope: Type.Optional(Type.Array(PlanOutOfScope)),
       safetyNotes: Type.Optional(Type.Array(Type.String()))
     }),
-    execute: async (_id, params) => executeQaPlan(params)
+    execute: async (_id, params, _signal, _onUpdate, ctx) => executeQaPlan(params, ctx)
   })
 
   pi.registerTool({
@@ -96,7 +165,7 @@ export function registerQaTools(pi: ExtensionAPI): void {
       evidenceIds: Type.Array(Type.String()),
       bugs: Type.Optional(Type.Array(Type.String()))
     }),
-    execute: async (_id, params) => executeQaStep(params)
+    execute: async (_id, params, _signal, _onUpdate, ctx) => executeQaStep(params, ctx)
   })
 
   pi.registerTool({
@@ -117,7 +186,25 @@ export function registerQaTools(pi: ExtensionAPI): void {
   })
 }
 
-async function executeQaPlan(params: QaPlanInput) {
+async function executeQaShardPlan(params: QaShardPlanToolInput, cwd: string) {
+  const result = submitQaShardPlanToolInput(cwd, params)
+  return {
+    content: [{ type: 'text' as const, text: renderShardPlanResult(result) }],
+    details: result,
+    isError: !result.accepted
+  }
+}
+
+async function executeQaMissionCreate(params: QaMissionCreateInput, cwd: string) {
+  const result = await createQaMissionFile(cwd, params)
+  return {
+    content: [{ type: 'text' as const, text: renderMissionCreateResult(result) }],
+    details: result,
+    isError: !result.created
+  }
+}
+
+async function executeQaPlan(params: QaPlanInput, ctx?: ExtensionContext) {
   const active = getActiveRun(params.runId)
   if (!active) {
     const text = `qa_plan rejected: no active QA run with runId ${params.runId}. Start a /qa, /qa:staged, or /qa:freehand command first, then submit the plan using the runId from the command prompt.`
@@ -127,6 +214,8 @@ async function executeQaPlan(params: QaPlanInput) {
       isError: true
     }
   }
+
+  bindActiveRunContext(ctx, params.runId)
 
   const result = validateQaPlan(active.spec, params)
   if (result.accepted) {
@@ -149,7 +238,7 @@ async function executeQaPlan(params: QaPlanInput) {
   }
 }
 
-async function executeQaStep(params: QaStepInput) {
+async function executeQaStep(params: QaStepInput, ctx?: ExtensionContext) {
   const active = getActiveRun(params.runId)
   if (!active) {
     return {
@@ -158,6 +247,8 @@ async function executeQaStep(params: QaStepInput) {
       isError: true
     }
   }
+  bindActiveRunContext(ctx, params.runId)
+
   const result = validateQaStep(active, params)
   if (!result.accepted) {
     return {
@@ -185,6 +276,8 @@ async function executeQaFinish(params: QaFinishInput, cwd: string, pi: Extension
       }
     }
 
+    bindActiveRunContext(ctx, params.runId)
+
     const result = computeQaFinish(active, params)
     const artifacts = await writeQaFinishArtifacts(cwd, result)
     const text = `${renderFinishSummary(result)}\n${renderArtifactSummary(artifacts)}`
@@ -198,6 +291,24 @@ async function executeQaFinish(params: QaFinishInput, cwd: string, pi: Extension
     clearActiveRun(params.runId)
     await restoreQaConfigForRun(pi, ctx, params.runId)
   }
+}
+
+function renderShardPlanResult(result: ReturnType<typeof submitQaShardPlanToolInput>): string {
+  if (result.accepted) {
+    return [
+      `qa_shard_plan: accepted`,
+      `runId: ${result.runId}`,
+      `shards: ${result.shardCount}`,
+      `plan: ${result.planPath}`,
+      `state: ${result.statePath}`
+    ].join('\n')
+  }
+  return [`qa_shard_plan: rejected`, `runId: ${result.runId}`, 'Invalid:', ...result.invalid.map((entry) => `- ${entry}`)].join('\n')
+}
+
+function renderMissionCreateResult(result: Awaited<ReturnType<typeof createQaMissionFile>>): string {
+  if (result.created) return `qa_mission_create: created\npath: ${result.path}`
+  return ['qa_mission_create: rejected', 'Invalid:', ...result.invalid.map((entry) => `- ${entry}`)].join('\n')
 }
 
 function renderArtifactSummary(artifacts: Awaited<ReturnType<typeof writeQaFinishArtifacts>>): string {

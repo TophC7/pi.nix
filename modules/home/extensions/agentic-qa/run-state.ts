@@ -1,8 +1,8 @@
 // ## RUN STATE ## //
 // QA run spec model. The run spec is the single object every later QA tool
-// validates against. Mission missions get structured-section extraction with a
-// conservative freeform fallback; staged and freehand contexts get provisional
-// scenarios derived from their respective inputs.
+// validates against. Mission files use a small Markdown DSL that is parsed into
+// structured scenarios; staged and freehand contexts get provisional scenarios
+// derived from their respective inputs.
 
 import type { QaArtifactPlan } from './artifact-paths.ts'
 import { containsCredentialLeak } from './artifacts.ts'
@@ -16,6 +16,17 @@ export type QaEvidenceType =
   | 'console'
   | 'network'
   | 'observation'
+
+export const QA_EVIDENCE_TYPE_VALUES: readonly QaEvidenceType[] = [
+  'screenshot',
+  'console',
+  'network',
+  'accessibility_snapshot',
+  'observation'
+]
+
+export const QA_EVIDENCE_TYPE_HELP =
+  'Use one of: screenshot, console, network, accessibility_snapshot, observation. Use accessibility_snapshot for rendered text, DOM, page structure, and accessibility tree evidence.'
 
 export interface QaRequiredEvidence {
   readonly type: QaEvidenceType
@@ -66,15 +77,39 @@ export interface ParsedMissionSections {
 
 const EVIDENCE_TYPES: Record<string, QaEvidenceType> = {
   accessibility_snapshot: 'accessibility_snapshot',
-  'accessibility snapshot': 'accessibility_snapshot',
+  accessibility: 'accessibility_snapshot',
+  accessibility_tree: 'accessibility_snapshot',
+  a11y: 'accessibility_snapshot',
+  aria_snapshot: 'accessibility_snapshot',
+  dom: 'accessibility_snapshot',
+  document: 'accessibility_snapshot',
+  document_object_model: 'accessibility_snapshot',
+  page_structure: 'accessibility_snapshot',
   snapshot: 'accessibility_snapshot',
   screenshot: 'screenshot',
+  screen: 'screenshot',
   console: 'console',
+  browser_console: 'console',
+  console_log: 'console',
   network: 'network',
-  observation: 'observation'
+  request: 'network',
+  requests: 'network',
+  observation: 'observation',
+  observe: 'observation'
+}
+
+export function normalizeQaEvidenceType(value: string | undefined): QaEvidenceType | undefined {
+  if (!value) return undefined
+  const raw = value.trim().toLowerCase()
+  const normalized = raw.replace(/[-\s]+/g, '_')
+  return EVIDENCE_TYPES[raw] ?? EVIDENCE_TYPES[normalized]
 }
 
 // ### Section parsing ### //
+
+export function validateQaMissionSource(body: string): string[] {
+  return validateParsedMissionSections(parseMissionSections(body))
+}
 
 export function parseMissionSections(body: string): ParsedMissionSections {
   const setup: string[] = []
@@ -146,6 +181,22 @@ export function parseMissionSections(body: string): ParsedMissionSections {
   finishScenario()
 
   return { setup, scenarios, requiredEvidence, outOfScope, tags }
+}
+
+function validateParsedMissionSections(sections: ParsedMissionSections): string[] {
+  const invalid: string[] = []
+  if (sections.scenarios.length === 0) invalid.push('mission must contain at least one Scenario block')
+  for (const scenario of sections.scenarios) {
+    if (!scenario.title.trim()) invalid.push(`${scenario.id} title is required`)
+    if (scenario.given.length === 0) invalid.push(`${scenario.id} Given must contain at least one item`)
+    if (scenario.when.length === 0) invalid.push(`${scenario.id} When must contain at least one item`)
+    if (scenario.then.length === 0) invalid.push(`${scenario.id} Then must contain at least one item`)
+    if (scenario.checks.length === 0) invalid.push(`${scenario.id} Checks must contain at least one item`)
+    if (scenario.requiredEvidence.length === 0 && sections.requiredEvidence.length === 0) {
+      invalid.push(`${scenario.id} Evidence required must contain at least one item`)
+    }
+  }
+  return invalid
 }
 
 interface MutableScenario {
@@ -270,7 +321,7 @@ function parseRequiredEvidence(line: string): QaRequiredEvidence | undefined {
   if (colon > 0) {
     const head = trimmed.slice(0, colon).trim().toLowerCase()
     const tail = trimmed.slice(colon + 1).trim()
-    const type = EVIDENCE_TYPES[head]
+    const type = normalizeQaEvidenceType(head)
     if (type) return { type, purpose: tail || head }
   }
   return { type: 'observation', purpose: trimmed }
@@ -298,9 +349,9 @@ export interface CompileFreehandRunSpecInput {
 
 export function compileMissionRunSpec(input: CompileMissionRunSpecInput): QaRunSpec {
   const sections = parseMissionSections(input.mission.body)
-  const scenarios = sections.scenarios.length > 0
-    ? sections.scenarios
-    : [fallbackMissionScenario(input.mission, sections)]
+  const invalid = validateParsedMissionSections(sections)
+  if (invalid.length > 0) throw new Error(`Invalid QA mission ${input.mission.relativePath}: ${invalid.join('; ')}`)
+  const scenarios = sections.scenarios
   const requiredEvidence = collectMissionLevelEvidence(sections.requiredEvidence, scenarios)
   return {
     target: input.target,
@@ -374,30 +425,6 @@ export function compileFreehandRunSpec(input: CompileFreehandRunSpecInput): QaRu
     sourceFiles: [],
     tags: []
   }
-}
-
-function fallbackMissionScenario(mission: QaMission, sections: ParsedMissionSections): QaScenarioSpec {
-  return {
-    id: 'S1',
-    title: mission.title?.trim() || mission.slug,
-    given: [],
-    when: [],
-    then: [],
-    checks: sections.outOfScope.length === 0 ? inferFreeformChecks(mission.body) : [],
-    requiredEvidence: sections.requiredEvidence.map((evidence) => ({ ...evidence, scenarioId: 'S1' }))
-  }
-}
-
-function inferFreeformChecks(body: string): string[] {
-  // Pull bulleted lines as conservative provisional checks; if there are none,
-  // leave checks empty so qa_plan can demand explicit ones.
-  const bullets: string[] = []
-  for (const rawLine of body.split(/\r?\n/)) {
-    const match = rawLine.match(/^\s*[-*]\s+(.*\S)\s*$/)
-    if (match) bullets.push(match[1])
-    if (bullets.length >= 6) break
-  }
-  return bullets
 }
 
 function collectMissionLevelEvidence(
@@ -511,6 +538,7 @@ interface ActiveQaRun {
 }
 
 const activeRuns = new Map<string, ActiveQaRun>()
+const contextRunIds = new WeakMap<object, string>()
 let currentRunId: string | undefined
 
 export function registerActiveRun(spec: QaRunSpec): void {
@@ -522,7 +550,16 @@ export function getActiveRun(runId: string): ActiveQaRun | undefined {
   return activeRuns.get(runId)
 }
 
-export function getCurrentRunId(): string | undefined {
+export function bindActiveRunContext(context: object | undefined, runId: string): void {
+  if (!context || !activeRuns.has(runId)) return
+  contextRunIds.set(context, runId)
+}
+
+export function getCurrentRunId(context?: object): string | undefined {
+  if (context && contextRunIds.has(context)) {
+    const scopedRunId = contextRunIds.get(context)
+    return scopedRunId && activeRuns.has(scopedRunId) ? scopedRunId : undefined
+  }
   return currentRunId
 }
 

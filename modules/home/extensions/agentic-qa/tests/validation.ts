@@ -4,7 +4,10 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { buildQaArtifactPlan } from '../artifact-paths.ts'
+import { computeAggregateQaFinish, writeAggregateQaReport } from '../aggregate.ts'
 import { isSafeArtifactPath, writeQaFinishArtifacts } from '../artifacts.ts'
+import { createQaMissionFile } from '../mission-create.ts'
+import { runQaShardCoordinator } from '../coordinator.ts'
 import {
   deferQaRestoreUntilFinish,
   registerQaModelRestoreLifecycle,
@@ -31,7 +34,29 @@ import {
 } from '../playwright-capture.ts'
 import { registerQaTools } from '../tools.ts'
 import {
+  QA_PLANNER_AGENT,
+  compileDirectShardPlan,
+  createInitialQaShardRunState,
+  qaShardPlanPath,
+  qaShardStatePath,
+  readQaShardRunState,
+  shouldUsePlannerForShardPlan,
+  updateQaShardRunState,
+  buildQaShardPlannerTask,
+  registerQaShardPlannerRun,
+  submitQaShardPlanToolInput,
+  writeQaShardPlan,
+  writeQaShardRunState
+} from '../shards.ts'
+import {
+  buildQaShardWorkerTask,
+  createQaShardRunSpec,
+  prepareQaShardWorker,
+  registerQaShardWorkerRun
+} from '../worker.ts'
+import {
   appendEvidence,
+  bindActiveRunContext,
   clearActiveRun,
   compileFreehandRunSpec,
   compileMissionRunSpec,
@@ -46,6 +71,7 @@ import {
   recordQaStep,
   registerActiveRun,
   renderRunSpec,
+  validateQaMissionSource,
   validateQaPlan,
   validateQaStep,
   type AcceptedQaPlan,
@@ -163,6 +189,8 @@ await check('compileMissionRunSpec lifts structured scenarios and aggregates run
         '- submit synthetic creds',
         'Then:',
         '- dashboard heading visible',
+        'Checks:',
+        '- dashboard heading visible',
         'Evidence required:',
         '- screenshot: dashboard'
       ].join('\n')
@@ -177,21 +205,21 @@ await check('compileMissionRunSpec lifts structured scenarios and aggregates run
   assert(spec.sourceFiles[0] === 'login.qa.md', 'source files missing mission path')
 })
 
-await check('compileMissionRunSpec falls back to a single scenario for freeform missions', () => {
-  const artifacts = buildQaArtifactPlan('freeform')
-  const spec = compileMissionRunSpec({
-    target: 'http://localhost:5173',
-    artifacts,
-    mission: missionRef({
-      slug: 'freeform',
-      title: 'Freeform',
-      relativePath: 'freeform.qa.md',
-      body: '- visit page\n- click button\n'
+await check('validateQaMissionSource and compileMissionRunSpec reject freeform missions without structured scenarios', () => {
+  const body = '- visit page\n- click button\n'
+  const invalid = validateQaMissionSource(body)
+  assert(invalid.some((entry) => entry.includes('at least one Scenario')), 'freeform mission should need Scenario block')
+  let rejected = false
+  try {
+    compileMissionRunSpec({
+      target: 'http://localhost:5173',
+      artifacts: buildQaArtifactPlan('freeform'),
+      mission: missionRef({ slug: 'freeform', title: 'Freeform', relativePath: 'freeform.qa.md', body })
     })
-  })
-  assert(spec.scenarios.length === 1, 'expected single fallback scenario')
-  assert(spec.scenarios[0]?.title === 'Freeform', 'fallback should use mission title')
-  assert(spec.scenarios[0]?.checks.length > 0, 'fallback should preserve bullets as provisional checks')
+  } catch (error) {
+    rejected = error instanceof Error && error.message.includes('Invalid QA mission')
+  }
+  assert(rejected, 'compileMissionRunSpec should reject non-deterministic mission source')
 })
 
 await check('compileStagedRunSpec works from staged files without ever referencing a mission', () => {
@@ -329,6 +357,30 @@ await check('registerActiveRun + recordAcceptedPlan wires plan into the active r
   }
 })
 
+await check('qa_plan tool binds the calling context to its explicit run id', async () => {
+  const specA = { ...sampleLoginRunSpec(), runId: 'run-a', relativeRunDir: '.sworm/qa/login/run-a', relativeArtifactDir: '.sworm/qa/login/run-a/artifacts' }
+  const specB = { ...sampleLoginRunSpec(), runId: 'run-b', relativeRunDir: '.sworm/qa/login/run-b', relativeArtifactDir: '.sworm/qa/login/run-b/artifacts' }
+  const pi = fakeToolPi()
+  const ctxA = { cwd: '/tmp', ui: { notify() {} } }
+  registerQaTools(pi as never)
+  registerActiveRun(specA)
+  registerActiveRun(specB)
+  try {
+    await pi.tools.qa_plan!.execute('plan-a', basePlan(specA, {
+      scenarios: [{
+        scenarioId: 'S1', title: 'Sign in',
+        plannedSteps: ['navigate to /login', 'submit synthetic credentials and confirm dashboard heading'],
+        evidenceToCollect: [{ type: 'screenshot', purpose: 'dashboard final state', scenarioId: 'S1' }]
+      }]
+    }), undefined, undefined, ctxA)
+    assert(getCurrentRunId() === specB.runId, 'legacy current run should remain latest registered run')
+    assert(getCurrentRunId(ctxA) === specA.runId, 'qa_plan should bind ctxA to run-a')
+  } finally {
+    clearActiveRun(specA.runId)
+    clearActiveRun(specB.runId)
+  }
+})
+
 await check('mapPlaywrightToolToEvidenceType maps known Playwright tools and skips unrelated tools', () => {
   assert(mapPlaywrightToolToEvidenceType('playwright_browser_snapshot') === 'accessibility_snapshot', 'snapshot mapping')
   assert(mapPlaywrightToolToEvidenceType('playwright_browser_take_screenshot') === 'screenshot', 'screenshot mapping')
@@ -417,6 +469,31 @@ await check('beginCapture ignores tool events when no QA run is active', () => {
     const begin = beginCapture({ toolName: 'playwright_browser_snapshot', toolCallId: 'call-1', args: {} }, root)
     assert(begin === undefined, 'no active run should produce no capture')
     assert(getCurrentRunId() === undefined, 'no current run id when nothing is active')
+  })
+})
+
+await check('beginCapture prefers run id bound to the tool context over global current run', () => {
+  withWorkspace((root) => {
+    const specA = { ...sampleLoginRunSpec(), runId: 'run-a', relativeRunDir: '.sworm/qa/login/run-a', relativeArtifactDir: '.sworm/qa/login/run-a/artifacts' }
+    const specB = { ...sampleLoginRunSpec(), runId: 'run-b', relativeRunDir: '.sworm/qa/login/run-b', relativeArtifactDir: '.sworm/qa/login/run-b/artifacts' }
+    const ctxA = {}
+    const ctxB = {}
+    registerActiveRun(specA)
+    registerActiveRun(specB)
+    try {
+      bindActiveRunContext(ctxA, specA.runId)
+      bindActiveRunContext(ctxB, specB.runId)
+      assert(getCurrentRunId() === specB.runId, 'latest registered run should remain legacy current run')
+      assert(getCurrentRunId(ctxA) === specA.runId, 'ctxA should resolve run-a')
+      assert(getCurrentRunId(ctxB) === specB.runId, 'ctxB should resolve run-b')
+      const captureA = beginCapture({ toolName: 'playwright_browser_snapshot', toolCallId: 'call-a', args: {} }, root, ctxA)
+      const captureB = beginCapture({ toolName: 'playwright_browser_snapshot', toolCallId: 'call-b', args: {} }, root, ctxB)
+      assert(captureA?.pending.runId === specA.runId, 'capture should use ctxA run id')
+      assert(captureB?.pending.runId === specB.runId, 'capture should use ctxB run id')
+    } finally {
+      clearActiveRun(specA.runId)
+      clearActiveRun(specB.runId)
+    }
   })
 })
 
@@ -624,12 +701,427 @@ await check('compileFreehandRunSpec derives scenario title from prompt and never
   assert(spec.scenarios[0]?.title.startsWith('check that the dashboard loads'), 'scenario title should derive from prompt')
 })
 
-await check('qa:new prompt instructs ask_user to keep freeform context open', () => {
+await check('compileDirectShardPlan creates one mission shard per scenario with scoped evidence', () => {
+  const spec = sampleLoginRunSpec({ extraScenarioIds: ['S2'] })
+  const plan = compileDirectShardPlan(spec)
+  assert(plan.version === 1, 'plan version')
+  assert(plan.parentRunId === spec.runId, 'parent run id')
+  assert(plan.relativePlanPath === qaShardPlanPath(spec), 'plan path should live under run dir')
+  assert(plan.shards.length === 2, `expected 2 shards, got ${plan.shards.length}`)
+  assert(plan.shards[0]?.shardId === 'shard-S1', 'stable shard id missing')
+  assert(plan.shards[0]?.requiredEvidence.some((entry) => entry.scenarioId === 'S1' && entry.type === 'screenshot'), 'scenario evidence should be scoped')
+  assert(plan.shards[1]?.relativeArtifactDir.endsWith('/artifacts/shard-S2'), 'shard artifact dir should be nested below run artifacts')
+})
+
+await check('staged and freehand provisional specs request planner while structured mission specs do not', () => {
+  const artifacts = buildQaArtifactPlan('staged')
+  const staged = compileStagedRunSpec({ target: 'http://localhost:5173', artifacts, stagedFiles: ['src/app.ts'] })
+  const freehand = compileFreehandRunSpec({ target: 'http://localhost:5173', artifacts: buildQaArtifactPlan('freehand'), prompt: 'check dashboard' })
+  const mission = sampleLoginRunSpec()
+  assert(shouldUsePlannerForShardPlan(staged), 'staged provisional spec should use planner')
+  assert(shouldUsePlannerForShardPlan(freehand), 'freehand provisional spec should use planner')
+  assert(!shouldUsePlannerForShardPlan(mission), 'structured mission spec should not use planner')
+})
+
+await check('qa_shard_plan tool submission writes normalized transient shard plan and state', () => {
+  withWorkspace((root) => {
+    const spec = compileFreehandRunSpec({ target: 'http://localhost:5173', artifacts: buildQaArtifactPlan('freehand'), prompt: 'check dashboard' })
+    registerQaShardPlannerRun({ spec, cwd: root, sourceCommand: 'qa:freehand' })
+    const result = submitQaShardPlanToolInput(root, {
+      runId: spec.runId,
+      shards: [{
+        title: 'Dashboard loads',
+        given: ['App is running'],
+        when: ['Open dashboard'],
+        then: ['Dashboard content appears'],
+        checks: ['No visible error state'],
+        requiredEvidence: [{ type: 'dom', purpose: 'dashboard visible' }],
+        safetyNotes: ['Use synthetic data']
+      }]
+    })
+    assert(result.accepted, `expected accepted, got ${result.invalid.join('|')}`)
+    const written = JSON.parse(readFileSync(path.join(root, result.planPath!), 'utf8'))
+    assert(written.shards.length === 1, 'expected one persisted shard')
+    assert(written.shards[0]?.scenarioId === 'S1', 'tool should assign stable scenario id by order')
+    assert(written.shards[0]?.requiredEvidence[0]?.type === 'accessibility_snapshot', 'planner evidence should normalize dom to accessibility_snapshot')
+    assert(existsSync(path.join(root, result.statePath!)), 'tool should write shard-state.json')
+  })
+})
+
+await check('qa_shard_plan rejects invalid evidence types with actionable message before writing artifacts', () => {
+  withWorkspace((root) => {
+    const spec = compileFreehandRunSpec({ target: 'http://localhost:5173', artifacts: buildQaArtifactPlan('freehand'), prompt: 'check dashboard' })
+    registerQaShardPlannerRun({ spec, cwd: root, sourceCommand: 'qa:freehand' })
+    const result = submitQaShardPlanToolInput(root, {
+      runId: spec.runId,
+      shards: [{ title: 'Dashboard loads', given: ['App running'], when: ['Open'], then: ['Visible'], checks: ['No error'], requiredEvidence: [{ type: 'video', purpose: 'record flow' }] }]
+    })
+    assert(!result.accepted, 'invalid evidence type should reject')
+    assert(result.invalid.some((entry) => entry.includes('video') && entry.includes('screenshot') && entry.includes('accessibility_snapshot')), 'invalid type should list valid evidence types')
+    assert(!existsSync(path.join(root, qaShardPlanPath(spec))), 'rejected tool call should not write shards.json')
+  })
+})
+
+await check('qa_shard_plan rejects incomplete shard fields before writing artifacts', () => {
+  withWorkspace((root) => {
+    const spec = compileFreehandRunSpec({ target: 'http://localhost:5173', artifacts: buildQaArtifactPlan('freehand'), prompt: 'check dashboard' })
+    registerQaShardPlannerRun({ spec, cwd: root, sourceCommand: 'qa:freehand' })
+    const result = submitQaShardPlanToolInput(root, {
+      runId: spec.runId,
+      shards: [{ title: 'Dashboard loads', given: [], when: ['Open'], then: ['Visible'], checks: ['No error'], requiredEvidence: [] }]
+    })
+    assert(!result.accepted, 'incomplete shard should reject')
+    assert(result.invalid.some((entry) => entry.includes('given')), 'missing given should be reported')
+    assert(result.invalid.some((entry) => entry.includes('requiredEvidence')), 'missing evidence should be reported')
+    assert(!existsSync(path.join(root, qaShardPlanPath(spec))), 'rejected tool call should not write shards.json')
+  })
+})
+
+await check('planner task uses qa_shard_plan tool, not chat JSON or temp mission creation', () => {
+  const spec = compileStagedRunSpec({ target: 'http://localhost:5173', artifacts: buildQaArtifactPlan('staged'), stagedFiles: ['src/app.ts'] })
+  const task = buildQaShardPlannerTask({ spec, context: 'diff --git a/src/app.ts b/src/app.ts', sourceCommand: 'qa:staged', extra: 'focus smoke' })
+  assert(QA_PLANNER_AGENT === 'agentic-qa.qa-planner', 'planner agent runtime name should be package-scoped')
+  assert(task.includes('Call qa_shard_plan exactly once'), 'planner task should require typed tool submission')
+  assert(!task.includes('Return only JSON'), 'planner task must not demand chat JSON')
+  assert(task.includes('Do not run browser tools'), 'planner task should forbid browser testing')
+  assert(task.includes('Do not create or propose temp .qa.md files'), 'planner task should forbid temp mission files')
+  assert(task.includes('Do not write JSON files yourself'), 'planner task should keep artifact writing in code')
+  assert(task.includes('focus smoke'), 'planner task should include extra user instructions')
+})
+
+await check('writeQaShardPlan persists transient shard plan under run directory', () => {
+  withWorkspace((root) => {
+    const plan = compileDirectShardPlan(sampleLoginRunSpec())
+    const written = writeQaShardPlan(root, plan)
+    assert(written.endsWith(plan.relativePlanPath), 'written path should match plan relative path')
+    assert(existsSync(written), 'shard plan file should exist')
+    const json = JSON.parse(readFileSync(written, 'utf8'))
+    assert(json.parentRunId === plan.parentRunId, 'persisted plan should include parent run id')
+    assert(Array.isArray(json.shards) && json.shards.length === 1, 'persisted plan should include shards')
+  })
+})
+
+await check('createInitialQaShardRunState records queued shards with child run ids and artifact paths', () => {
+  const plan = compileDirectShardPlan(sampleLoginRunSpec({ extraScenarioIds: ['S2'] }))
+  const state = createInitialQaShardRunState(plan, 'qa')
+  assert(state.parentRunId === plan.parentRunId, 'parent run id should persist')
+  assert(state.target === plan.target, 'target should persist')
+  assert(state.sourceCommand === 'qa', 'source command should persist')
+  assert(state.shardPlanPath === plan.relativePlanPath, 'shard plan path should persist')
+  assert(state.shards.length === 2, 'state should track every shard')
+  assert(state.shards.every((shard) => shard.status === 'queued'), 'initial shard status should be queued')
+  assert(state.shards[0]?.childRunId === 'run-test-1--shard-S1', 'child run id should be assigned')
+  assert(state.shards[0]?.artifactPaths.length === 0, 'initial artifact paths should be empty')
+})
+
+await check('write/read QA shard run state persists minimal coordinator state under run directory', () => {
+  withWorkspace((root) => {
+    const plan = compileDirectShardPlan(sampleLoginRunSpec())
+    const state = createInitialQaShardRunState(plan, 'qa')
+    const written = writeQaShardRunState(root, state)
+    assert(written.endsWith(qaShardStatePath(state)), 'state path should live under run dir')
+    assert(existsSync(written), 'state file should exist')
+    const reloaded = readQaShardRunState(root, state.relativeRunDir)
+    assert(reloaded.parentRunId === state.parentRunId, 'reloaded parent run id should match')
+    assert(reloaded.shards[0]?.childRunId === state.shards[0]?.childRunId, 'reloaded child run id should match')
+  })
+})
+
+await check('updateQaShardRunState records running and terminal shard results without retry metadata', () => {
+  const state = createInitialQaShardRunState(compileDirectShardPlan(sampleLoginRunSpec()), 'qa')
+  const running = updateQaShardRunState(state, 'shard-S1', { status: 'running', artifactPaths: ['.sworm/qa/login/run-test-1/artifacts/shard-S1/E1.png'] })
+  assert(running.shards[0]?.status === 'running', 'status should update to running')
+  assert(running.shards[0]?.artifactPaths.length === 1, 'artifact paths should update')
+  const passed = updateQaShardRunState(running, 'shard-S1', { status: 'passed', reportPath: '.sworm/qa/login/run-test-1/shard-S1/report.md' })
+  assert(passed.shards[0]?.status === 'passed', 'status should update to passed')
+  assert(passed.shards[0]?.reportPath?.endsWith('report.md'), 'report path should persist')
+  assert(!('lease' in passed.shards[0]!), 'minimal state should not include lease metadata')
+})
+
+await check('runQaShardCoordinator defaults to serial execution and records child report status', async () => {
+  await withWorkspaceAsync(async (root) => {
+    const parent = sampleLoginRunSpec({ extraScenarioIds: ['S2'] })
+    const plan = compileDirectShardPlan(parent)
+    const state = createInitialQaShardRunState(plan, 'qa')
+    const order: string[] = []
+    const ctx = fakeCoordinatorCtx(root)
+    const result = await runQaShardCoordinator({} as never, ctx as never, {
+      parentSpec: parent,
+      plan,
+      state,
+      parallel: { enabled: false, maxConcurrency: 8 },
+      async runShardWorker(worker) {
+        order.push(worker.shard.shardId)
+        writeChildReport(root, worker.childSpec, 'pass')
+      }
+    })
+    assert(order.join(',') === 'shard-S1,shard-S2', `expected serial shard order, got ${order.join(',')}`)
+    assert(result.state.shards.every((shard) => shard.status === 'passed'), 'all shards should be marked passed')
+    assert(result.completed === 2 && result.blocked === 0, 'result counts should match terminal shards')
+    const reloaded = readQaShardRunState(root, state.relativeRunDir)
+    assert(reloaded.shards.every((shard) => shard.status === 'passed'), 'state file should persist terminal statuses')
+  })
+})
+
+await check('runQaShardCoordinator honors extension-configured parallel max concurrency', async () => {
+  await withWorkspaceAsync(async (root) => {
+    const parent = sampleLoginRunSpec({ extraScenarioIds: ['S2', 'S3'] })
+    const plan = compileDirectShardPlan(parent)
+    const state = createInitialQaShardRunState(plan, 'qa')
+    let active = 0
+    let maxActive = 0
+    const result = await runQaShardCoordinator({} as never, fakeCoordinatorCtx(root) as never, {
+      parentSpec: parent,
+      plan,
+      state,
+      parallel: { enabled: true, maxConcurrency: 2 },
+      async runShardWorker(worker) {
+        active += 1
+        maxActive = Math.max(maxActive, active)
+        await new Promise((resolve) => setTimeout(resolve, 5))
+        writeChildReport(root, worker.childSpec, 'pass')
+        active -= 1
+      }
+    })
+    assert(maxActive === 2, `expected max concurrency 2, got ${maxActive}`)
+    assert(result.state.shards.every((shard) => shard.status === 'passed'), 'parallel shards should be marked passed')
+  })
+})
+
+await check('runQaShardCoordinator marks worker errors as blocked without retry metadata and clears child run state', async () => {
+  await withWorkspaceAsync(async (root) => {
+    const parent = sampleLoginRunSpec()
+    const plan = compileDirectShardPlan(parent)
+    const state = createInitialQaShardRunState(plan, 'qa')
+    const notifications: string[] = []
+    const result = await runQaShardCoordinator({} as never, fakeCoordinatorCtx(root, notifications) as never, {
+      parentSpec: parent,
+      plan,
+      state,
+      parallel: { enabled: false, maxConcurrency: 1 },
+      async runShardWorker(worker) {
+        registerActiveRun(worker.childSpec)
+        throw new Error('browser unavailable')
+      }
+    })
+    assert(result.state.shards[0]?.status === 'blocked', 'failed worker should mark shard blocked')
+    assert(result.blocked === 1, 'blocked count should be 1')
+    assert(getActiveRun(state.shards[0]!.childRunId) === undefined, 'blocked child run state should be cleared')
+    assert(notifications.some((entry) => entry.includes('browser unavailable')), 'blocking error should be surfaced')
+    assert(!('lease' in result.state.shards[0]!), 'coordinator should not add retry/lease metadata')
+  })
+})
+
+await check('computeAggregateQaFinish passes only when every child shard passed', () => {
+  withWorkspace((root) => {
+    const parent = sampleLoginRunSpec({ extraScenarioIds: ['S2'] })
+    const state = shardStateWithReports(root, parent, ['pass', 'pass'])
+    const finish = computeAggregateQaFinish(root, { parentSpec: parent, shardState: state })
+    assert(finish.status === 'pass', `expected pass, got ${finish.status}`)
+    assert(finish.evidence.map((entry) => entry.id).join(',') === 'E1,E2', 'child evidence ids should be renumbered')
+    assert(finish.steps.every((step) => step.runId === parent.runId), 'parent steps should use parent run id')
+    assert(finish.steps[1]?.evidenceIds[0] === 'E2', 'step evidence ids should be remapped')
+    assert(finish.coverage.every((entry) => entry.status === 'planned-tested'), 'all scenarios should be covered')
+  })
+})
+
+await check('computeAggregateQaFinish promotes planner shard scenarios into aggregate spec and coverage', () => {
+  withWorkspace((root) => {
+    const parent = compileFreehandRunSpec({ target: 'http://localhost:5173', artifacts: buildQaArtifactPlan('freehand'), prompt: 'check dashboard and settings' })
+    registerQaShardPlannerRun({ spec: parent, cwd: root, sourceCommand: 'qa:freehand' })
+    const submit = submitQaShardPlanToolInput(root, {
+      runId: parent.runId,
+      shards: [
+        { scenarioId: 'S1', title: 'Dashboard loads', given: ['App running'], when: ['Open dashboard'], then: ['Dashboard visible'], checks: ['Dashboard visible'], requiredEvidence: [{ type: 'screenshot', purpose: 'dashboard' }] },
+        { scenarioId: 'S2', title: 'Settings loads', given: ['App running'], when: ['Open settings'], then: ['Settings visible'], checks: ['Settings visible'], requiredEvidence: [{ type: 'console', purpose: 'no errors' }] }
+      ]
+    })
+    assert(submit.accepted, `planner tool should accept aggregate fixture: ${submit.invalid.join('|')}`)
+    const plan = JSON.parse(readFileSync(path.join(root, submit.planPath!), 'utf8'))
+    let state = readQaShardRunState(root, parent.relativeRunDir)
+    for (const shard of plan.shards) {
+      const entry = state.shards.find((candidate) => candidate.shardId === shard.shardId)!
+      const prepared = prepareQaShardWorker({ parentSpec: parent, shard, state: entry })
+      writeChildReport(root, prepared.childSpec, 'pass')
+      state = updateQaShardRunState(state, shard.shardId, {
+        status: 'passed',
+        reportPath: `${prepared.childSpec.relativeRunDir}/report.md`,
+        reportJsonPath: `${prepared.childSpec.relativeRunDir}/report.json`,
+        artifactPaths: [path.join(root, prepared.childSpec.relativeArtifactDir, 'E1.png')]
+      })
+    }
+    const finish = computeAggregateQaFinish(root, { parentSpec: parent, shardState: state, shardPlan: plan })
+    assert(finish.spec.scenarios.length === 2, 'aggregate spec should include planner scenarios')
+    assert(finish.spec.scenarios[1]?.id === 'S2', 'planner-created S2 should be promoted into aggregate spec')
+    assert(finish.coverage.some((entry) => entry.scenarioId === 'S2' && entry.status === 'planned-tested'), 'planner-created S2 should appear covered')
+    assert(finish.acceptedPlan?.acceptedScenarioIds.includes('S2'), 'accepted scenario ids should include planner-created S2')
+  })
+})
+
+await check('computeAggregateQaFinish fails on failed child and is inconclusive on blocked child', () => {
+  withWorkspace((root) => {
+    const parent = sampleLoginRunSpec({ extraScenarioIds: ['S2'] })
+    const failed = computeAggregateQaFinish(root, { parentSpec: parent, shardState: shardStateWithReports(root, parent, ['pass', 'fail']) })
+    assert(failed.status === 'fail', `expected fail, got ${failed.status}`)
+    assert(failed.failures.some((entry) => entry.includes('shard-S2')), 'failed shard should appear in failures')
+
+    const blockedState = updateQaShardRunState(shardStateWithReports(root, parent, ['pass', 'pass']), 'shard-S2', { status: 'blocked' })
+    const blocked = computeAggregateQaFinish(root, { parentSpec: parent, shardState: blockedState })
+    assert(blocked.status === 'inconclusive', `expected inconclusive, got ${blocked.status}`)
+    assert(blocked.blockers.some((entry) => entry.includes('shard-S2 blocked')), 'blocked shard should appear in blockers')
+  })
+})
+
+await check('writeAggregateQaReport writes parent report.json/report.md from child artifacts', async () => {
+  await withWorkspaceAsync(async (root) => {
+    const parent = sampleLoginRunSpec()
+    const state = shardStateWithReports(root, parent, ['pass'])
+    const { finish, artifacts } = await writeAggregateQaReport(root, { parentSpec: parent, shardState: state })
+    assert(finish.status === 'pass', 'aggregate finish should pass')
+    assert(artifacts.written, 'parent aggregate artifacts should be written')
+    assert(existsSync(path.join(root, parent.relativeRunDir, 'report.json')), 'parent report.json should exist')
+    assert(existsSync(path.join(root, parent.relativeRunDir, 'report.md')), 'parent report.md should exist')
+    assert(existsSync(path.join(root, parent.relativeArtifactDir, 'E1.png')), 'child screenshot should be bundled into parent artifacts')
+  })
+})
+
+await check('writeAggregateQaReport still writes parent report when a child never calls qa_finish', async () => {
+  await withWorkspaceAsync(async (root) => {
+    const parent = sampleLoginRunSpec()
+    const plan = compileDirectShardPlan(parent)
+    const state = updateQaShardRunState(createInitialQaShardRunState(plan, 'qa'), 'shard-S1', { status: 'blocked' })
+    const { finish, artifacts } = await writeAggregateQaReport(root, { parentSpec: parent, shardState: state, shardPlan: plan })
+    assert(finish.status === 'inconclusive', `expected inconclusive parent, got ${finish.status}`)
+    assert(finish.blockers.some((entry) => entry.includes('has no child report')), 'missing child report should be recorded as blocker')
+    assert(artifacts.written, `parent report should still be written for blocked child: ${JSON.stringify(artifacts.reasons)}`)
+    const reportJsonPath = path.join(root, parent.relativeRunDir, 'report.json')
+    assert(existsSync(reportJsonPath), 'parent report.json should exist even without child report')
+    const json = JSON.parse(readFileSync(reportJsonPath, 'utf8'))
+    assert(json.status === 'inconclusive', 'report.json should record inconclusive status')
+    assert(json.blockers.some((entry: string) => entry.includes('has no child report')), 'report.json should explain missing child report')
+  })
+})
+
+await check('qa commands route browser testing through shard coordinator by default', () => {
+  const source = readFileSync(new URL('../commands.ts', import.meta.url), 'utf8')
+  assert(source.includes("import { runQaShardCoordinator } from './coordinator.ts'"), 'commands should import shard coordinator')
+  assert(source.includes('await coordinateQaShards(pi, ctx'), 'qa commands should coordinate shard workers')
+  assert(!source.includes('pi.sendUserMessage(buildMissionPrompt'), '/qa mission must not hand testing prompt to main agent')
+  assert(!source.includes('pi.sendUserMessage(buildStagedPrompt'), '/qa:staged must not hand testing prompt to main agent')
+  assert(!source.includes('pi.sendUserMessage(buildFreehandPrompt'), '/qa:freehand must not hand testing prompt to main agent')
+})
+
+await check('createQaShardRunSpec narrows a parent run to one child shard run', () => {
+  const parent = sampleLoginRunSpec({ extraScenarioIds: ['S2'] })
+  const plan = compileDirectShardPlan(parent)
+  const state = createInitialQaShardRunState(plan, 'qa')
+  const child = createQaShardRunSpec(parent, plan.shards[0]!, state.shards[0]!)
+  assert(child.runId === 'run-test-1--shard-S1', 'child run id should come from shard state')
+  assert(child.scenarios.length === 1, 'child run should contain exactly one scenario')
+  assert(child.scenarios[0]?.id === 'S1', 'child scenario id should match shard')
+  assert(child.requiredEvidence.every((entry) => entry.scenarioId === 'S1'), 'child evidence should be scoped to shard scenario')
+  assert(child.relativeArtifactDir.endsWith('/artifacts/shard-S1'), 'child artifact dir should point at shard artifact dir')
+})
+
+await check('single-shard worker task stays small and requires child run QA protocol', () => {
+  const parent = sampleLoginRunSpec({ extraScenarioIds: ['S2'] })
+  const plan = compileDirectShardPlan(parent)
+  const state = createInitialQaShardRunState(plan, 'qa')
+  const prepared = prepareQaShardWorker({ parentSpec: parent, shard: plan.shards[0]!, state: state.shards[0]! })
+  const task = buildQaShardWorkerTask(prepared)
+  assert(task.includes('Parent run id: run-test-1'), 'task should include parent run id')
+  assert(task.includes('Child run id: run-test-1--shard-S1'), 'task should include child run id')
+  assert(task.includes('Shard id: shard-S1'), 'task should include shard id')
+  assert(task.includes('Use child run id run-test-1--shard-S1'), 'task should require child run id for QA tools')
+  assert(task.includes('Do not test scenarios outside this shard'), 'task should forbid cross-shard testing')
+  assert(!task.includes('Mission instructions:'), 'task should not include whole mission prompt ceremony')
+  assert(!task.includes('Staged diff'), 'task should not include staged diff')
+})
+
+await check('registerQaShardWorkerRun registers the child run without needing main-agent history', () => {
+  const parent = sampleLoginRunSpec()
+  const plan = compileDirectShardPlan(parent)
+  const state = createInitialQaShardRunState(plan, 'qa')
+  const prepared = prepareQaShardWorker({ parentSpec: parent, shard: plan.shards[0]!, state: state.shards[0]! })
+  try {
+    const child = registerQaShardWorkerRun(prepared)
+    assert(getActiveRun(child.runId)?.spec.runId === child.runId, 'child active run should be registered')
+    assert(getActiveRun(parent.runId) === undefined, 'parent run need not be active for child worker registration')
+  } finally {
+    clearActiveRun(prepared.childSpec.runId)
+  }
+})
+
+await check('qa_mission_create renders canonical .qa.md that /qa can compile', async () => {
+  await withWorkspaceAsync(async (root) => {
+    const result = await createQaMissionFile(root, {
+      path: 'src/login/login.qa.md',
+      title: 'Login QA',
+      purpose: 'Verify login happy path.',
+      setup: ['Dev server running'],
+      scenarios: [{
+        title: 'Guest can sign in',
+        given: ['Login page is open'],
+        when: ['Enter synthetic valid credentials', 'Submit form'],
+        then: ['Dashboard is visible'],
+        checks: ['Dashboard heading is visible'],
+        requiredEvidence: [{ type: 'screenshot', purpose: 'Dashboard after login' }, { type: 'dom', purpose: 'Rendered dashboard heading and page structure' }]
+      }],
+      outOfScope: ['Password reset'],
+      tags: ['smoke', 'login']
+    })
+    assert(result.created, `mission create should pass: ${result.invalid.join('|')}`)
+    assert(existsSync(path.join(root, 'src/login/login.qa.md')), 'mission file should be written')
+    const body = readFileSync(path.join(root, 'src/login/login.qa.md'), 'utf8')
+    assert(validateQaMissionSource(body).length === 0, 'rendered mission should validate')
+    const spec = compileMissionRunSpec({
+      target: 'http://localhost:5173',
+      artifacts: buildQaArtifactPlan('login'),
+      mission: missionRef({ slug: 'login', relativePath: 'src/login/login.qa.md', body })
+    })
+    assert(spec.scenarios.length === 1, 'compiled mission should have one scenario')
+    assert(spec.requiredEvidence.length === 2, 'compiled mission should preserve evidence')
+    assert(spec.requiredEvidence[1]?.type === 'accessibility_snapshot', 'mission create should normalize dom to accessibility_snapshot')
+  })
+})
+
+await check('qa_mission_create rejects invalid evidence types with actionable message', async () => {
+  await withWorkspaceAsync(async (root) => {
+    const result = await createQaMissionFile(root, {
+      path: 'bad.qa.md',
+      title: 'Bad QA',
+      purpose: 'Bad mission',
+      scenarios: [{ title: 'Bad evidence', given: ['App running'], when: ['Open app'], then: ['App visible'], checks: ['Visible'], requiredEvidence: [{ type: 'video', purpose: 'record flow' }] }]
+    })
+    assert(!result.created, 'invalid evidence type should reject')
+    assert(result.invalid.some((entry) => entry.includes('video') && entry.includes('screenshot') && entry.includes('accessibility_snapshot')), 'invalid type should list valid evidence types')
+  })
+})
+
+await check('qa_mission_create rejects incomplete scenarios and path escapes', async () => {
+  await withWorkspaceAsync(async (root) => {
+    const result = await createQaMissionFile(root, {
+      path: '../escape.qa.md',
+      title: 'Bad QA',
+      purpose: 'Bad mission',
+      scenarios: [{ title: 'Incomplete', given: [], when: [], then: [], checks: [], requiredEvidence: [] }]
+    })
+    assert(!result.created, 'invalid mission should reject')
+    assert(result.invalid.some((entry) => entry.includes('workspace-relative')), 'path escape should be reported')
+    assert(result.invalid.some((entry) => entry.includes('given')), 'missing given should be reported')
+  })
+})
+
+await check('qa:new prompt instructs ask_user to keep freeform context open and use qa_mission_create', () => {
   const source = readFileSync(new URL('../commands.ts', import.meta.url), 'utf8')
   assert(source.includes('Treat `/qa:new` arguments as the initial natural-language prompt'), 'qa:new args should be initial prompt')
   assert(source.includes('allowFreeform: true'), 'ask_user must allow freeform text')
   assert(source.includes('allowComment: true'), 'ask_user must allow additional comment text')
   assert(source.includes('answer may be entirely freeform text'), 'missing prompt flow should not force menu choices')
+  assert(source.includes('Call qa_mission_create to create the file'), 'qa:new should use typed mission creation tool')
+  assert(source.includes('If it rejects, fix the fields from the tool error and resubmit'), 'qa:new should retry from tool errors instead of investigating schema')
+  assert(source.includes('Evidence types:'), 'qa:new should surface valid evidence types')
+  assert(source.includes('Do not use Write/Edit for `.qa.md` mission files'), 'qa:new should not hand-write mission syntax')
 })
 
 await check('qa model restore waits for matching qa_finish run id', async () => {
@@ -756,7 +1248,7 @@ await check('writeQaFinishArtifacts writes report.json and report.md with summar
     const finish = await buildFinishedFailure({ root, screenshotSource: screenshot })
     const result = await writeQaFinishArtifacts(root, finish)
     assert(result.written && !result.blocked, `artifact write failed: ${JSON.stringify(result.reasons)}`)
-    const expectedRun = path.join(root, '.sworm', 'qa', finish.spec.slug, finish.spec.runId)
+    const expectedRun = path.join(root, finish.spec.relativeRunDir)
     assert(result.reportPath === path.join(expectedRun, 'report.md'), `report path mismatch: ${result.reportPath}`)
     assert(result.reportJsonPath === path.join(expectedRun, 'report.json'), `report.json path mismatch: ${result.reportJsonPath}`)
     assert(result.artifactPaths?.[0] === path.join(expectedRun, 'artifacts', 'E1.png'), 'screenshot not copied into artifacts/E1.png')
@@ -921,6 +1413,89 @@ function fakePi(): QaGitRunner {
 
 function fakeCtx(root: string): QaCommandContext {
   return { cwd: root }
+}
+
+function fakeCoordinatorCtx(root: string, notifications: string[] = []) {
+  return {
+    cwd: root,
+    ui: {
+      notify(message: string) { notifications.push(message) }
+    }
+  }
+}
+
+function writeChildReport(root: string, spec: QaRunSpec, status: 'pass' | 'fail' | 'inconclusive'): void {
+  const scenario = spec.scenarios[0]!
+  const now = new Date().toISOString()
+  write(root, `${spec.relativeArtifactDir}/E1.png`, 'fake screenshot')
+  write(root, `${spec.relativeRunDir}/report.md`, `# ${spec.runId}\n`)
+  write(root, `${spec.relativeRunDir}/report.json`, JSON.stringify({
+    runId: spec.runId,
+    status,
+    target: spec.target,
+    mode: spec.mode,
+    slug: spec.slug,
+    summary: `${status} child report`,
+    coverage: [{ scenarioId: scenario.id, title: scenario.title, status: 'planned-tested' }],
+    missingEvidence: [],
+    blockers: status === 'inconclusive' ? ['child inconclusive'] : [],
+    failures: status === 'fail' ? ['child failed'] : [],
+    spec,
+    acceptedPlan: {
+      runId: spec.runId,
+      target: spec.target,
+      acceptedScenarioIds: [scenario.id],
+      scenarios: [{ scenarioId: scenario.id, title: scenario.title, plannedSteps: ['open page', 'observe result'], evidenceToCollect: spec.requiredEvidence }],
+      outOfScope: [],
+      safetyNotes: [],
+      acceptedAt: now
+    },
+    steps: [{
+      runId: spec.runId,
+      scenarioId: scenario.id,
+      title: `${scenario.title} assertion`,
+      status: status === 'fail' ? 'fail' : 'pass',
+      expected: ['expected state'],
+      observed: [status === 'fail' ? 'broken state' : 'expected state'],
+      evidenceIds: ['E1'],
+      bugs: [],
+      recordedAt: now
+    }],
+    evidence: [{
+      id: 'E1',
+      type: 'screenshot',
+      sourceTool: 'playwright_browser_take_screenshot',
+      startedAt: now,
+      endedAt: now,
+      durationMs: 1,
+      inputSummary: '',
+      summary: 'screenshot evidence',
+      artifactPaths: [path.join(root, spec.relativeArtifactDir, 'E1.png')],
+      bundledArtifactPaths: [`${spec.relativeArtifactDir}/E1.png`],
+      isError: false
+    }],
+    bugs: [],
+    safetyNotes: [],
+    nextSteps: []
+  }))
+}
+
+function shardStateWithReports(root: string, parent: QaRunSpec, statuses: Array<'pass' | 'fail' | 'inconclusive'>) {
+  const plan = compileDirectShardPlan(parent)
+  let state = createInitialQaShardRunState(plan, 'qa')
+  plan.shards.forEach((shard, index) => {
+    const entry = state.shards.find((item) => item.shardId === shard.shardId)!
+    const prepared = prepareQaShardWorker({ parentSpec: parent, shard, state: entry })
+    const status = statuses[index] ?? 'pass'
+    writeChildReport(root, prepared.childSpec, status)
+    state = updateQaShardRunState(state, shard.shardId, {
+      status: status === 'pass' ? 'passed' : status === 'fail' ? 'failed' : 'inconclusive',
+      reportPath: `${prepared.childSpec.relativeRunDir}/report.md`,
+      reportJsonPath: `${prepared.childSpec.relativeRunDir}/report.json`,
+      artifactPaths: [path.join(root, prepared.childSpec.relativeArtifactDir, 'E1.png')]
+    })
+  })
+  return state
 }
 
 function fakeToolPi() {

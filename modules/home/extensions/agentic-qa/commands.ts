@@ -1,7 +1,7 @@
 // ## COMMANDS ## //
 // Registers localhost QA commands. Commands assemble mission/staged/freehand
-// context, compile a QaRunSpec, and hand a deterministic run-spec block plus
-// browser-evidence rules to the active agent.
+// context, compile a QaRunSpec, and dispatch browser work to a fresh Pi
+// subagent instead of the long-lived main agent.
 
 import type { ExtensionAPI, ExtensionCommandContext } from '@mariozechner/pi-coding-agent'
 import { deferToAgentEnd } from '@pi/lib/agent-end'
@@ -12,7 +12,10 @@ import {
   restoreCommandConfig
 } from '../commands/config'
 import { buildQaArtifactPlan, type QaArtifactPlan } from './artifact-paths.ts'
+import { writeAggregateQaReport } from './aggregate.ts'
+import { runQaShardCoordinator } from './coordinator.ts'
 import { getQaTargetUrl, isLocalhostQaTarget } from './config.ts'
+import { fenced } from './markdown.ts'
 import {
   collectStagedQaContext,
   discoverQaMissions,
@@ -21,16 +24,28 @@ import {
   type QaMission,
   type StagedQaContext
 } from './missions.ts'
-import { deferQaRestoreUntilFinish } from './model-restore.ts'
+import { deferQaRestoreUntilFinish, restoreQaConfigForRun } from './model-restore.ts'
 import { QA_SYSTEM_PROMPT } from './prompt.ts'
 import {
   compileFreehandRunSpec,
   compileMissionRunSpec,
   compileStagedRunSpec,
   registerActiveRun,
+  QA_EVIDENCE_TYPE_HELP,
   renderRunSpec,
+  validateQaMissionSource,
   type QaRunSpec
 } from './run-state.ts'
+import {
+  compileDirectShardPlan,
+  createInitialQaShardRunState,
+  runQaShardPlannerSubagent,
+  writeQaShardPlan,
+  writeQaShardRunState,
+  type QaShardPlan,
+  type QaShardRunState,
+  type QaSourceCommandKind
+} from './shards.ts'
 
 export function registerQaCommands(pi: ExtensionAPI): void {
   pi.registerCommand('qa', {
@@ -62,15 +77,26 @@ async function runMissionQa(pi: ExtensionAPI, ctx: ExtensionCommandContext, args
   const mission = request.slug ? lookupRequestedMission(ctx, request.slug) : await pickMission(ctx)
   if (!mission) return
 
+  const missionInvalid = validateQaMissionSource(mission.body)
+  if (missionInvalid.length > 0) {
+    ctx.ui.notify(`/qa ${mission.slug} is not executable:\n${missionInvalid.map((entry) => `- ${entry}`).join('\n')}`, 'error')
+    return
+  }
+
   const artifacts = buildQaArtifactPlan(mission.slug)
   const run = await prepareQaRun(pi, ctx, artifacts.runId)
   if (!run) return
 
   const spec = compileMissionRunSpec({ target: run.targetUrl, artifacts, mission })
-  registerActiveRun(spec)
-
-  pi.sendUserMessage(buildMissionPrompt(spec, mission, request.extra, artifacts), {
-    deliverAs: 'followUp'
+  await dispatchPreparedQaShards(pi, ctx, spec, async () => {
+    const shardPlan = compileDirectShardPlan(spec)
+    const shardState = persistInitialShardState(ctx, shardPlan, 'qa')
+    return {
+      shardPlan,
+      shardState,
+      fallbackPrompt: buildMissionPrompt(spec, mission, request.extra, artifacts),
+      label: `/qa ${mission.slug}`
+    }
   })
 }
 
@@ -84,6 +110,7 @@ async function runStagedQa(pi: ExtensionAPI, ctx: ExtensionCommandContext, args:
   const staged = await collectStagedQaContext(pi, ctx)
   if (staged.error) {
     ctx.ui.notify(`/qa:staged could not read staged git context: ${staged.error}`, 'error')
+    await restoreQaConfigForRun(pi, ctx, artifacts.runId)
     return
   }
 
@@ -92,10 +119,19 @@ async function runStagedQa(pi: ExtensionAPI, ctx: ExtensionCommandContext, args:
     artifacts,
     stagedFiles: staged.stagedFiles
   })
-  registerActiveRun(spec)
-
-  pi.sendUserMessage(buildStagedPrompt(spec, staged, args.trim(), artifacts), {
-    deliverAs: 'followUp'
+  await dispatchPreparedQaShards(pi, ctx, spec, async () => {
+    const { shardPlan, shardState } = await runQaShardPlannerSubagent(pi, ctx, {
+      spec,
+      context: buildStagedPlannerContext(staged),
+      sourceCommand: 'qa:staged',
+      extra: args.trim()
+    })
+    return {
+      shardPlan,
+      shardState,
+      fallbackPrompt: buildStagedPrompt(spec, staged, args.trim(), artifacts),
+      label: '/qa:staged'
+    }
   })
 }
 
@@ -113,9 +149,19 @@ async function runFreehandQa(pi: ExtensionAPI, ctx: ExtensionCommandContext, arg
   if (!run) return
 
   const spec = compileFreehandRunSpec({ target: run.targetUrl, artifacts, prompt })
-  registerActiveRun(spec)
-
-  pi.sendUserMessage(buildFreehandPrompt(spec, prompt, artifacts), { deliverAs: 'followUp' })
+  await dispatchPreparedQaShards(pi, ctx, spec, async () => {
+    const { shardPlan, shardState } = await runQaShardPlannerSubagent(pi, ctx, {
+      spec,
+      context: prompt,
+      sourceCommand: 'qa:freehand'
+    })
+    return {
+      shardPlan,
+      shardState,
+      fallbackPrompt: buildFreehandPrompt(spec, prompt, artifacts),
+      label: '/qa:freehand'
+    }
+  })
 }
 
 async function runNewQaMission(pi: ExtensionAPI, ctx: ExtensionCommandContext, args: string): Promise<void> {
@@ -205,6 +251,85 @@ async function prepareQaRun(
   return { targetUrl }
 }
 
+function buildWorkerFallbackPrompt(prompt: string, error: string): string {
+  return [
+    'QA subagent orchestration failed before completing the run.',
+    `Subagent error: ${error}`,
+    'Fallback: complete this QA run in the main agent using the original QA payload below.',
+    prompt
+  ].join('\n\n')
+}
+
+async function dispatchPreparedQaShards(
+  pi: ExtensionAPI,
+  ctx: ExtensionCommandContext,
+  spec: QaRunSpec,
+  prepare: () => Promise<{
+    readonly shardPlan: QaShardPlan
+    readonly shardState: QaShardRunState
+    readonly fallbackPrompt: string
+    readonly label: string
+  }>
+): Promise<void> {
+  let handedToCoordinator = false
+  try {
+    const input = await prepare()
+    handedToCoordinator = true
+    await coordinateQaShards(pi, ctx, { spec, ...input })
+  } finally {
+    if (!handedToCoordinator) await restoreQaConfigForRun(pi, ctx, spec.runId)
+  }
+}
+
+async function coordinateQaShards(
+  pi: ExtensionAPI,
+  ctx: ExtensionCommandContext,
+  input: {
+    readonly spec: QaRunSpec
+    readonly shardPlan: QaShardPlan
+    readonly shardState: QaShardRunState
+    readonly fallbackPrompt: string
+    readonly label: string
+  }
+): Promise<void> {
+  let handedToMainAgent = false
+  try {
+    ctx.ui.notify(`${input.label}: launching ${input.shardPlan.shards.length} QA shard(s).`, 'info')
+    const result = await runQaShardCoordinator(pi, ctx, {
+      parentSpec: input.spec,
+      plan: input.shardPlan,
+      state: input.shardState
+    })
+    const aggregate = await writeAggregateQaReport(ctx.cwd, {
+      parentSpec: input.spec,
+      shardState: result.state,
+      shardPlan: input.shardPlan
+    })
+    const total = result.state.shards.length
+    const message = `${input.label}: QA shards complete (${result.completed}/${total}; ${result.blocked} blocked). Parent report: ${aggregate.finish.status}.`
+    ctx.ui.notify(message, result.blocked > 0 || aggregate.finish.status !== 'pass' ? 'warning' : 'info')
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    registerActiveRun(input.spec)
+    handedToMainAgent = true
+    ctx.ui.notify(`${input.label}: QA shard coordinator failed; handing fallback to main agent. ${message}`, 'error')
+    pi.sendUserMessage(buildWorkerFallbackPrompt(input.fallbackPrompt, message), { deliverAs: 'followUp' })
+  } finally {
+    if (!handedToMainAgent) await restoreQaConfigForRun(pi, ctx, input.spec.runId)
+  }
+}
+
+function persistInitialShardState(
+  ctx: ExtensionCommandContext,
+  plan: QaShardPlan,
+  sourceCommand: QaSourceCommandKind
+): QaShardRunState {
+  const state = createInitialQaShardRunState(plan, sourceCommand)
+  writeQaShardPlan(ctx.cwd, plan)
+  writeQaShardRunState(ctx.cwd, state)
+  return state
+}
+
 type QaRestoreMode =
   | { readonly kind: 'agent-end' }
   | { readonly kind: 'qa-finish'; readonly runId: string }
@@ -241,6 +366,14 @@ function buildMissionPrompt(spec: QaRunSpec, mission: QaMission, extra: string, 
   ]
     .filter(Boolean)
     .join('\n\n')
+}
+
+function buildStagedPlannerContext(staged: StagedQaContext): string {
+  return [
+    `Staged files:\n${staged.stagedFiles.length ? staged.stagedFiles.map((file) => `- ${file}`).join('\n') : '- none'}`,
+    'Staged diff:',
+    fenced('diff', staged.stagedDiff?.trim() || '<no staged diff>')
+  ].join('\n\n')
 }
 
 function buildStagedPrompt(spec: QaRunSpec, staged: StagedQaContext, extra: string, artifacts: QaArtifactPlan): string {
@@ -280,10 +413,14 @@ function buildNewMissionPrompt(cwd: string, prompt: string): string {
     '- When using ask_user for missing prompt details or follow-up questions, always pass `allowFreeform: true` and `allowComment: true` so Toph can add context or answer something else in text.',
     '- If you offer options in ask_user, make them shortcuts only. Accept any freeform/comment text as valid instructions, even when it does not match an option.',
     '- Ask one focused question per ask_user call. Start with the most blocking unknown: feature/flow, expected behavior, setup, success/failure signals, or required evidence.',
-    '- If enough information is present, inspect the project, choose the best colocated location, and create the file.',
-    '- Do not ask the user to choose a slug. Prefer no frontmatter; the mission slug will default to the filename.',
+    '- If enough information is present, inspect the project and choose the best colocated path.',
+    '- Do not ask the user to choose a slug. The mission slug will default to the filename.',
     '- Name the file after the feature or flow, for example `login.qa.md`, and place it near the relevant route, component, or feature code.',
-    '- Use the structured mission shape below so /qa can compile concrete scenarios and required evidence.',
+    '- Call qa_mission_create to create the file. If it rejects, fix the fields from the tool error and resubmit; do not research the tool schema.',
+    '- Do not use Write/Edit for `.qa.md` mission files.',
+    '- qa_mission_create renders the canonical Markdown DSL so /qa can compile concrete scenarios and required evidence.',
+    '- Every scenario needs nonempty Given, When, Then, Checks, and Evidence required sections.',
+    `- Evidence types: ${QA_EVIDENCE_TYPE_HELP}`,
     '- Use synthetic/local data only. Do not include credentials, tokens, PHI, cookies, passwords, or real user data.',
     '- Do not run QA now; this command creates the mission only.',
     'Recommended file shape:',
@@ -334,6 +471,3 @@ function qaShellNote(artifacts: QaArtifactPlan): string {
   ].join('\n')
 }
 
-function fenced(language: string, value: string): string {
-  return `\`\`\`${language}\n${value}\n\`\`\``
-}
