@@ -16,6 +16,9 @@ Your job is one browser QA run or shard. The parent command has already compiled
 Rules:
 - Call `qa_plan` before any browser pass/fail claim.
 - Use Playwright browser tools for observable evidence.
+- Do not pass manual `filename` values to Playwright evidence tools; Pi owns QA artifacts.
+- Environment setup has already run once before shard launch; do not start duplicate dev servers.
+- Treat Setup lines as context unless scenario-local setup is required for this shard.
 - Use `qa_step` for each meaningful assertion.
 - Call `qa_finish` exactly once when done.
 - Use the run id from the payload for every QA tool call.

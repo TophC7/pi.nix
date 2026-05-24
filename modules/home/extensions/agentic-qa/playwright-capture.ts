@@ -1,9 +1,4 @@
-// ## PLAYWRIGHT CAPTURE ## //
-// Passive evidence capture from Playwright direct tools. Pi events drive this
-// so the agent does not invent or number evidence by hand; Pi assigns the IDs
-// and stores the records on the active QA run.
-
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import type { ExtensionAPI, ExtensionContext } from '@mariozechner/pi-coding-agent'
 import { containsCredentialLeak, isSafeArtifactPath } from './artifacts.ts'
@@ -12,6 +7,7 @@ import {
   getActiveRun,
   getCurrentRunId,
   getEvidence,
+  registerActiveRunCleanup,
   type QaEvidenceRecord,
   type QaEvidenceType
 } from './run-state.ts'
@@ -49,7 +45,7 @@ export function sanitizeSummary(value: string): string {
   return containsCredentialLeak(truncated) ? REDACTED : truncated
 }
 
-export function extractScreenshotArtifactPath(args: unknown, cwd: string): string | undefined {
+export function extractPlaywrightOutputPath(args: unknown, cwd: string): string | undefined {
   const filename = readStringField(args, 'filename')
   if (!filename) return undefined
   const resolved = path.isAbsolute(filename) ? filename : path.resolve(cwd, filename)
@@ -66,6 +62,11 @@ export function summarizePlaywrightArgs(toolName: string, args: unknown): string
       return summaryWith({ url: record.url })
     case 'playwright_browser_take_screenshot':
       return summaryWith({ filename: record.filename, fullPage: record.fullPage, type: record.type })
+    case 'playwright_browser_snapshot':
+    case 'playwright_browser_console_messages':
+    case 'playwright_browser_network_requests':
+    case 'playwright_browser_evaluate':
+      return summaryWith({ filename: record.filename, filter: record.filter, level: record.level })
     case 'playwright_browser_click':
     case 'playwright_browser_hover':
     case 'playwright_browser_press_key':
@@ -89,11 +90,19 @@ interface PendingCapture {
   readonly cwd: string
   readonly inputSummary: string
   readonly artifactPaths: readonly string[]
+  readonly requestedOutputPaths: readonly RequestedOutputPath[]
+}
+
+interface RequestedOutputPath {
+  readonly path: string
+  readonly existedAtStart: boolean
 }
 
 const pending = new Map<string, PendingCapture>()
 
 export function registerPlaywrightCapture(pi: ExtensionAPI): void {
+  registerActiveRunCleanup(clearPendingCapturesForRun)
+
   pi.on('tool_execution_start', async (event, ctx) => {
     const capture = beginCapture(event, ctx?.cwd ?? process.cwd(), ctx)
     if (!capture) return
@@ -133,9 +142,11 @@ export function beginCapture(event: unknown, cwd: string, ctx?: ExtensionContext
   const args = (event as { args?: unknown }).args
   const inputSummary = sanitizeSummary(summarizePlaywrightArgs(toolName, args))
   const artifactPaths: string[] = []
-  if (toolName === 'playwright_browser_take_screenshot') {
-    const screenshotPath = extractScreenshotArtifactPath(args, cwd)
-    if (screenshotPath) artifactPaths.push(screenshotPath)
+  const requestedOutputPaths: RequestedOutputPath[] = []
+  const outputPath = extractPlaywrightOutputPath(args, cwd)
+  if (outputPath) {
+    requestedOutputPaths.push({ path: outputPath, existedAtStart: existsSync(outputPath) })
+    if (toolName === 'playwright_browser_take_screenshot') artifactPaths.push(outputPath)
   }
   const startedAtMs = Date.now()
   return {
@@ -148,13 +159,14 @@ export function beginCapture(event: unknown, cwd: string, ctx?: ExtensionContext
       startedAtMs,
       cwd,
       inputSummary,
-      artifactPaths
+      artifactPaths,
+      requestedOutputPaths
     }
   }
 }
 
 export function finishCapture(capture: PendingCapture, event: unknown): QaEvidenceRecord | undefined {
-  const artifactPaths = capture.type === 'screenshot' ? persistScreenshotPayload(capture, event) : capture.artifactPaths
+  const artifactPaths = capture.type === 'screenshot' ? persistScreenshotPayload(capture, event) : cleanupRequestedOutputPaths(capture)
   const endedAtMs = Date.now()
   const summary = sanitizeSummary(summarizeToolResult(event))
   const isError = Boolean((event as { isError?: unknown }).isError)
@@ -202,10 +214,21 @@ function persistScreenshotPayload(capture: PendingCapture, event: unknown): read
 
   mkdirSync(path.dirname(target), { recursive: true })
   writeFileSync(target, Buffer.from(image.data, 'base64'))
-  for (const stalePath of capture.artifactPaths) {
-    if (path.resolve(stalePath) !== path.resolve(target) && isSafeArtifactPath(capture.cwd, stalePath)) rmSync(stalePath, { force: true })
+  for (const stale of capture.requestedOutputPaths) {
+    if (path.resolve(stale.path) !== path.resolve(target)) removeRequestedOutputPath(capture.cwd, stale)
   }
   return [target]
+}
+
+function cleanupRequestedOutputPaths(capture: PendingCapture): readonly string[] {
+  for (const stale of capture.requestedOutputPaths) removeRequestedOutputPath(capture.cwd, stale)
+  return []
+}
+
+function removeRequestedOutputPath(cwd: string, requested: RequestedOutputPath): void {
+  if (requested.existedAtStart) return
+  if (!isSafeArtifactPath(cwd, requested.path)) return
+  rmSync(requested.path, { force: true })
 }
 
 interface ScreenshotPayload {

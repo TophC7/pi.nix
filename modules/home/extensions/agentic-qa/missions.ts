@@ -48,12 +48,20 @@ export interface StagedQaContext {
   readonly error?: string
 }
 
+export function discoverQaMissionSummaries(cwd: string): QaMissionSummary[] {
+  return discoverMissionFiles(cwd).map((filePath) => readQaMissionSummary(cwd, filePath))
+}
+
 export function discoverQaMissions(cwd: string): QaMission[] {
   return discoverMissionFiles(cwd).map((filePath) => parseQaMission(cwd, filePath))
 }
 
+export function loadQaMission(cwd: string, mission: QaMissionSummary): QaMission {
+  return parseQaMission(cwd, mission.filePath)
+}
+
 export function lookupQaMission(cwd: string, slug: string): MissionLookupResult {
-  const available = discoverMissionFiles(cwd).map((filePath) => readQaMissionSummary(cwd, filePath))
+  const available = discoverQaMissionSummaries(cwd)
   const matches = available.filter((mission) => mission.slug === slug)
   if (matches.length === 1) {
     return { kind: 'found', mission: parseQaMission(cwd, matches[0].filePath), matches, available }

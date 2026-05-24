@@ -62,7 +62,7 @@ export async function writeQaFinishArtifacts(cwd: string, finish: QaFinishResult
     return { written: false, blocked: true, reasons: ['QA artifact path escaped the run directory.'] }
   }
 
-  const collected = await collectScreenshotArtifacts(cwd, finish.evidence, artifactDir)
+  const collected = await collectScreenshotArtifacts(cwd, finish.evidence, runDir, artifactDir)
   if (collected.reasons.length > 0) return { written: false, blocked: true, reasons: collected.reasons }
 
   const artifactsByEvidenceId = groupArtifactsByEvidenceId(collected.artifacts)
@@ -301,6 +301,7 @@ function computeRunDuration(finish: QaFinishResult): string {
 async function collectScreenshotArtifacts(
   cwd: string,
   evidence: readonly QaEvidenceRecord[],
+  runDir: string,
   artifactDir: string
 ): Promise<{ artifacts: EvidenceArtifact[]; reasons: string[] }> {
   const reasons: string[] = []
@@ -337,9 +338,10 @@ async function collectScreenshotArtifacts(
         reasons.push(`Screenshot artifact for ${record.id} is larger than ${MAX_ARTIFACT_BYTES} bytes: ${sourcePath}`)
         continue
       }
+      const existingRunArtifact = isSafeArtifactPath(runDir, source)
       const name = `${safePathSegment(record.id)}${sourcePaths.length > 1 ? `-${index + 1}` : ''}${ext}`
-      const destination = path.join(artifactDir, name)
-      if (!isSafeArtifactPath(artifactDir, destination)) {
+      const destination = existingRunArtifact ? source : path.join(artifactDir, name)
+      if (!existingRunArtifact && !isSafeArtifactPath(artifactDir, destination)) {
         reasons.push(`Screenshot artifact for ${record.id} escaped the artifact directory: ${sourcePath}`)
         continue
       }
@@ -347,7 +349,7 @@ async function collectScreenshotArtifacts(
         evidenceId: record.id,
         sourcePath: source,
         destinationPath: destination,
-        relativePath: toMarkdownPath(path.join(QA_ARTIFACT_SUBDIR, name))
+        relativePath: toMarkdownPath(existingRunArtifact ? path.relative(runDir, source) : path.join(QA_ARTIFACT_SUBDIR, name))
       })
     }
   }

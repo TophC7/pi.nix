@@ -18,11 +18,14 @@ import {
   type QaRunSpec,
   type QaScenarioSpec
 } from './run-state.ts'
+import { createQaShardRunSpec } from './worker.ts'
 
 export const QA_SHARD_PLAN_VERSION = 1
 export const QA_SHARD_PLAN_FILENAME = 'shards.json'
 export const QA_SHARD_STATE_FILENAME = 'shard-state.json'
 export const QA_PLANNER_AGENT = 'agentic-qa.qa-planner'
+
+const QA_SHARD_CHILD_INDEX_DIR = '_child-runs'
 
 export interface QaShardPlan {
   readonly version: typeof QA_SHARD_PLAN_VERSION
@@ -60,6 +63,12 @@ export interface QaShardRunState {
   readonly shardPlanPath: string
   readonly relativeRunDir: string
   readonly shards: readonly QaShardStateEntry[]
+}
+
+interface QaShardChildRunIndex {
+  readonly version: typeof QA_SHARD_PLAN_VERSION
+  readonly childRunId: string
+  readonly shardStatePath: string
 }
 
 export interface QaShardStateEntry {
@@ -217,6 +226,7 @@ export function writeQaShardRunState(cwd: string, state: QaShardRunState): strin
   const statePath = path.join(cwd, qaShardStatePath(state))
   mkdirSync(path.dirname(statePath), { recursive: true })
   writeFileSync(statePath, `${JSON.stringify(state, null, 2)}\n`)
+  writeQaShardChildRunIndexes(cwd, state)
   return statePath
 }
 
@@ -272,6 +282,39 @@ export function registerQaShardPlannerRun(input: {
 
 export function clearQaShardPlannerRun(runId: string): void {
   activeQaShardPlanners.delete(runId)
+}
+
+export function hydrateQaShardWorkerRun(cwd: string, runId: string): QaRunSpec | undefined {
+  const statePath = readShardStatePathForChildRun(cwd, runId)
+  if (!statePath) return undefined
+  try {
+    const state = JSON.parse(readFileSync(statePath, 'utf8')) as QaShardRunState
+    const entry = state.shards.find((item) => item.childRunId === runId)
+    if (!entry) return undefined
+    const plan = JSON.parse(readFileSync(path.join(cwd, state.shardPlanPath), 'utf8')) as QaShardPlan
+    const shard = plan.shards.find((item) => item.shardId === entry.shardId)
+    if (!shard) return undefined
+    return createQaShardRunSpec(
+      {
+        target: plan.target,
+        mode: plan.mode,
+        slug: plan.slug,
+        runId: plan.parentRunId,
+        relativeRunDir: plan.relativeRunDir,
+        relativeArtifactDir: path.join(cwd, entry.relativeArtifactDir),
+        setup: [],
+        scenarios: [],
+        requiredEvidence: [],
+        outOfScope: [],
+        sourceFiles: [],
+        tags: []
+      },
+      shard,
+      entry
+    )
+  } catch {
+    return undefined
+  }
 }
 
 export function takeQaShardPlannerResult(runId: string): QaShardPlannerResult | undefined {
@@ -369,7 +412,7 @@ function shardFromScenario(spec: QaRunSpec, scenario: QaScenarioSpec): QaShardSp
     checks: scenario.checks,
     requiredEvidence: evidenceForScenario(spec, scenario),
     safetyNotes: [],
-    relativeArtifactDir: `${spec.relativeArtifactDir}/${shardIdForScenario(scenario.id)}`
+    relativeArtifactDir: `${spec.relativeRunDir}/${shardIdForScenario(scenario.id)}/artifacts`
   }
 }
 
@@ -386,15 +429,24 @@ function shardFromToolInput(spec: QaRunSpec, entry: QaShardPlanToolScenarioInput
     checks: stringArray(entry.checks),
     requiredEvidence: evidenceArray(entry.requiredEvidence, scenarioId),
     safetyNotes: stringArray(entry.safetyNotes),
-    relativeArtifactDir: `${spec.relativeArtifactDir}/${shardIdForScenario(scenarioId)}`
+    relativeArtifactDir: `${spec.relativeRunDir}/${shardIdForScenario(scenarioId)}/artifacts`
   }
 }
 
 function validateQaShardPlanToolInput(input: QaShardPlanToolInput): string[] {
   const invalid: string[] = []
+  const seenShardIds = new Map<string, number>()
   if (!Array.isArray(input.shards) || input.shards.length === 0) invalid.push('shards must contain at least one shard')
   for (const [index, shard] of (input.shards ?? []).entries()) {
     const label = `shard ${index + 1}`
+    const scenarioId = stringValue(shard.scenarioId) || `S${index + 1}`
+    const shardId = shardIdForScenario(scenarioId)
+    const firstIndex = seenShardIds.get(shardId)
+    if (firstIndex !== undefined) {
+      invalid.push(`${label} scenarioId ${scenarioId} duplicates shard ${firstIndex + 1} after normalization`)
+    } else {
+      seenShardIds.set(shardId, index)
+    }
     if (!stringValue(shard.title)) invalid.push(`${label} title is required`)
     requireNonEmptyStringArray(shard.given, `${label} given`, invalid)
     requireNonEmptyStringArray(shard.when, `${label} when`, invalid)
@@ -514,5 +566,37 @@ function shardIdForScenario(scenarioId: string): string {
 
 function shardPathSegment(value: string, fallback: string): string {
   return /[A-Za-z0-9._-]/.test(value) ? safePathSegment(value) : fallback
+}
+
+function writeQaShardChildRunIndexes(cwd: string, state: QaShardRunState): void {
+  const shardStatePath = qaShardStatePath(state)
+  const indexDir = qaShardChildRunIndexDir(cwd)
+  mkdirSync(indexDir, { recursive: true })
+  for (const shard of state.shards) {
+    const index: QaShardChildRunIndex = {
+      version: QA_SHARD_PLAN_VERSION,
+      childRunId: shard.childRunId,
+      shardStatePath
+    }
+    writeFileSync(qaShardChildRunIndexPath(cwd, shard.childRunId), `${JSON.stringify(index, null, 2)}\n`)
+  }
+}
+
+function readShardStatePathForChildRun(cwd: string, runId: string): string | undefined {
+  try {
+    const parsed = JSON.parse(readFileSync(qaShardChildRunIndexPath(cwd, runId), 'utf8')) as QaShardChildRunIndex
+    if (parsed.version !== QA_SHARD_PLAN_VERSION || parsed.childRunId !== runId || !parsed.shardStatePath) return undefined
+    return path.join(cwd, parsed.shardStatePath)
+  } catch {
+    return undefined
+  }
+}
+
+function qaShardChildRunIndexDir(cwd: string): string {
+  return path.join(cwd, '.sworm', 'qa', QA_SHARD_CHILD_INDEX_DIR)
+}
+
+function qaShardChildRunIndexPath(cwd: string, runId: string): string {
+  return path.join(qaShardChildRunIndexDir(cwd), `${safePathSegment(runId)}.json`)
 }
 

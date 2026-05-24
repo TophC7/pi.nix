@@ -74,8 +74,13 @@ export interface RunnerSession {
   prompt(task: string): Promise<void>
   subscribe(listener: SessionListener): () => void
   abort(): Promise<void> | void
-  dispose(): void
+  dispose(): Promise<void> | void
   getActiveToolNames?(): string[]
+  bindExtensions?(bindings: Record<string, unknown>): Promise<void>
+  extensionRunner?: {
+    hasHandlers?(eventType: string): boolean
+    emit?(event: Record<string, unknown>): Promise<unknown>
+  }
 }
 
 export interface RunnerSessionFactoryOptions {
@@ -313,7 +318,16 @@ async function runSlot(
     return failSlot(slot, error instanceof Error ? error.message : String(error), state, options)
   } finally {
     unsubscribe?.()
-    session?.dispose()
+    try {
+      await disposeRunnerSession(session)
+    } catch (error) {
+      emitEvent(state, options, {
+        timestamp: Date.now(),
+        slotId: slot.id,
+        type: 'error',
+        error: `Session cleanup failed: ${error instanceof Error ? error.message : String(error)}`
+      })
+    }
     request.parentSignal?.removeEventListener('abort', onParentAbort)
     childControllers.delete(controller)
   }
@@ -355,7 +369,25 @@ async function createRunnerSession(
     tools,
     resourceLoader: loader
   })
+  await bindRunnerSessionExtensions(created.session)
   return created.session
+}
+
+async function bindRunnerSessionExtensions(session: RunnerSession): Promise<void> {
+  if (!session.bindExtensions) return
+  await session.bindExtensions({})
+}
+
+async function disposeRunnerSession(session: RunnerSession | undefined): Promise<void> {
+  if (!session) return
+  try {
+    const runner = session.extensionRunner
+    if (runner?.emit && (!runner.hasHandlers || runner.hasHandlers('session_shutdown'))) {
+      await runner.emit({ type: 'session_shutdown', reason: 'subagent_dispose' })
+    }
+  } finally {
+    await session.dispose()
+  }
 }
 
 function resolveModel(agent: DiscoveredAgent, modelRegistry: { find(provider: string, modelId: string): unknown }) {

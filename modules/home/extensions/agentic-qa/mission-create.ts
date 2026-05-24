@@ -5,7 +5,8 @@
 import { existsSync } from 'node:fs'
 import { mkdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
-import { containsCredentialLeak } from './artifacts.ts'
+import { toMarkdownPath } from './artifact-paths.ts'
+import { containsCredentialLeak, isSafeArtifactPath } from './artifacts.ts'
 import { QA_EVIDENCE_TYPE_HELP, normalizeQaEvidenceType, validateQaMissionSource, type QaEvidenceType } from './run-state.ts'
 
 export interface QaMissionCreateEvidenceInput {
@@ -122,10 +123,10 @@ export function validateQaMissionCreateInput(cwd: string, input: QaMissionCreate
 
 function resolveMissionPath(cwd: string, relativePath: string): { absolutePath: string; relativePath: string } | undefined {
   if (!relativePath || path.isAbsolute(relativePath)) return undefined
-  const absolutePath = path.resolve(cwd, relativePath)
-  const relative = path.relative(path.resolve(cwd), absolutePath)
-  if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) return undefined
-  return { absolutePath, relativePath: relative.split(path.sep).join('/') }
+  const root = path.resolve(cwd)
+  const absolutePath = path.resolve(root, relativePath)
+  if (!isSafeArtifactPath(root, absolutePath)) return undefined
+  return { absolutePath, relativePath: toMarkdownPath(path.relative(root, absolutePath)) }
 }
 
 function pushList(lines: string[], heading: string, values: readonly string[]): void {

@@ -1,7 +1,7 @@
 // ## COMMANDS ## //
 // Registers localhost QA commands. Commands assemble mission/staged/freehand
-// context, compile a QaRunSpec, and dispatch browser work to a fresh Pi
-// subagent instead of the long-lived main agent.
+// context, compile a QaRunSpec, and normally dispatch browser work to fresh Pi
+// subagents; coordinator fallback can prompt the main agent when orchestration fails.
 
 import type { ExtensionAPI, ExtensionCommandContext } from '@mariozechner/pi-coding-agent'
 import { deferToAgentEnd } from '@pi/lib/agent-end'
@@ -10,7 +10,7 @@ import {
   captureRestore,
   getCommandConfig,
   restoreCommandConfig
-} from '../commands/config'
+} from '../commands/config.ts'
 import { buildQaArtifactPlan, type QaArtifactPlan } from './artifact-paths.ts'
 import { writeAggregateQaReport } from './aggregate.ts'
 import { runQaShardCoordinator } from './coordinator.ts'
@@ -18,10 +18,12 @@ import { getQaTargetUrl, isLocalhostQaTarget } from './config.ts'
 import { fenced } from './markdown.ts'
 import {
   collectStagedQaContext,
-  discoverQaMissions,
+  discoverQaMissionSummaries,
   formatMissionList,
+  loadQaMission,
   lookupQaMission,
   type QaMission,
+  type QaMissionSummary,
   type StagedQaContext
 } from './missions.ts'
 import { deferQaRestoreUntilFinish, restoreQaConfigForRun } from './model-restore.ts'
@@ -46,6 +48,7 @@ import {
   type QaShardRunState,
   type QaSourceCommandKind
 } from './shards.ts'
+import { ensureQaEnvironmentReady } from './setup.ts'
 
 export function registerQaCommands(pi: ExtensionAPI): void {
   pi.registerCommand('qa', {
@@ -176,7 +179,7 @@ function completeQaMissionArguments(prefix: string): { value: string; label: str
   const trimmed = prefix.trimStart()
   if (trimmed.includes(' ')) return null
   const needle = trimmed.toLowerCase()
-  const items = discoverQaMissions(process.cwd())
+  const items = discoverQaMissionSummaries(process.cwd())
     .filter((mission) => mission.slug.toLowerCase().startsWith(needle))
     .map((mission) => ({
       value: mission.slug,
@@ -211,7 +214,7 @@ function lookupRequestedMission(ctx: ExtensionCommandContext, slug: string): QaM
 }
 
 async function pickMission(ctx: ExtensionCommandContext): Promise<QaMission | undefined> {
-  const missions = discoverQaMissions(ctx.cwd)
+  const missions = discoverQaMissionSummaries(ctx.cwd)
   if (missions.length === 0) {
     ctx.ui.notify('No .qa.md missions found. Create one with /qa:new <what to test>.', 'warning')
     return undefined
@@ -224,10 +227,11 @@ async function pickMission(ctx: ExtensionCommandContext): Promise<QaMission | un
   const labels = missions.map(missionPickerLabel)
   const selected = await ctx.ui.select('Pick QA mission', labels)
   if (!selected) return undefined
-  return missions[labels.indexOf(selected)]
+  const summary = missions[labels.indexOf(selected)]
+  return summary ? loadQaMission(ctx.cwd, summary) : undefined
 }
 
-function missionPickerLabel(mission: QaMission): string {
+function missionPickerLabel(mission: QaMissionSummary): string {
   return `${mission.slug}${mission.title ? ` — ${mission.title}` : ''} (${mission.relativePath})`
 }
 
@@ -274,6 +278,7 @@ async function dispatchPreparedQaShards(
   let handedToCoordinator = false
   try {
     const input = await prepare()
+    await ensureQaEnvironmentReady(pi, ctx, spec, input.label)
     handedToCoordinator = true
     await coordinateQaShards(pi, ctx, { spec, ...input })
   } finally {

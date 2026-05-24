@@ -37,13 +37,14 @@ export function prepareQaShardWorker(input: QaShardWorkerInput): PreparedQaShard
 }
 
 export function createQaShardRunSpec(parentSpec: QaRunSpec, shard: QaShardSpec, state: QaShardStateEntry): QaRunSpec {
+  const relativeRunDir = `${parentSpec.relativeRunDir}/${shard.shardId}`
   return {
     target: parentSpec.target,
     mode: parentSpec.mode,
     slug: `${parentSpec.slug}-${shard.shardId}`,
     runId: state.childRunId,
-    relativeRunDir: `${parentSpec.relativeRunDir}/${shard.shardId}`,
-    relativeArtifactDir: state.relativeArtifactDir,
+    relativeRunDir,
+    relativeArtifactDir: `${relativeRunDir}/artifacts`,
     setup: parentSpec.setup,
     scenarios: [{
       id: shard.scenarioId,
@@ -78,6 +79,9 @@ export function buildQaShardWorkerTask(input: PreparedQaShardWorker): string {
     `- Use child run id ${input.childSpec.runId} for qa_plan, qa_step, and qa_finish.`,
     '- Call qa_plan before any browser pass/fail claim.',
     '- Use Playwright browser tools to collect real evidence.',
+    '- Do not pass manual filename values to Playwright evidence tools; Pi owns QA artifacts.',
+    '- Environment setup has already run once before shard launch; do not start duplicate dev servers.',
+    '- Treat Setup lines as context unless scenario-local setup is required for this shard.',
     '- Use qa_step after each meaningful browser assertion.',
     '- Call qa_finish exactly once for the child run id.',
     '- Do not test scenarios outside this shard.',

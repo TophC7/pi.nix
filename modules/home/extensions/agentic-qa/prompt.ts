@@ -1,7 +1,3 @@
-// ## PROMPT ## //
-// Shared testing instructions for agentic QA commands. Browser orchestration will
-// grow around this; the core contract stays evidence-first and localhost-only.
-
 export const QA_SYSTEM_PROMPT = `You are running agentic website QA for Toph.
 
 Scope and safety:
@@ -27,7 +23,7 @@ Evidence rules:
 - Call qa_finish once after all qa_step calls. Pi computes the final status (pass/fail/inconclusive); do not assert the final status yourself.
 - Failed runs require at least one screenshot evidence record with a local artifact path; Pi persists Playwright screenshot payloads into the run artifact directory automatically.
 - Do not include credentials, tokens, cookies, API keys, passwords, or PHI in any qa_plan, qa_step, or qa_finish content.
-- When taking screenshots, omit manual filenames unless you need one for your own browser workflow; Pi owns report artifact naming.
+- Do not pass manual filename values to Playwright evidence tools. Pi owns QA artifacts and will clean tool-created files when possible.
 
 Run flow:
 1. qa_plan (mandatory first)

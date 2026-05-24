@@ -535,15 +535,24 @@ interface ActiveQaRun {
   acceptedPlan?: AcceptedQaPlan
   evidence: QaEvidenceRecord[]
   steps: QaStepRecord[]
+  readonly cleanupTimer?: ReturnType<typeof setTimeout>
 }
 
+const ACTIVE_QA_RUN_TTL_MS = 4 * 60 * 60 * 1000
 const activeRuns = new Map<string, ActiveQaRun>()
 const contextRunIds = new WeakMap<object, string>()
-let currentRunId: string | undefined
+const activeRunCleanupCallbacks = new Set<(runId: string) => void>()
+
+export function registerActiveRunCleanup(callback: (runId: string) => void): void {
+  activeRunCleanupCallbacks.add(callback)
+}
 
 export function registerActiveRun(spec: QaRunSpec): void {
-  activeRuns.set(spec.runId, { spec, evidence: [], steps: [] })
-  currentRunId = spec.runId
+  const existing = activeRuns.get(spec.runId)
+  if (existing?.cleanupTimer) clearTimeout(existing.cleanupTimer)
+  const cleanupTimer = setTimeout(() => clearActiveRun(spec.runId), ACTIVE_QA_RUN_TTL_MS)
+  ;(cleanupTimer as { unref?: () => void }).unref?.()
+  activeRuns.set(spec.runId, { spec, evidence: [], steps: [], cleanupTimer })
 }
 
 export function getActiveRun(runId: string): ActiveQaRun | undefined {
@@ -551,21 +560,41 @@ export function getActiveRun(runId: string): ActiveQaRun | undefined {
 }
 
 export function bindActiveRunContext(context: object | undefined, runId: string): void {
-  if (!context || !activeRuns.has(runId)) return
-  contextRunIds.set(context, runId)
+  const key = activeRunContextKey(context)
+  if (!key || !activeRuns.has(runId)) return
+  contextRunIds.set(key, runId)
 }
 
 export function getCurrentRunId(context?: object): string | undefined {
-  if (context && contextRunIds.has(context)) {
-    const scopedRunId = contextRunIds.get(context)
-    return scopedRunId && activeRuns.has(scopedRunId) ? scopedRunId : undefined
-  }
-  return currentRunId
+  const key = activeRunContextKey(context)
+  if (!key || !contextRunIds.has(key)) return undefined
+  const scopedRunId = contextRunIds.get(key)
+  return scopedRunId && activeRuns.has(scopedRunId) ? scopedRunId : undefined
 }
 
 export function clearActiveRun(runId: string): void {
+  const active = activeRuns.get(runId)
+  if (!active) return
+  if (active.cleanupTimer) clearTimeout(active.cleanupTimer)
   activeRuns.delete(runId)
-  if (currentRunId === runId) currentRunId = undefined
+  for (const cleanup of activeRunCleanupCallbacks) {
+    try {
+      cleanup(runId)
+    } catch {
+      // best-effort lifecycle cleanup only
+    }
+  }
+}
+
+function activeRunContextKey(context: object | undefined): object | undefined {
+  if (!context) return undefined
+  try {
+    const sessionManager = (context as { readonly sessionManager?: unknown }).sessionManager
+    if (sessionManager && typeof sessionManager === 'object') return sessionManager
+  } catch {
+    return undefined
+  }
+  return context
 }
 
 export function appendEvidence(
@@ -815,10 +844,13 @@ export function validateQaStep(run: ActiveQaRun, input: QaStepInput): QaStepVali
     if (input.evidenceIds.length === 0) invalid.push(`${input.status} step must cite at least one evidence id`)
   }
 
-  const knownEvidenceIds = new Set(run.evidence.map((record) => record.id))
+  const evidenceById = new Map(run.evidence.map((record) => [record.id, record] as const))
   for (const evidenceId of input.evidenceIds) {
-    if (!knownEvidenceIds.has(evidenceId)) {
+    const evidence = evidenceById.get(evidenceId)
+    if (!evidence) {
       invalid.push(`evidence ${evidenceId} was not captured during this run`)
+    } else if (requiresEvidence && evidence.isError) {
+      invalid.push(`${input.status} step cannot cite errored evidence ${evidenceId}`)
     }
   }
 
@@ -887,6 +919,8 @@ export function computeQaFinish(run: ActiveQaRun, input: QaFinishInput): QaFinis
   const blockers: string[] = []
   const failures: string[] = []
   const missingEvidence: string[] = []
+  const successfulEvidence = run.evidence.filter((record) => !record.isError)
+  const successfulEvidenceById = new Map(successfulEvidence.map((record) => [record.id, record] as const))
   const knownEvidenceIds = new Set(run.evidence.map((record) => record.id))
   const inputBugs = (input.bugs ?? []).map((bug) => ({
     claim: bug.claim,
@@ -905,7 +939,7 @@ export function computeQaFinish(run: ActiveQaRun, input: QaFinishInput): QaFinis
   for (const step of failedSteps) failures.push(`scenario ${step.scenarioId} failed: ${step.title}`)
 
   if (!run.acceptedPlan) blockers.push('no accepted qa_plan')
-  if (run.evidence.length === 0) blockers.push('no browser evidence captured during this run')
+  if (successfulEvidence.length === 0) blockers.push('no successful browser evidence captured during this run')
 
   const plannedIds = new Set(run.acceptedPlan?.scenarios.map((scenario) => scenario.scenarioId) ?? [])
   const outOfScopeIds = new Set(run.acceptedPlan?.outOfScope.map((item) => item.scenarioId) ?? [])
@@ -931,14 +965,18 @@ export function computeQaFinish(run: ActiveQaRun, input: QaFinishInput): QaFinis
 
   for (const required of run.spec.requiredEvidence) {
     if (required.scenarioId && outOfScopeIds.has(required.scenarioId)) continue
-    const found = run.evidence.some((record) => record.type === required.type)
-    if (!found) missingEvidence.push(`${required.type} (${required.purpose})`)
+    const found = run.steps.some((step) => {
+      if (step.status !== 'pass' && step.status !== 'fail') return false
+      if (required.scenarioId && step.scenarioId !== required.scenarioId) return false
+      return step.evidenceIds.some((evidenceId) => successfulEvidenceById.get(evidenceId)?.type === required.type)
+    })
+    if (!found) missingEvidence.push(`${required.type} (${required.purpose})${required.scenarioId ? ` for ${required.scenarioId}` : ''}`)
   }
   if (missingEvidence.length > 0) blockers.push(`missing required evidence: ${missingEvidence.join(', ')}`)
 
   const isFail = failedSteps.length > 0 || inputBugs.length > 0
   if (isFail) {
-    const screenshotsWithPath = run.evidence.filter((record) => record.type === 'screenshot' && record.artifactPaths.length > 0)
+    const screenshotsWithPath = successfulEvidence.filter((record) => record.type === 'screenshot' && record.artifactPaths.length > 0)
     if (screenshotsWithPath.length === 0) blockers.push('failed run lacks a screenshot evidence record with an artifact path')
   }
 

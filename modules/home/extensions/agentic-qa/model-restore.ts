@@ -1,5 +1,5 @@
 import type { ExtensionAPI, ExtensionContext } from '@mariozechner/pi-coding-agent'
-import { restoreCommandConfig, type RestoreState } from '../commands/config'
+import { restoreCommandConfig, type RestoreState } from '../commands/config.ts'
 
 const pendingQaRestores = new WeakMap<ExtensionAPI, Map<string, RestoreState>>()
 const restoreLifecycleRegistered = new WeakSet<ExtensionAPI>()

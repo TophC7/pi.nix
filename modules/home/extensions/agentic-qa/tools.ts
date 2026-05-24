@@ -9,11 +9,13 @@ import { createQaMissionFile, type QaMissionCreateInput } from './mission-create
 import { writeQaFinishArtifacts } from './artifacts.ts'
 import { restoreQaConfigForRun } from './model-restore.ts'
 import { clearPendingCapturesForRun } from './playwright-capture.ts'
-import { submitQaShardPlanToolInput, type QaShardPlanToolInput } from './shards.ts'
+import { hydrateQaShardWorkerRun, submitQaShardPlanToolInput, type QaShardPlanToolInput } from './shards.ts'
 import {
   QA_EVIDENCE_TYPE_HELP,
+  QA_EVIDENCE_TYPE_VALUES,
   bindActiveRunContext,
   clearActiveRun,
+  registerActiveRun,
   computeQaFinish,
   getActiveRun,
   recordAcceptedPlan,
@@ -27,13 +29,10 @@ import {
   type QaStepInput
 } from './run-state.ts'
 
-const EvidenceType = Type.Union([
-  Type.Literal('accessibility_snapshot'),
-  Type.Literal('screenshot'),
-  Type.Literal('console'),
-  Type.Literal('network'),
-  Type.Literal('observation')
-])
+const EvidenceType = Type.Union(
+  QA_EVIDENCE_TYPE_VALUES.map((value) => Type.Literal(value)),
+  { description: QA_EVIDENCE_TYPE_HELP }
+)
 
 const PlanEvidence = Type.Object({
   type: EvidenceType,
@@ -66,7 +65,7 @@ const FinishBug = Type.Object({
 })
 
 const ShardPlanEvidence = Type.Object({
-  type: Type.String({ description: QA_EVIDENCE_TYPE_HELP }),
+  type: EvidenceType,
   purpose: Type.String(),
   scenarioId: Type.Optional(Type.String())
 })
@@ -83,7 +82,7 @@ const ShardPlanScenario = Type.Object({
 })
 
 const MissionCreateEvidence = Type.Object({
-  type: Type.String({ description: QA_EVIDENCE_TYPE_HELP }),
+  type: EvidenceType,
   purpose: Type.String()
 })
 
@@ -205,7 +204,14 @@ async function executeQaMissionCreate(params: QaMissionCreateInput, cwd: string)
 }
 
 async function executeQaPlan(params: QaPlanInput, ctx?: ExtensionContext) {
-  const active = getActiveRun(params.runId)
+  let active = getActiveRun(params.runId)
+  if (!active && ctx?.cwd) {
+    const hydrated = hydrateQaShardWorkerRun(ctx.cwd, params.runId)
+    if (hydrated) {
+      registerActiveRun(hydrated)
+      active = getActiveRun(params.runId)
+    }
+  }
   if (!active) {
     const text = `qa_plan rejected: no active QA run with runId ${params.runId}. Start a /qa, /qa:staged, or /qa:freehand command first, then submit the plan using the runId from the command prompt.`
     return {
@@ -239,7 +245,14 @@ async function executeQaPlan(params: QaPlanInput, ctx?: ExtensionContext) {
 }
 
 async function executeQaStep(params: QaStepInput, ctx?: ExtensionContext) {
-  const active = getActiveRun(params.runId)
+  let active = getActiveRun(params.runId)
+  if (!active && ctx?.cwd) {
+    const hydrated = hydrateQaShardWorkerRun(ctx.cwd, params.runId)
+    if (hydrated) {
+      registerActiveRun(hydrated)
+      active = getActiveRun(params.runId)
+    }
+  }
   if (!active) {
     return {
       content: [{ type: 'text' as const, text: `qa_step rejected: no active QA run with runId ${params.runId}.` }],
@@ -267,7 +280,14 @@ async function executeQaStep(params: QaStepInput, ctx?: ExtensionContext) {
 
 async function executeQaFinish(params: QaFinishInput, cwd: string, pi: ExtensionAPI, ctx: Pick<ExtensionContext, 'ui'>) {
   try {
-    const active = getActiveRun(params.runId)
+    let active = getActiveRun(params.runId)
+    if (!active) {
+      const hydrated = hydrateQaShardWorkerRun(cwd, params.runId)
+      if (hydrated) {
+        registerActiveRun(hydrated)
+        active = getActiveRun(params.runId)
+      }
+    }
     if (!active) {
       return {
         content: [{ type: 'text' as const, text: `qa_finish rejected: no active QA run with runId ${params.runId}.` }],
