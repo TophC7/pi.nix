@@ -1,4 +1,5 @@
-import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync } from 'node:fs'
+import { mkdir, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import type { ExtensionAPI, ExtensionContext } from '@mariozechner/pi-coding-agent'
 import { containsCredentialLeak, isSafeArtifactPath } from './artifacts.ts'
@@ -29,6 +30,9 @@ const PLAYWRIGHT_TOOL_TYPES: Record<string, QaEvidenceType> = {
   playwright_browser_press_key: 'observation',
   playwright_browser_select_option: 'observation',
   playwright_browser_evaluate: 'observation',
+  playwright_browser_run_code: 'observation',
+  playwright_browser_tabs: 'observation',
+  playwright_browser_resize: 'observation',
   playwright_browser_drag: 'observation',
   playwright_browser_file_upload: 'observation',
   playwright_browser_wait_for: 'observation',
@@ -67,6 +71,12 @@ export function summarizePlaywrightArgs(toolName: string, args: unknown): string
     case 'playwright_browser_network_requests':
     case 'playwright_browser_evaluate':
       return summaryWith({ filename: record.filename, filter: record.filter, level: record.level })
+    case 'playwright_browser_run_code':
+      return summaryWith({ filename: record.filename, code: typeof record.code === 'string' ? `${record.code.length} chars` : undefined })
+    case 'playwright_browser_tabs':
+      return summaryWith({ action: record.action, index: record.index })
+    case 'playwright_browser_resize':
+      return summaryWith({ width: record.width, height: record.height })
     case 'playwright_browser_click':
     case 'playwright_browser_hover':
     case 'playwright_browser_press_key':
@@ -115,7 +125,9 @@ export function registerPlaywrightCapture(pi: ExtensionAPI): void {
     const capture = pending.get(callId)
     if (!capture) return
     pending.delete(callId)
-    finishCapture(capture, event)
+    const record = await finishCapture(capture, event)
+    if (!record) return
+    return appendQaEvidenceNotice(event, record)
   })
 }
 
@@ -165,8 +177,8 @@ export function beginCapture(event: unknown, cwd: string, ctx?: ExtensionContext
   }
 }
 
-export function finishCapture(capture: PendingCapture, event: unknown): QaEvidenceRecord | undefined {
-  const artifactPaths = capture.type === 'screenshot' ? persistScreenshotPayload(capture, event) : cleanupRequestedOutputPaths(capture)
+export async function finishCapture(capture: PendingCapture, event: unknown): Promise<QaEvidenceRecord | undefined> {
+  const artifactPaths = capture.type === 'screenshot' ? await persistScreenshotPayload(capture, event) : await cleanupRequestedOutputPaths(capture)
   const endedAtMs = Date.now()
   const summary = sanitizeSummary(summarizeToolResult(event))
   const isError = Boolean((event as { isError?: unknown }).isError)
@@ -181,6 +193,61 @@ export function finishCapture(capture: PendingCapture, event: unknown): QaEviden
     artifactPaths,
     isError
   })
+}
+
+interface ToolResultPatch {
+  readonly content: readonly unknown[]
+  readonly details?: unknown
+  readonly isError?: boolean
+}
+
+function appendQaEvidenceNotice(event: unknown, record: QaEvidenceRecord): ToolResultPatch {
+  const patch: { content: readonly unknown[]; details?: unknown; isError?: boolean } = {
+    content: [
+      ...readToolResultContent(event),
+      { type: 'text' as const, text: renderQaEvidenceNotice(record) }
+    ]
+  }
+  const details = readToolResultDetails(event)
+  if (details !== undefined) patch.details = details
+  const isError = readToolResultIsError(event)
+  if (isError !== undefined) patch.isError = isError
+  return patch
+}
+
+function renderQaEvidenceNotice(record: QaEvidenceRecord): string {
+  const lines = [`QA evidence captured: ${record.id} ${record.type} from ${record.sourceTool}.`]
+  if (record.isError) lines.push(`Errored evidence cannot support pass/fail qa_step assertions.`)
+  else lines.push(`Cite ${record.id} in qa_step when this observation supports the assertion.`)
+  if (record.artifactPaths.length > 0) lines.push(`Artifact: ${record.artifactPaths.join(', ')}`)
+  lines.push('Use qa_evidence_list if you need the current evidence id catalog.')
+  return lines.join('\n')
+}
+
+function readToolResultContent(event: unknown): readonly unknown[] {
+  if (!event || typeof event !== 'object') return []
+  const direct = (event as { content?: unknown }).content
+  if (Array.isArray(direct)) return direct
+  const result = (event as { result?: unknown }).result
+  const nested = result && typeof result === 'object' ? (result as { content?: unknown }).content : undefined
+  return Array.isArray(nested) ? nested : []
+}
+
+function readToolResultDetails(event: unknown): unknown {
+  if (!event || typeof event !== 'object') return undefined
+  const direct = (event as { details?: unknown }).details
+  if (direct !== undefined) return direct
+  const result = (event as { result?: unknown }).result
+  return result && typeof result === 'object' ? (result as { details?: unknown }).details : undefined
+}
+
+function readToolResultIsError(event: unknown): boolean | undefined {
+  if (!event || typeof event !== 'object') return undefined
+  const direct = (event as { isError?: unknown }).isError
+  if (typeof direct === 'boolean') return direct
+  const result = (event as { result?: unknown }).result
+  const nested = result && typeof result === 'object' ? (result as { isError?: unknown }).isError : undefined
+  return typeof nested === 'boolean' ? nested : undefined
 }
 
 export function summarizeToolResult(event: unknown): string {
@@ -202,33 +269,56 @@ export function summarizeToolResult(event: unknown): string {
   return ''
 }
 
-function persistScreenshotPayload(capture: PendingCapture, event: unknown): readonly string[] {
+async function persistScreenshotPayload(capture: PendingCapture, event: unknown): Promise<readonly string[]> {
   const image = extractImagePayload(event)
   const run = getActiveRun(capture.runId)
-  if (!image || !run) return capture.artifactPaths
+  if (!image || !run) return fallbackScreenshotArtifactPaths(capture, event)
 
   const nextEvidenceId = `E${getEvidence(capture.runId).length + 1}`
   const extension = screenshotExtension(image.mimeType)
   const target = path.resolve(capture.cwd, run.spec.relativeArtifactDir, `${nextEvidenceId}${extension}`)
   if (!isSafeArtifactPath(capture.cwd, target)) return capture.artifactPaths
 
-  mkdirSync(path.dirname(target), { recursive: true })
-  writeFileSync(target, Buffer.from(image.data, 'base64'))
+  await mkdir(path.dirname(target), { recursive: true })
+  await writeFile(target, Buffer.from(image.data, 'base64'))
   for (const stale of capture.requestedOutputPaths) {
-    if (path.resolve(stale.path) !== path.resolve(target)) removeRequestedOutputPath(capture.cwd, stale)
+    if (path.resolve(stale.path) !== path.resolve(target)) await removeRequestedOutputPath(capture.cwd, stale)
   }
   return [target]
 }
 
-function cleanupRequestedOutputPaths(capture: PendingCapture): readonly string[] {
-  for (const stale of capture.requestedOutputPaths) removeRequestedOutputPath(capture.cwd, stale)
+function fallbackScreenshotArtifactPaths(capture: PendingCapture, event: unknown): readonly string[] {
+  const paths = [...capture.artifactPaths]
+  for (const candidate of extractScreenshotPathsFromText(summarizeToolResult(event), capture.cwd)) paths.push(candidate)
+  return [...new Set(paths.map((candidate) => path.resolve(candidate)))]
+}
+
+function extractScreenshotPathsFromText(value: string, cwd: string): readonly string[] {
+  const paths: string[] = []
+  const patterns = [
+    /\]\(([^)\s]+\.(?:png|jpe?g|webp))\)/gi,
+    /(?:^|\s)(\.playwright-mcp\/[^\s)`'\"]+\.(?:png|jpe?g|webp))/gi
+  ]
+  for (const pattern of patterns) {
+    for (const match of value.matchAll(pattern)) {
+      const raw = match[1]?.trim()
+      if (!raw) continue
+      const resolved = path.isAbsolute(raw) ? raw : path.resolve(cwd, raw)
+      if (isSafeArtifactPath(cwd, resolved)) paths.push(resolved)
+    }
+  }
+  return paths
+}
+
+async function cleanupRequestedOutputPaths(capture: PendingCapture): Promise<readonly string[]> {
+  for (const stale of capture.requestedOutputPaths) await removeRequestedOutputPath(capture.cwd, stale)
   return []
 }
 
-function removeRequestedOutputPath(cwd: string, requested: RequestedOutputPath): void {
+async function removeRequestedOutputPath(cwd: string, requested: RequestedOutputPath): Promise<void> {
   if (requested.existedAtStart) return
   if (!isSafeArtifactPath(cwd, requested.path)) return
-  rmSync(requested.path, { force: true })
+  await rm(requested.path, { force: true })
 }
 
 interface ScreenshotPayload {

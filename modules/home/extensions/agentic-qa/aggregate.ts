@@ -94,11 +94,11 @@ export function computeAggregateQaFinish(cwd: string, input: AggregateQaReportIn
     }
 
     for (const planScenario of report.acceptedPlan?.scenarios ?? []) acceptedScenarios.push(planScenario)
-    for (const blocker of report.blockers ?? []) blockers.push(`shard ${shard.shardId}: ${blocker}`)
-    for (const failure of report.failures ?? []) failures.push(`shard ${shard.shardId}: ${failure}`)
-    for (const missing of report.missingEvidence ?? []) missingEvidence.push(`shard ${shard.shardId}: ${missing}`)
-    for (const note of report.safetyNotes ?? []) safetyNotes.push(`shard ${shard.shardId}: ${note}`)
-    for (const next of report.nextSteps ?? []) nextSteps.push(`shard ${shard.shardId}: ${next}`)
+    for (const blocker of report.blockers ?? []) blockers.push(`shard ${shard.shardId}: ${remapChildEvidenceText(report, blocker, evidenceIds)}`)
+    for (const failure of report.failures ?? []) failures.push(`shard ${shard.shardId}: ${remapChildEvidenceText(report, failure, evidenceIds)}`)
+    for (const missing of report.missingEvidence ?? []) missingEvidence.push(`shard ${shard.shardId}: ${remapChildEvidenceText(report, missing, evidenceIds)}`)
+    for (const note of report.safetyNotes ?? []) safetyNotes.push(`shard ${shard.shardId}: ${remapChildEvidenceText(report, note, evidenceIds)}`)
+    for (const next of report.nextSteps ?? []) nextSteps.push(`shard ${shard.shardId}: ${remapChildEvidenceText(report, next, evidenceIds)}`)
   }
 
   for (const shard of input.shardState.shards) {
@@ -207,6 +207,10 @@ function readChildReport(cwd: string, shard: QaShardStateEntry): { readonly repo
 
 function childEvidenceKey(report: ChildReportJson, evidenceId: string): string {
   return `${report.runId ?? 'child'}:${evidenceId}`
+}
+
+function remapChildEvidenceText(report: ChildReportJson, text: string, evidenceIds: ReadonlyMap<string, string>): string {
+  return text.replace(/\bE\d+\b/g, (evidenceId) => evidenceIds.get(childEvidenceKey(report, evidenceId)) ?? evidenceId)
 }
 
 function unique(values: readonly string[]): string[] {

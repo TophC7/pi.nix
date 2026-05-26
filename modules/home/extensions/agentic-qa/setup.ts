@@ -157,9 +157,24 @@ async function runQaEnvironmentSetupSubagent(
     `qa:${spec.runId}:setup`
   )
   const text = extractSubagentText(response).trim()
-  const blocked = text.match(/^SETUP_BLOCKED\s*:\s*(.+)$/i)
-  if (blocked) throw new Error(`${label}: setup blocked: ${blocked[1]?.trim() || 'no reason supplied'}`)
-  if (text !== 'SETUP_OK') throw new Error(`${label}: setup worker returned malformed status: ${text || 'empty response'}`)
+  const status = parseQaSetupWorkerStatus(text)
+  if (status.kind === 'blocked') throw new Error(`${label}: setup blocked: ${status.reason}`)
+  if (status.kind === 'malformed') throw new Error(`${label}: setup worker returned malformed status: ${text || 'empty response'}`)
+}
+
+export type QaSetupWorkerStatus =
+  | { readonly kind: 'ok' }
+  | { readonly kind: 'blocked'; readonly reason: string }
+  | { readonly kind: 'malformed' }
+
+export function parseQaSetupWorkerStatus(text: string): QaSetupWorkerStatus {
+  const finalLine = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).at(-1) ?? ''
+  if (finalLine === 'SETUP_OK') return { kind: 'ok' }
+
+  const blocked = finalLine.match(/^SETUP_BLOCKED\s*:\s*(.+)$/i)
+  if (blocked) return { kind: 'blocked', reason: blocked[1]?.trim() || 'no reason supplied' }
+
+  return { kind: 'malformed' }
 }
 
 function isNoopSetupItem(item: string): boolean {

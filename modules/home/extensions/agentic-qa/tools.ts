@@ -5,6 +5,7 @@
 
 import type { ExtensionAPI, ExtensionContext } from '@mariozechner/pi-coding-agent'
 import { Type } from 'typebox'
+import { singleLine, truncate } from '../pi-lib/subagents/render-helpers.ts'
 import { createQaMissionFile, type QaMissionCreateInput } from './mission-create.ts'
 import { writeQaFinishArtifacts } from './artifacts.ts'
 import { restoreQaConfigForRun } from './model-restore.ts'
@@ -17,16 +18,20 @@ import {
   clearActiveRun,
   registerActiveRun,
   computeQaFinish,
+  findMissingRequiredEvidence,
   getActiveRun,
+  getEvidence,
   recordAcceptedPlan,
   recordQaStep,
   validateQaPlan,
   validateQaStep,
   type AcceptedQaPlan,
+  type QaEvidenceRecord,
   type QaFinishInput,
   type QaFinishResult,
   type QaPlanInput,
-  type QaStepInput
+  type QaStepInput,
+  type QaStepRecord
 } from './run-state.ts'
 
 const EvidenceType = Type.Union(
@@ -153,7 +158,7 @@ export function registerQaTools(pi: ExtensionAPI): void {
     description:
       'Record one structured QA assertion against the active run. Pass and fail steps require expected, observed, and at least one evidence id captured during this run. Invalid steps are rejected.',
     promptSnippet:
-      'Use qa_step after each meaningful browser assertion. Cite evidence ids that Pi assigned (E1, E2, ...). Title describes the assertion, not the click.',
+      'Use qa_step after each meaningful browser assertion. Cite E# evidence ids that Pi assigned. If rejected or unsure, call qa_evidence_list and retry before qa_finish. Title describes the assertion, not the click.',
     parameters: Type.Object({
       runId: Type.String(),
       scenarioId: Type.String(),
@@ -165,6 +170,20 @@ export function registerQaTools(pi: ExtensionAPI): void {
       bugs: Type.Optional(Type.Array(Type.String()))
     }),
     execute: async (_id, params, _signal, _onUpdate, ctx) => executeQaStep(params, ctx)
+  })
+
+  pi.registerTool({
+    name: 'qa_evidence_list',
+    label: 'QA Evidence List',
+    description:
+      'List QA evidence ids captured so far for an active run, plus any still-missing required evidence for a scenario. Use when choosing evidenceIds for qa_step or repairing rejected citations.',
+    promptSnippet:
+      'Use qa_evidence_list when you need current QA evidence ids. Cite E# ids in qa_step; do not cite Playwright artifact paths.',
+    parameters: Type.Object({
+      runId: Type.String(),
+      scenarioId: Type.Optional(Type.String({ description: 'Optional scenario id, for example S1, to show scenario-specific missing evidence.' }))
+    }),
+    execute: async (_id, params, _signal, _onUpdate, ctx) => executeQaEvidenceList(params, ctx)
   })
 
   pi.registerTool({
@@ -203,15 +222,20 @@ async function executeQaMissionCreate(params: QaMissionCreateInput, cwd: string)
   }
 }
 
-async function executeQaPlan(params: QaPlanInput, ctx?: ExtensionContext) {
-  let active = getActiveRun(params.runId)
-  if (!active && ctx?.cwd) {
-    const hydrated = hydrateQaShardWorkerRun(ctx.cwd, params.runId)
+function getOrHydrateQaRun(runId: string, cwd: string | undefined) {
+  let active = getActiveRun(runId)
+  if (!active && cwd) {
+    const hydrated = hydrateQaShardWorkerRun(cwd, runId)
     if (hydrated) {
       registerActiveRun(hydrated)
-      active = getActiveRun(params.runId)
+      active = getActiveRun(runId)
     }
   }
+  return active
+}
+
+async function executeQaPlan(params: QaPlanInput, ctx?: ExtensionContext) {
+  const active = getOrHydrateQaRun(params.runId, ctx?.cwd)
   if (!active) {
     const text = `qa_plan rejected: no active QA run with runId ${params.runId}. Start a /qa, /qa:staged, or /qa:freehand command first, then submit the plan using the runId from the command prompt.`
     return {
@@ -245,14 +269,7 @@ async function executeQaPlan(params: QaPlanInput, ctx?: ExtensionContext) {
 }
 
 async function executeQaStep(params: QaStepInput, ctx?: ExtensionContext) {
-  let active = getActiveRun(params.runId)
-  if (!active && ctx?.cwd) {
-    const hydrated = hydrateQaShardWorkerRun(ctx.cwd, params.runId)
-    if (hydrated) {
-      registerActiveRun(hydrated)
-      active = getActiveRun(params.runId)
-    }
-  }
+  const active = getOrHydrateQaRun(params.runId, ctx?.cwd)
   if (!active) {
     return {
       content: [{ type: 'text' as const, text: `qa_step rejected: no active QA run with runId ${params.runId}.` }],
@@ -264,30 +281,45 @@ async function executeQaStep(params: QaStepInput, ctx?: ExtensionContext) {
 
   const result = validateQaStep(active, params)
   if (!result.accepted) {
+    const evidence = getEvidence(params.runId)
     return {
-      content: [{ type: 'text' as const, text: `qa_step rejected:\n${result.invalid.map((entry) => `- ${entry}`).join('\n')}` }],
-      details: result,
+      content: [{ type: 'text' as const, text: renderStepRejection(params, result.invalid, evidence) }],
+      details: { ...result, evidence: summarizeEvidenceDetails(evidence) },
       isError: true
     }
   }
   const record = recordQaStep(active, params)
+  const missingEvidence = findMissingRequiredEvidence(active, { scenarioId: record.scenarioId })
   return {
-    content: [{ type: 'text' as const, text: `qa_step accepted: ${record.scenarioId} ${record.title} [${record.status}]` }],
-    details: { accepted: true, record },
+    content: [{ type: 'text' as const, text: renderStepAccepted(record, missingEvidence.map((gap) => gap.message), active.evidence) }],
+    details: { accepted: true, record, missingEvidence },
+    isError: false
+  }
+}
+
+async function executeQaEvidenceList(params: { readonly runId: string; readonly scenarioId?: string }, ctx?: ExtensionContext) {
+  const active = getOrHydrateQaRun(params.runId, ctx?.cwd)
+  if (!active) {
+    return {
+      content: [{ type: 'text' as const, text: `qa_evidence_list rejected: no active QA run with runId ${params.runId}.` }],
+      details: { accepted: false, invalid: ['no active QA run'] },
+      isError: true
+    }
+  }
+  bindActiveRunContext(ctx, params.runId)
+  const evidence = getEvidence(params.runId)
+  const missingEvidence = findMissingRequiredEvidence(active, { scenarioId: params.scenarioId })
+  return {
+    content: [{ type: 'text' as const, text: renderEvidenceList(params.runId, params.scenarioId, evidence, missingEvidence.map((gap) => gap.message)) }],
+    details: { accepted: true, evidence: summarizeEvidenceDetails(evidence), missingEvidence },
     isError: false
   }
 }
 
 async function executeQaFinish(params: QaFinishInput, cwd: string, pi: ExtensionAPI, ctx: Pick<ExtensionContext, 'ui'>) {
+  let shouldCloseRun = true
   try {
-    let active = getActiveRun(params.runId)
-    if (!active) {
-      const hydrated = hydrateQaShardWorkerRun(cwd, params.runId)
-      if (hydrated) {
-        registerActiveRun(hydrated)
-        active = getActiveRun(params.runId)
-      }
-    }
+    const active = getOrHydrateQaRun(params.runId, cwd)
     if (!active) {
       return {
         content: [{ type: 'text' as const, text: `qa_finish rejected: no active QA run with runId ${params.runId}.` }],
@@ -299,6 +331,14 @@ async function executeQaFinish(params: QaFinishInput, cwd: string, pi: Extension
     bindActiveRunContext(ctx, params.runId)
 
     const result = computeQaFinish(active, params)
+    if (failedRunLacksScreenshot(result)) {
+      shouldCloseRun = false
+      return {
+        content: [{ type: 'text' as const, text: renderFinishNeedsScreenshot(result, active.evidence) }],
+        details: { ...result, evidence: summarizeEvidenceDetails(active.evidence), needsScreenshot: true },
+        isError: true
+      }
+    }
     const artifacts = await writeQaFinishArtifacts(cwd, result)
     const text = `${renderFinishSummary(result)}\n${renderArtifactSummary(artifacts)}`
     return {
@@ -307,9 +347,11 @@ async function executeQaFinish(params: QaFinishInput, cwd: string, pi: Extension
       isError: result.status !== 'pass' || artifacts.blocked
     }
   } finally {
-    clearPendingCapturesForRun(params.runId)
-    clearActiveRun(params.runId)
-    await restoreQaConfigForRun(pi, ctx, params.runId)
+    if (shouldCloseRun) {
+      clearPendingCapturesForRun(params.runId)
+      clearActiveRun(params.runId)
+      await restoreQaConfigForRun(pi, ctx, params.runId)
+    }
   }
 }
 
@@ -363,6 +405,84 @@ function renderFinishSummary(result: QaFinishResult): string {
     for (const item of result.missingEvidence) lines.push(`- ${item}`)
   }
   return lines.join('\n')
+}
+
+function renderStepRejection(input: QaStepInput, invalid: readonly string[], evidence: readonly QaEvidenceRecord[]): string {
+  const lines = ['qa_step rejected:', ...invalid.map((entry) => `- ${entry}`)]
+  if (input.evidenceIds.some((id) => !/^E\d+$/i.test(id.trim()))) {
+    lines.push('Evidence ids must be QA ids like E1, E2. Do not cite .playwright-mcp paths, screenshot filenames, or artifact paths.')
+  }
+  lines.push(...renderEvidenceCatalog(evidence))
+  lines.push('Retry qa_step with valid E# evidenceIds before qa_finish.')
+  return lines.join('\n')
+}
+
+function renderStepAccepted(record: QaStepRecord, missingEvidence: readonly string[], evidence: readonly QaEvidenceRecord[]): string {
+  const lines = [`qa_step accepted: ${record.scenarioId} ${record.title} [${record.status}]`]
+  if ((record.status === 'fail' || record.bugs.length > 0) && !hasScreenshotArtifact(evidence)) {
+    lines.push('This fail/bug will require screenshot evidence before qa_finish. Call playwright_browser_take_screenshot, then cite that E# in qa_step or qa_finish bugs.')
+  }
+  if (missingEvidence.length > 0) {
+    lines.push(`Scenario ${record.scenarioId} still missing required evidence:`)
+    for (const item of missingEvidence) lines.push(`- ${item}`)
+    lines.push('Capture or cite those evidence types before qa_finish to avoid inconclusive status.')
+  }
+  return lines.join('\n')
+}
+
+function failedRunLacksScreenshot(result: QaFinishResult): boolean {
+  return result.blockers.some((blocker) => blocker === 'failed run lacks a screenshot evidence record with an artifact path')
+}
+
+function renderFinishNeedsScreenshot(result: QaFinishResult, evidence: readonly QaEvidenceRecord[]): string {
+  return [
+    'qa_finish rejected: failed run needs screenshot evidence before report finalization.',
+    'Call playwright_browser_take_screenshot now, then retry qa_finish. Pi will append a QA evidence id and persist the image artifact.',
+    ...renderEvidenceCatalog(evidence),
+    'Current blockers:',
+    ...result.blockers.map((blocker) => `- ${blocker}`)
+  ].join('\n')
+}
+
+function renderEvidenceList(runId: string, scenarioId: string | undefined, evidence: readonly QaEvidenceRecord[], missingEvidence: readonly string[]): string {
+  const lines = [`qa_evidence_list: ${runId}${scenarioId ? ` ${scenarioId}` : ''}`]
+  lines.push(...renderEvidenceCatalog(evidence))
+  if (missingEvidence.length > 0) {
+    lines.push('Missing required evidence:')
+    for (const item of missingEvidence) lines.push(`- ${item}`)
+  } else {
+    lines.push('Missing required evidence: none')
+  }
+  return lines.join('\n')
+}
+
+function renderEvidenceCatalog(evidence: readonly QaEvidenceRecord[]): string[] {
+  if (evidence.length === 0) return ['Available evidence: none captured yet. Run Playwright direct tools first.']
+  return ['Available evidence:', ...evidence.map((record) => `- ${formatEvidenceRecord(record)}`)]
+}
+
+function hasScreenshotArtifact(evidence: readonly QaEvidenceRecord[]): boolean {
+  return evidence.some((record) => record.type === 'screenshot' && !record.isError && record.artifactPaths.length > 0)
+}
+
+function summarizeEvidenceDetails(evidence: readonly QaEvidenceRecord[]) {
+  return evidence.map((record) => ({
+    id: record.id,
+    type: record.type,
+    sourceTool: record.sourceTool,
+    isError: record.isError,
+    artifactPaths: [...record.artifactPaths]
+  }))
+}
+
+function formatEvidenceRecord(record: QaEvidenceRecord): string {
+  const parts = [`${record.id} ${record.type}`, `[${record.isError ? 'error' : 'ok'}]`, `source=${record.sourceTool}`]
+  if (record.artifactPaths.length > 0) parts.push(`artifacts=${record.artifactPaths.join(',')}`)
+  const input = truncate(singleLine(record.inputSummary ?? ''), 90)
+  const summary = truncate(singleLine(record.summary ?? ''), 120)
+  if (input) parts.push(`input=${input}`)
+  if (summary) parts.push(`summary=${summary}`)
+  return parts.join(' ')
 }
 
 function renderPlanResult(result: ReturnType<typeof validateQaPlan>): string {

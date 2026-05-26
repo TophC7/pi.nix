@@ -27,7 +27,7 @@ import {
   type StagedQaContext
 } from './missions.ts'
 import { deferQaRestoreUntilFinish, restoreQaConfigForRun } from './model-restore.ts'
-import { QA_SYSTEM_PROMPT } from './prompt.ts'
+import { QA_SYSTEM_PROMPT, renderQaEvidenceProtocolBullets } from './prompt.ts'
 import {
   compileFreehandRunSpec,
   compileMissionRunSpec,
@@ -470,9 +470,7 @@ function qaShellNote(artifacts: QaArtifactPlan): string {
     'Do not claim browser pass/fail without browser evidence.',
     `Use runId ${artifacts.runId} for qa_plan, qa_step, and qa_finish.`,
     `QA artifacts for this run belong under ${artifacts.relativeRunDir}/. Pi will write report.json and report.md there when qa_finish is called.`,
-    `Create ${artifacts.relativeArtifactDir}/ before screenshots if the screenshot tool needs the directory to exist.`,
-    `Pass screenshot filenames under ${artifacts.relativeArtifactDir}/ (for example ${artifacts.relativeArtifactDir}/E1.png) so Pi can capture the artifact path automatically and inline screenshots in the report.`,
-    'Pi assigns evidence ids (E1, E2, ...) when Playwright tools run; do not invent them.'
+    renderQaEvidenceProtocolBullets()
   ].join('\n')
 }
 

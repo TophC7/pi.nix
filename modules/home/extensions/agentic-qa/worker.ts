@@ -5,6 +5,7 @@
 
 import type { ExtensionAPI, ExtensionCommandContext } from '@mariozechner/pi-coding-agent'
 import { fenced } from './markdown.ts'
+import { renderQaEvidenceProtocolBullets } from './prompt.ts'
 import { registerActiveRun, renderRunSpec, type QaRunSpec } from './run-state.ts'
 import type { QaShardSpec, QaShardStateEntry } from './shards.ts'
 
@@ -79,7 +80,7 @@ export function buildQaShardWorkerTask(input: PreparedQaShardWorker): string {
     `- Use child run id ${input.childSpec.runId} for qa_plan, qa_step, and qa_finish.`,
     '- Call qa_plan before any browser pass/fail claim.',
     '- Use Playwright browser tools to collect real evidence.',
-    '- Do not pass manual filename values to Playwright evidence tools; Pi owns QA artifacts.',
+    renderQaEvidenceProtocolBullets(),
     '- Environment setup has already run once before shard launch; do not start duplicate dev servers.',
     '- Treat Setup lines as context unless scenario-local setup is required for this shard.',
     '- Use qa_step after each meaningful browser assertion.',

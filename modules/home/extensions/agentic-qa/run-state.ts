@@ -530,12 +530,18 @@ export interface QaEvidenceRecord {
   readonly isError: boolean
 }
 
-interface ActiveQaRun {
+export interface ActiveQaRun {
   readonly spec: QaRunSpec
   acceptedPlan?: AcceptedQaPlan
   evidence: QaEvidenceRecord[]
   steps: QaStepRecord[]
   readonly cleanupTimer?: ReturnType<typeof setTimeout>
+}
+
+export interface QaRequiredEvidenceGap {
+  readonly required: QaRequiredEvidence
+  readonly message: string
+  readonly candidateEvidenceIds: readonly string[]
 }
 
 const ACTIVE_QA_RUN_TTL_MS = 4 * 60 * 60 * 1000
@@ -615,6 +621,73 @@ export function getEvidence(runId: string): readonly QaEvidenceRecord[] {
 
 export function getSteps(runId: string): readonly QaStepRecord[] {
   return activeRuns.get(runId)?.steps ?? []
+}
+
+export function findMissingRequiredEvidence(
+  run: ActiveQaRun,
+  options: { readonly scenarioId?: string; readonly outOfScopeIds?: ReadonlySet<string> } = {}
+): readonly QaRequiredEvidenceGap[] {
+  const successfulEvidence = run.evidence.filter((record) => !record.isError)
+  const successfulEvidenceById = new Map(successfulEvidence.map((record) => [record.id, record] as const))
+  const successfulEvidenceIdsByType = indexEvidenceIdsByType(successfulEvidence)
+  const gaps: QaRequiredEvidenceGap[] = []
+
+  for (const required of run.spec.requiredEvidence) {
+    if (required.scenarioId && options.outOfScopeIds?.has(required.scenarioId)) continue
+    if (!requiredEvidenceAppliesToScenario(run, required, options.scenarioId)) continue
+
+    const found = run.steps.some((step) => stepSatisfiesRequiredEvidence(step, required, successfulEvidenceById, options.scenarioId))
+    if (!found) {
+      const gap = {
+        required,
+        candidateEvidenceIds: successfulEvidenceIdsByType.get(required.type) ?? []
+      }
+      gaps.push({ ...gap, message: renderMissingRequiredEvidence(gap) })
+    }
+  }
+
+  return gaps
+}
+
+function renderMissingRequiredEvidence(gap: Pick<QaRequiredEvidenceGap, 'required' | 'candidateEvidenceIds'>): string {
+  const required = gap.required
+  const base = `${required.type} (${required.purpose})${required.scenarioId ? ` for ${required.scenarioId}` : ''}`
+  if (gap.candidateEvidenceIds.length === 0) return base
+  return `${base}; captured candidate ids not cited by a passing/failing qa_step: ${gap.candidateEvidenceIds.join(', ')}`
+}
+
+function indexEvidenceIdsByType(evidence: readonly QaEvidenceRecord[]): ReadonlyMap<QaEvidenceType, readonly string[]> {
+  const byType = new Map<QaEvidenceType, string[]>()
+  for (const record of evidence) {
+    const ids = byType.get(record.type) ?? []
+    ids.push(record.id)
+    byType.set(record.type, ids)
+  }
+  return byType
+}
+
+function requiredEvidenceAppliesToScenario(run: ActiveQaRun, required: QaRequiredEvidence, scenarioId: string | undefined): boolean {
+  if (!scenarioId) return true
+  if (required.scenarioId) return required.scenarioId === scenarioId
+  if (run.spec.scenarios.length === 1) return true
+  const scenario = run.spec.scenarios.find((entry) => entry.id === scenarioId)
+  return scenario?.requiredEvidence.some((candidate) => evidenceRequirementKey(candidate) === evidenceRequirementKey(required)) ?? false
+}
+
+function evidenceRequirementKey(required: QaRequiredEvidence): string {
+  return `${required.type}::${required.purpose}`
+}
+
+function stepSatisfiesRequiredEvidence(
+  step: QaStepRecord,
+  required: QaRequiredEvidence,
+  successfulEvidenceById: ReadonlyMap<string, QaEvidenceRecord>,
+  scenarioId: string | undefined
+): boolean {
+  if (step.status !== 'pass' && step.status !== 'fail') return false
+  if (scenarioId && step.scenarioId !== scenarioId) return false
+  if (required.scenarioId && step.scenarioId !== required.scenarioId) return false
+  return step.evidenceIds.some((evidenceId) => successfulEvidenceById.get(evidenceId)?.type === required.type)
 }
 
 export function recordAcceptedPlan(runId: string, plan: AcceptedQaPlan): void {
@@ -918,9 +991,7 @@ export type QaReportStatus = 'pass' | 'fail' | 'inconclusive'
 export function computeQaFinish(run: ActiveQaRun, input: QaFinishInput): QaFinishResult {
   const blockers: string[] = []
   const failures: string[] = []
-  const missingEvidence: string[] = []
   const successfulEvidence = run.evidence.filter((record) => !record.isError)
-  const successfulEvidenceById = new Map(successfulEvidence.map((record) => [record.id, record] as const))
   const knownEvidenceIds = new Set(run.evidence.map((record) => record.id))
   const inputBugs = (input.bugs ?? []).map((bug) => ({
     claim: bug.claim,
@@ -963,15 +1034,7 @@ export function computeQaFinish(run: ActiveQaRun, input: QaFinishInput): QaFinis
     if (entry.status === 'unplanned') blockers.push(`scenario ${entry.scenarioId} is not covered by the accepted plan`)
   }
 
-  for (const required of run.spec.requiredEvidence) {
-    if (required.scenarioId && outOfScopeIds.has(required.scenarioId)) continue
-    const found = run.steps.some((step) => {
-      if (step.status !== 'pass' && step.status !== 'fail') return false
-      if (required.scenarioId && step.scenarioId !== required.scenarioId) return false
-      return step.evidenceIds.some((evidenceId) => successfulEvidenceById.get(evidenceId)?.type === required.type)
-    })
-    if (!found) missingEvidence.push(`${required.type} (${required.purpose})${required.scenarioId ? ` for ${required.scenarioId}` : ''}`)
-  }
+  const missingEvidence = findMissingRequiredEvidence(run, { outOfScopeIds }).map((gap) => gap.message)
   if (missingEvidence.length > 0) blockers.push(`missing required evidence: ${missingEvidence.join(', ')}`)
 
   const isFail = failedSteps.length > 0 || inputBugs.length > 0

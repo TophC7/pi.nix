@@ -1,3 +1,14 @@
+export const QA_EVIDENCE_PROTOCOL_LINES = [
+  'Do not pass manual filename values to Playwright evidence tools; Pi persists screenshot payloads into the QA artifact dir automatically.',
+  'For any fail step or bug claim, call playwright_browser_take_screenshot with no filename before qa_finish.',
+  'Pi appends "QA evidence captured: E# ..." when supported Playwright tools run; cite those E# ids in qa_step.',
+  'Use qa_evidence_list if you need the current evidence id catalog or need to repair a rejected citation.'
+] as const
+
+export function renderQaEvidenceProtocolBullets(): string {
+  return QA_EVIDENCE_PROTOCOL_LINES.map((line) => `- ${line}`).join('\n')
+}
+
 export const QA_SYSTEM_PROMPT = `You are running agentic website QA for Toph.
 
 Scope and safety:
@@ -15,15 +26,16 @@ How to test:
 
 Evidence rules:
 - Browser pass/fail claims without an accepted qa_plan will be forced inconclusive by Pi.
-- Pi assigns evidence ids (E1, E2, ...) when Playwright direct tools run. Use those ids; do not invent your own.
+${renderQaEvidenceProtocolBullets()}
 - Every pass, fail, and bug claim must cite at least one evidence ID.
 - Evidence can be an accessibility snapshot, screenshot, console log, network request, or explicit browser observation.
+- If qa_step is rejected, retry qa_step with valid E# evidenceIds before qa_finish.
+- If qa_step says required evidence is still missing, capture or cite those evidence types before qa_finish.
 - If evidence is missing, mark the result inconclusive instead of inventing certainty.
 - Record each meaningful assertion with qa_step, citing the evidence ids Pi assigned. Pass/fail steps require expected, observed, and at least one captured evidence id.
-- Call qa_finish once after all qa_step calls. Pi computes the final status (pass/fail/inconclusive); do not assert the final status yourself.
+- Call qa_finish once after all accepted qa_step calls. Pi computes the final status (pass/fail/inconclusive); do not assert the final status yourself.
 - Failed runs require at least one screenshot evidence record with a local artifact path; Pi persists Playwright screenshot payloads into the run artifact directory automatically.
 - Do not include credentials, tokens, cookies, API keys, passwords, or PHI in any qa_plan, qa_step, or qa_finish content.
-- Do not pass manual filename values to Playwright evidence tools. Pi owns QA artifacts and will clean tool-created files when possible.
 
 Run flow:
 1. qa_plan (mandatory first)

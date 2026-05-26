@@ -5,15 +5,10 @@
 
 import { copyFile, mkdir, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
+import { singleLine } from '../pi-lib/subagents/render-helpers.ts'
 import { QA_ARTIFACT_SUBDIR, safePathSegment, toMarkdownPath } from './artifact-paths.ts'
 import { isLocalhostQaTarget } from './config.ts'
-import type {
-  QaEvidenceRecord,
-  QaFinishBug,
-  QaFinishResult,
-  QaScenarioCoverage,
-  QaStepRecord
-} from './run-state.ts'
+import type { QaEvidenceRecord, QaFinishBug, QaFinishResult, QaScenarioCoverage } from './run-state.ts'
 
 const MAX_ARTIFACT_BYTES = 20 * 1024 * 1024
 const SCREENSHOT_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp'])
@@ -172,94 +167,425 @@ function buildReportJson(finish: QaFinishResult, artifacts: ReadonlyMap<string, 
 export function renderReportMarkdown(finish: QaFinishResult, artifacts: ReadonlyMap<string, readonly EvidenceArtifact[]>): string {
   const lines: string[] = []
   const duration = computeRunDuration(finish)
+  const evidenceById = new Map(finish.evidence.map((entry) => [entry.id, entry] as const))
+  const scenarioRows = buildScenarioResults(finish)
+
   lines.push(`# QA Report: ${finish.spec.slug}`)
   lines.push('')
-  lines.push('| Status | Target | Mode | Run ID | Duration |')
-  lines.push('|---|---|---|---|---|')
-  lines.push(`| ${finish.status} | ${finish.spec.target} | ${finish.spec.mode} | ${finish.runId} | ${duration} |`)
+
+  lines.push('## Result')
   lines.push('')
-  lines.push('## Summary')
-  lines.push(finish.summary || '<no summary>')
+  lines.push(`Status: ${statusLabel(finish.status)}`)
+  lines.push(`Target: ${finish.spec.target || 'unknown'}`)
+  lines.push(`Run: ${finish.runId}`)
+  lines.push(`Duration: ${duration}`)
   lines.push('')
 
-  lines.push('## Coverage')
-  if (finish.coverage.length === 0) lines.push('- no scenarios in run spec')
-  else for (const entry of finish.coverage) lines.push(`- ${coverageMarker(entry)} ${entry.scenarioId} ${entry.title}`)
-  lines.push(`- Missing evidence: ${finish.missingEvidence.length ? finish.missingEvidence.join(', ') : 'none'}`)
-  if (finish.blockers.length) {
-    lines.push('- Blockers:')
-    for (const blocker of finish.blockers) lines.push(`  - ${blocker}`)
+  lines.push('## Executive Summary')
+  lines.push('')
+  for (const sentence of buildExecutiveSummary(finish, scenarioRows)) lines.push(escapeMarkdownText(sentence))
+  lines.push('')
+
+  lines.push('## Key Findings')
+  lines.push('')
+  lines.push('| Scenario | Finding | Evidence |')
+  lines.push('|---|---|---|')
+  for (const finding of buildKeyFindings(finish)) {
+    lines.push(`| ${tableCell(finding.scenario)} | ${tableCell(finding.finding)} | ${tableCell(finding.evidence)} |`)
   }
   lines.push('')
 
-  lines.push('## Steps')
+  lines.push('## Scenario Results')
+  lines.push('')
+  lines.push('| Scenario | Result | Notes |')
+  lines.push('|---|---|---|')
+  for (const row of scenarioRows) {
+    lines.push(`| ${tableCell(row.scenario)} | ${tableCell(row.result)} | ${tableCell(row.notes)} |`)
+  }
+  lines.push('')
+
+  lines.push('## Ship Readiness')
+  lines.push('')
+  appendShipReadiness(lines, finish)
+  lines.push('')
+
+  lines.push('## Recommended Next Steps')
+  lines.push('')
+  appendNumberedList(lines, buildRecommendedNextSteps(finish))
+  lines.push('')
+
+  lines.push('---')
+  lines.push('')
+  lines.push('# Details')
+  lines.push('')
+  lines.push('Canonical run data: [report.json](report.json).')
+  lines.push('')
+
+  lines.push('## Assertions')
+  lines.push('')
   if (finish.steps.length === 0) lines.push('- no qa_step records were submitted')
   else {
-    const evidenceById = new Map(finish.evidence.map((entry) => [entry.id, entry] as const))
-    let index = 0
     for (const step of finish.steps) {
-      index += 1
-      lines.push(`### ${stepMarker(step)} ${index}. ${step.title} [${step.scenarioId}]`)
-      lines.push('Expected:')
-      if (step.expected.length === 0) lines.push('- (none)')
-      else for (const value of step.expected) lines.push(`- ${value}`)
-      lines.push('Observed:')
-      if (step.observed.length === 0) lines.push('- (none)')
-      else for (const value of step.observed) lines.push(`- ${value}`)
-      lines.push('Evidence:')
+      lines.push(`### ${step.scenarioId} ${escapeMarkdownText(step.title)}`)
+      lines.push('')
+      lines.push(`Result: ${statusLabel(step.status)}`)
+      lines.push('')
+      lines.push('**Expected**')
+      lines.push('')
+      appendBulletList(lines, step.expected.length ? step.expected : ['(none)'])
+      lines.push('')
+      lines.push('**Observed**')
+      lines.push('')
+      appendBulletList(lines, step.observed.length ? step.observed : ['(none)'])
+      lines.push('')
+      lines.push('**Evidence**')
+      lines.push('')
       if (step.evidenceIds.length === 0) lines.push('- (none cited)')
       else for (const evidenceId of step.evidenceIds) {
         const evidence = evidenceById.get(evidenceId)
-        lines.push(`- ${evidenceId}${evidence ? ` ${evidence.type} \u2014 ${formatEvidenceSummary(evidence)}` : ' (unknown)'}`)
-        appendArtifactImages(lines, evidenceId, artifacts)
+        lines.push(`- ${escapeMarkdownText(formatEvidenceReference(evidenceId, evidence))}${formatEvidenceLinks(evidence, evidenceId, artifacts)}`)
       }
       lines.push('')
     }
   }
 
-  lines.push('## Bugs')
-  if (finish.bugs.length === 0) lines.push('- none')
-  else for (const bug of finish.bugs) lines.push(`- ${bug.claim}${formatEvidenceRefs(bug.evidenceIds)}`)
-  if (finish.failures.length) {
-    lines.push('- Failures:')
-    for (const failure of finish.failures) lines.push(`  - ${failure}`)
-  }
+  lines.push('## Coverage')
+  lines.push('')
+  if (finish.coverage.length === 0) lines.push('- no scenarios in run spec')
+  else for (const entry of finish.coverage) lines.push(`- ${coverageMarker(entry)} ${escapeMarkdownText(entry.scenarioId)} ${escapeMarkdownText(entry.title)}`)
   lines.push('')
 
-  lines.push('## Evidence')
+  lines.push('## Blockers and Missing Evidence')
+  lines.push('')
+  lines.push('### Blockers')
+  lines.push('')
+  appendBulletList(lines, finish.blockers.length ? finish.blockers : ['none'])
+  lines.push('')
+  lines.push('### Missing Evidence')
+  lines.push('')
+  appendBulletList(lines, finish.missingEvidence.length ? finish.missingEvidence : ['none'])
+  lines.push('')
+
+  lines.push('## Evidence Appendix')
+  lines.push('')
+  lines.push('Full evidence records live in [report.json](report.json).')
+  lines.push('')
   if (finish.evidence.length === 0) lines.push('- none')
-  else for (const evidence of finish.evidence) {
-    lines.push(`- ${evidence.id} ${evidence.type} \u2014 ${formatEvidenceSummary(evidence)}`)
-    appendArtifactImages(lines, evidence.id, artifacts)
+  else {
+    const appendixEvidence = selectMarkdownAppendixEvidence(finish)
+    for (const evidence of appendixEvidence.included) appendEvidenceAppendixEntry(lines, evidence, artifacts)
+    if (appendixEvidence.omittedCount > 0) {
+      lines.push(`- ${appendixEvidence.omittedCount} uncited non-essential evidence record(s) omitted from markdown; see [report.json](report.json).`)
+      lines.push('')
+    }
   }
   lines.push('')
 
-  lines.push('## Safety notes')
-  if (finish.safetyNotes.length === 0) lines.push('- none')
-  else for (const note of finish.safetyNotes) lines.push(`- ${note}`)
+  lines.push('## Safety Notes')
   lines.push('')
-
-  lines.push('## Next steps')
-  if (finish.nextSteps.length === 0) lines.push('- none')
-  else for (const step of finish.nextSteps) lines.push(`- ${step}`)
+  appendBulletList(lines, finish.safetyNotes.length ? finish.safetyNotes : ['none'])
 
   return lines.join('\n')
+}
+
+interface KeyFindingRow {
+  readonly scenario: string
+  readonly finding: string
+  readonly evidence: string
+}
+
+interface ScenarioResultRow {
+  readonly scenario: string
+  readonly result: string
+  readonly notes: string
+}
+
+type FinishStep = QaFinishResult['steps'][number]
+
+function buildExecutiveSummary(finish: QaFinishResult, scenarioRows: readonly ScenarioResultRow[]): string[] {
+  const counts = countScenarioResults(scenarioRows)
+  const summary = finish.summary?.trim()
+  const sentences: string[] = []
+  sentences.push(`QA completed with ${statusLabel(finish.status)} status against ${finish.spec.target || 'the target'}.`)
+  if (summary && !/^Aggregated \d+ QA shard\(s\):/i.test(summary)) sentences.push(summary)
+  sentences.push(
+    `${scenarioRows.length} scenario(s) reported: ${counts.Pass} pass, ${counts.Fail} fail, ${counts.Inconclusive} inconclusive, ${counts.Untested} untested, ${counts.Skipped} skipped.`
+  )
+  if (finish.bugs.length || finish.blockers.length || finish.missingEvidence.length) {
+    sentences.push(`${finish.bugs.length} bug(s), ${finish.blockers.length} blocker(s), and ${finish.missingEvidence.length} missing evidence item(s) recorded.`)
+  } else {
+    sentences.push('No bugs, blockers, or missing evidence were recorded.')
+  }
+  return sentences.slice(0, 3)
+}
+
+function buildKeyFindings(finish: QaFinishResult): KeyFindingRow[] {
+  const rows: KeyFindingRow[] = []
+  for (const bug of finish.bugs) {
+    rows.push({
+      scenario: scenarioForEvidence(finish, bug.evidenceIds, bug.claim),
+      finding: cleanFindingText(bug.claim),
+      evidence: formatEvidenceRefsForTable(bug.evidenceIds)
+    })
+  }
+
+  if (rows.length === 0) {
+    for (const failure of finish.failures) {
+      rows.push({ scenario: scenarioForText(finish, failure), finding: cleanFindingText(failure), evidence: '—' })
+    }
+  }
+
+  if (rows.length === 0 && finish.blockers.length > 0) {
+    for (const blocker of finish.blockers) {
+      rows.push({ scenario: scenarioForText(finish, blocker), finding: cleanFindingText(blocker), evidence: '—' })
+    }
+  }
+
+  if (rows.length === 0 && finish.missingEvidence.length > 0) {
+    for (const missing of finish.missingEvidence) {
+      rows.push({ scenario: scenarioForText(finish, missing), finding: `Missing evidence: ${cleanFindingText(missing)}`, evidence: '—' })
+    }
+  }
+
+  if (rows.length === 0) rows.push({ scenario: 'All', finding: 'No material findings recorded.', evidence: '—' })
+  return rows
+}
+
+function buildScenarioResults(finish: QaFinishResult): ScenarioResultRow[] {
+  if (finish.coverage.length === 0) return [{ scenario: '—', result: 'Untested', notes: 'No scenarios in run spec.' }]
+  const stepsByScenario = groupStepsByScenario(finish)
+  return finish.coverage.map((entry) => {
+    const steps = stepsByScenario.get(entry.scenarioId) ?? []
+    return {
+      scenario: `${entry.scenarioId} ${entry.title}`,
+      result: scenarioResult(entry, steps),
+      notes: scenarioNotes(finish, entry.scenarioId, steps)
+    }
+  })
+}
+
+function groupStepsByScenario(finish: QaFinishResult): Map<string, FinishStep[]> {
+  const byScenario = new Map<string, FinishStep[]>()
+  for (const step of finish.steps) {
+    const steps = byScenario.get(step.scenarioId)
+    if (steps) steps.push(step)
+    else byScenario.set(step.scenarioId, [step])
+  }
+  return byScenario
+}
+
+function scenarioResult(entry: QaScenarioCoverage, steps: readonly FinishStep[]): string {
+  if (entry.status === 'out-of-scope') return 'Skipped'
+  if (entry.status === 'planned-untested' || entry.status === 'unplanned') return 'Untested'
+  if (steps.some((step) => step.status === 'fail')) return 'Fail'
+  if (steps.some((step) => step.status === 'inconclusive')) return 'Inconclusive'
+  if (steps.length > 0 && steps.every((step) => step.status === 'pass')) return 'Pass'
+  if (steps.some((step) => step.status === 'skipped')) return 'Skipped'
+  return 'Inconclusive'
+}
+
+function scenarioNotes(finish: QaFinishResult, scenarioId: string, steps: readonly FinishStep[]): string {
+  const failed = steps.find((step) => step.status === 'fail')
+  if (failed) return firstUsefulText(failed.observed, true) || cleanFindingText(failed.title)
+  const inconclusive = steps.find((step) => step.status === 'inconclusive')
+  if (inconclusive) return firstUsefulText(inconclusive.observed, true) || cleanFindingText(inconclusive.title)
+  const passed = steps.find((step) => step.status === 'pass')
+  if (passed) return firstUsefulText(passed.observed) || cleanFindingText(passed.title)
+  const missing = finish.missingEvidence.find((value) => value.includes(scenarioId))
+  if (missing) return `Missing evidence: ${cleanFindingText(missing)}`
+  const blocker = finish.blockers.find((value) => value.includes(scenarioId))
+  if (blocker) return cleanFindingText(blocker)
+  return 'No assertion details recorded.'
+}
+
+function appendShipReadiness(lines: string[], finish: QaFinishResult): void {
+  if (finish.status === 'pass') {
+    lines.push('Ready based on this QA run. No blocking issues were recorded.')
+    return
+  }
+
+  if (finish.status === 'fail') lines.push('Not ready. Blocking issues:')
+  else lines.push('Not ready to decide. Inconclusive issues:')
+
+  appendBulletList(lines, buildShipReadinessIssues(finish))
+}
+
+function buildShipReadinessIssues(finish: QaFinishResult): string[] {
+  const issues = finish.bugs.map((bug) => cleanFindingText(bug.claim))
+  if (issues.length === 0) issues.push(...finish.failures.map(cleanFindingText))
+  if (issues.length === 0) issues.push(...finish.blockers.map(cleanFindingText))
+  if (issues.length === 0) issues.push(...finish.missingEvidence.map((item) => `Missing evidence: ${cleanFindingText(item)}`))
+  return issues.length ? issues : ['No specific blocking issue was recorded.']
+}
+
+function buildRecommendedNextSteps(finish: QaFinishResult): string[] {
+  if (finish.nextSteps.length > 0) return finish.nextSteps.map(cleanFindingText)
+  const steps: string[] = []
+  for (const bug of finish.bugs) steps.push(`Fix: ${cleanFindingText(bug.claim)}`)
+  if (steps.length === 0) for (const failure of finish.failures) steps.push(`Investigate: ${cleanFindingText(failure)}`)
+  if (finish.missingEvidence.length > 0) steps.push('Re-run QA with missing required evidence captured.')
+  if (steps.length === 0 && finish.blockers.length > 0) steps.push('Resolve blockers and re-run QA.')
+  if (steps.length === 0) steps.push('No follow-up required from this run.')
+  return steps
+}
+
+function selectMarkdownAppendixEvidence(finish: QaFinishResult): { readonly included: readonly QaEvidenceRecord[]; readonly omittedCount: number } {
+  const includedIds = collectMarkdownAppendixEvidenceIds(finish)
+  const included = finish.evidence.filter((evidence) => includedIds.has(evidence.id) || evidence.type === 'screenshot' || evidence.isError)
+  return { included, omittedCount: finish.evidence.length - included.length }
+}
+
+function collectMarkdownAppendixEvidenceIds(finish: QaFinishResult): Set<string> {
+  const ids = new Set<string>()
+  for (const step of finish.steps) for (const evidenceId of step.evidenceIds) ids.add(evidenceId)
+  for (const bug of finish.bugs) for (const evidenceId of bug.evidenceIds) ids.add(evidenceId)
+  for (const text of [...finish.blockers, ...finish.missingEvidence, ...finish.safetyNotes, ...finish.nextSteps]) addEvidenceIdsFromText(ids, text)
+  return ids
+}
+
+function addEvidenceIdsFromText(ids: Set<string>, text: string): void {
+  for (const match of text.matchAll(/\bE\d+\b/g)) {
+    const evidenceId = match[0]
+    if (evidenceId) ids.add(evidenceId)
+  }
+}
+
+function appendEvidenceAppendixEntry(
+  lines: string[],
+  evidence: QaEvidenceRecord,
+  artifacts: ReadonlyMap<string, readonly EvidenceArtifact[]>
+): void {
+  lines.push(`### ${evidence.id} ${evidence.type}`)
+  lines.push('')
+  lines.push(`- Summary: ${escapeMarkdownText(formatEvidenceTeaser(evidence))}`)
+  lines.push(`- Full record: [report.json](report.json)`)
+  const links = formatEvidenceLinks(evidence, evidence.id, artifacts)
+  if (links) lines.push(`- Files: ${links.replace(/^ \(|\)$/g, '')}`)
+  for (const artifact of artifacts.get(evidence.id) ?? []) {
+    lines.push('')
+    lines.push(`![${evidence.id} screenshot](${artifact.relativePath})`)
+  }
+  lines.push('')
+}
+
+function countScenarioResults(rows: readonly ScenarioResultRow[]): Record<'Pass' | 'Fail' | 'Inconclusive' | 'Untested' | 'Skipped', number> {
+  const counts = { Pass: 0, Fail: 0, Inconclusive: 0, Untested: 0, Skipped: 0 }
+  for (const row of rows) {
+    if (row.result in counts) counts[row.result as keyof typeof counts] += 1
+  }
+  return counts
+}
+
+function scenarioForEvidence(finish: QaFinishResult, evidenceIds: readonly string[], fallbackText: string): string {
+  const matchingStep = finish.steps.find((step) => step.evidenceIds.some((id) => evidenceIds.includes(id)))
+  if (matchingStep) return scenarioLabel(finish, matchingStep.scenarioId)
+  return scenarioForText(finish, fallbackText)
+}
+
+function scenarioForText(finish: QaFinishResult, text: string): string {
+  const match = text.match(/\bS\d+\b/)
+  return match ? scenarioLabel(finish, match[0]!) : 'Run-level'
+}
+
+function scenarioLabel(finish: QaFinishResult, scenarioId: string): string {
+  const coverage = finish.coverage.find((entry) => entry.scenarioId === scenarioId)
+  return coverage ? `${coverage.scenarioId} ${coverage.title}` : scenarioId
+}
+
+function firstUsefulText(values: readonly string[], preferProblem = false): string {
+  const cleaned = values.map(cleanFindingText).filter(Boolean)
+  if (preferProblem) {
+    const problem = cleaned.find((value) => /\b(created|accepted|error|failed|failure|wrong|absent|remained|returned|500|empty|delete|not clean|not rejected)\b/i.test(value))
+    if (problem) return problem
+  }
+  return cleaned[0] ?? ''
+}
+
+function cleanFindingText(value: string): string {
+  return singleLine(
+    value
+      .replace(/^shard\s+\S+\s*:\s*/i, '')
+      .replace(/^scenario\s+(S\d+)\s+failed\s*:\s*/i, '$1 failed: ')
+  )
+}
+
+function appendBulletList(lines: string[], values: readonly string[]): void {
+  for (const value of values) lines.push(`- ${escapeMarkdownText(value)}`)
+}
+
+function appendNumberedList(lines: string[], values: readonly string[]): void {
+  values.forEach((value, index) => lines.push(`${index + 1}. ${escapeMarkdownText(value)}`))
+}
+
+function statusLabel(status: string): string {
+  return status.toUpperCase()
+}
+
+function formatEvidenceReference(evidenceId: string, evidence: QaEvidenceRecord | undefined): string {
+  if (!evidence) return `${evidenceId} (unknown)`
+  return `${evidenceId} ${evidence.type} — ${formatEvidenceTeaser(evidence)}`
+}
+
+function formatEvidenceTeaser(evidence: QaEvidenceRecord): string {
+  const summary = formatEvidenceSummary(evidence)
+  const firstLine = summary.split(/\r?\n/).map((line) => line.trim()).find((line) => line.length > 0)
+  return firstLine ? cleanFindingText(firstLine.replace(/^#+\s*/, '')) : '(no summary)'
+}
+
+function formatEvidenceLinks(
+  evidence: QaEvidenceRecord | undefined,
+  evidenceId: string,
+  artifacts: ReadonlyMap<string, readonly EvidenceArtifact[]>
+): string {
+  const links: string[] = []
+  for (const artifact of artifacts.get(evidenceId) ?? []) links.push(markdownLink('screenshot', artifact.relativePath))
+  if (evidence) {
+    for (const link of extractEvidenceLinks(formatEvidenceSummary(evidence))) links.push(link)
+  }
+  return links.length ? ` (${uniqueStrings(links).join(', ')})` : ''
+}
+
+function extractEvidenceLinks(value: string): string[] {
+  const links: string[] = []
+  const markdownLinks = value.matchAll(/\[[^\]\n]+\]\(([^)\s]+)\)/g)
+  for (const match of markdownLinks) {
+    const target = match[1]?.trim()
+    if (target) links.push(markdownLink(linkLabel(target), target))
+  }
+
+  const relativeFileLinks = value.matchAll(/(^|\s)(\.playwright-mcp\/[^\s)]+)/g)
+  for (const match of relativeFileLinks) {
+    const target = match[2]?.trim().replace(/[.,;:]+$/, '')
+    if (target) links.push(markdownLink(linkLabel(target), target))
+  }
+  return links
+}
+
+function markdownLink(label: string, target: string): string {
+  return `[${escapeMarkdownText(label)}](${target})`
+}
+
+function linkLabel(target: string): string {
+  const clean = target.split('#')[0] ?? target
+  const name = clean.split('/').at(-1) ?? clean
+  return name || 'file'
+}
+
+function uniqueStrings(values: readonly string[]): string[] {
+  return [...new Set(values)]
+}
+
+function escapeMarkdownText(value: string): string {
+  return value.replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+
+function tableCell(value: string): string {
+  return escapeMarkdownText(value).replace(/\|/g, '\\|').replace(/\r?\n/g, ' ')
 }
 
 function formatEvidenceSummary(evidence: QaEvidenceRecord): string {
   if (evidence.type === 'screenshot') return evidence.inputSummary || 'screenshot captured'
   return evidence.summary || evidence.inputSummary || '(no summary)'
-}
-
-function appendArtifactImages(
-  lines: string[],
-  evidenceId: string,
-  artifacts: ReadonlyMap<string, readonly EvidenceArtifact[]>
-): void {
-  for (const artifact of artifacts.get(evidenceId) ?? []) {
-    lines.push('')
-    lines.push(`![${evidenceId} screenshot](${artifact.relativePath})`)
-  }
 }
 
 function coverageMarker(entry: QaScenarioCoverage): string {
@@ -268,15 +594,8 @@ function coverageMarker(entry: QaScenarioCoverage): string {
   return '[gap]'
 }
 
-function stepMarker(step: QaStepRecord): string {
-  if (step.status === 'pass') return '[pass]'
-  if (step.status === 'fail') return '[fail]'
-  if (step.status === 'skipped') return '[skip]'
-  return '[inconclusive]'
-}
-
-function formatEvidenceRefs(ids: readonly string[]): string {
-  return ids.length ? ` [${ids.join(', ')}]` : ''
+function formatEvidenceRefsForTable(ids: readonly string[]): string {
+  return ids.length ? ids.join(', ') : '—'
 }
 
 function computeRunDuration(finish: QaFinishResult): string {
