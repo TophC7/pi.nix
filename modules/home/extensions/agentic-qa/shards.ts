@@ -6,6 +6,8 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import type { ExtensionAPI, ExtensionCommandContext } from '@mariozechner/pi-coding-agent'
+import type { SubagentResponse, SubagentToolSnapshot } from '@pi/lib/subagents'
+import { singleLine, truncate } from '../pi-lib/subagents/render-helpers.ts'
 import { containsCredentialLeak } from './artifacts.ts'
 import { safePathSegment } from './artifact-paths.ts'
 import { fenced } from './markdown.ts'
@@ -143,10 +145,38 @@ interface ActiveQaShardPlannerRun {
   readonly spec: QaRunSpec
   readonly cwd: string
   readonly sourceCommand: QaSourceCommandKind
+  readonly registeredAt: number
   submitted?: QaShardPlannerResult
 }
 
-const activeQaShardPlanners = new Map<string, ActiveQaShardPlannerRun>()
+interface QaShardPlannerAttemptSummary {
+  readonly attempt: number
+  readonly usedTools: readonly string[]
+  readonly qaShardPlanCalls: number
+  readonly failedQaShardPlanCalls: number
+  readonly lastQaShardPlanPreview?: string
+  readonly finalOutput?: string
+}
+
+const QA_SHARD_PLANNER_RUNS_GLOBAL = '__piAgenticQaActiveShardPlanners'
+const QA_SHARD_PLANNER_TTL_MS = 60 * 60_000
+const QA_SHARD_PLANNER_DIAGNOSTIC_TEXT_LIMIT = 800
+const activeQaShardPlanners = activeQaShardPlannerRuns()
+
+function activeQaShardPlannerRuns(): Map<string, ActiveQaShardPlannerRun> {
+  const global = globalThis as typeof globalThis &
+    Record<typeof QA_SHARD_PLANNER_RUNS_GLOBAL, Map<string, ActiveQaShardPlannerRun> | undefined>
+  global[QA_SHARD_PLANNER_RUNS_GLOBAL] ??= new Map<string, ActiveQaShardPlannerRun>()
+  return global[QA_SHARD_PLANNER_RUNS_GLOBAL]
+}
+
+function pruneActiveQaShardPlanners(now = Date.now()): void {
+  for (const [runId, entry] of activeQaShardPlanners.entries()) {
+    if (!Number.isFinite(entry.registeredAt) || now - entry.registeredAt > QA_SHARD_PLANNER_TTL_MS) {
+      activeQaShardPlanners.delete(runId)
+    }
+  }
+}
 
 interface PlannerEvidenceInput {
   readonly type?: unknown
@@ -237,6 +267,7 @@ export function readQaShardRunState(cwd: string, relativeRunDir: string): QaShar
 }
 
 export function submitQaShardPlanToolInput(cwd: string, input: QaShardPlanToolInput): QaShardPlanToolResult {
+  pruneActiveQaShardPlanners()
   const active = activeQaShardPlanners.get(input.runId)
   if (!active) {
     return {
@@ -277,7 +308,8 @@ export function registerQaShardPlannerRun(input: {
   readonly cwd: string
   readonly sourceCommand: QaSourceCommandKind
 }): void {
-  activeQaShardPlanners.set(input.spec.runId, { ...input })
+  pruneActiveQaShardPlanners()
+  activeQaShardPlanners.set(input.spec.runId, { ...input, registeredAt: Date.now() })
 }
 
 export function clearQaShardPlannerRun(runId: string): void {
@@ -318,6 +350,7 @@ export function hydrateQaShardWorkerRun(cwd: string, runId: string): QaRunSpec |
 }
 
 export function takeQaShardPlannerResult(runId: string): QaShardPlannerResult | undefined {
+  pruneActiveQaShardPlanners()
   const active = activeQaShardPlanners.get(runId)
   const submitted = active?.submitted
   activeQaShardPlanners.delete(runId)
@@ -364,27 +397,96 @@ export async function runQaShardPlannerSubagent(
   ctx: ExtensionCommandContext,
   input: QaShardPlannerInput
 ): Promise<QaShardPlannerResult> {
-  const { runSubagent } = await import('@pi/lib/subagents')
+  const { extractSubagentText, runSubagent } = await import('@pi/lib/subagents')
+  const attempts: QaShardPlannerAttemptSummary[] = []
   registerQaShardPlannerRun({ spec: input.spec, cwd: ctx.cwd, sourceCommand: input.sourceCommand })
   try {
-    await runSubagent(
-      pi,
-      ctx,
-      {
-        agent: QA_PLANNER_AGENT,
-        task: buildQaShardPlannerTask(input),
-        context: 'fresh',
-        agentScope: 'both'
-      },
-      `${input.spec.mode} QA planner`,
-      `agentic-qa-plan:${input.spec.runId}`
-    )
-    const submitted = takeQaShardPlannerResult(input.spec.runId)
-    if (!submitted) throw new Error(`QA shard planner did not submit qa_shard_plan for runId ${input.spec.runId}`)
-    return submitted
+    for (let attempt = 1; attempt <= 2; attempt += 1) {
+      const task = attempt === 1 ? buildQaShardPlannerTask(input) : buildQaShardPlannerRetryTask(input, attempts)
+      const response = await runSubagent(
+        pi,
+        ctx,
+        {
+          agent: QA_PLANNER_AGENT,
+          task,
+          context: 'fresh',
+          agentScope: 'both'
+        },
+        attempt === 1 ? `${input.spec.mode} QA planner` : `${input.spec.mode} QA planner retry`,
+        attempt === 1 ? `agentic-qa-plan:${input.spec.runId}` : `agentic-qa-plan:${input.spec.runId}:retry`
+      )
+      attempts.push(summarizeQaShardPlannerAttempt(response, attempt, extractSubagentText))
+      const submitted = takeQaShardPlannerResult(input.spec.runId)
+      if (submitted) return submitted
+      if (attempt < 2) registerQaShardPlannerRun({ spec: input.spec, cwd: ctx.cwd, sourceCommand: input.sourceCommand })
+    }
+    throw new Error(buildQaShardPlannerFailureMessage(input.spec.runId, attempts))
   } finally {
     clearQaShardPlannerRun(input.spec.runId)
   }
+}
+
+function buildQaShardPlannerRetryTask(input: QaShardPlannerInput, attempts: readonly QaShardPlannerAttemptSummary[]): string {
+  return [
+    buildQaShardPlannerTask(input),
+    '',
+    'Previous planner attempt did not submit an accepted qa_shard_plan.',
+    'Retry now. Your first action should be qa_shard_plan unless you must inspect one more local file to make the shards concrete.',
+    'Do not finish with prose only. The retry only succeeds when qa_shard_plan returns accepted.',
+    '',
+    'Previous attempt diagnostics:',
+    ...attempts.map(formatQaShardPlannerAttemptSummary)
+  ].join('\n')
+}
+
+function summarizeQaShardPlannerAttempt(
+  response: SubagentResponse,
+  attempt: number,
+  extractSubagentText: (response: SubagentResponse) => string
+): QaShardPlannerAttemptSummary {
+  const run = response.result?.details?.run
+  const tools = run?.slots.flatMap((slot) => slot.tools) ?? []
+  const qaShardPlanTools = tools.filter((tool) => tool.name === 'qa_shard_plan')
+  return {
+    attempt,
+    usedTools: summarizeToolNames(tools),
+    qaShardPlanCalls: qaShardPlanTools.length,
+    failedQaShardPlanCalls: qaShardPlanTools.filter((tool) => tool.status === 'failed' || tool.error).length,
+    lastQaShardPlanPreview: truncateOptionalText(qaShardPlanTools.at(-1)?.preview || qaShardPlanTools.at(-1)?.error),
+    finalOutput: truncateOptionalText(extractSubagentText(response))
+  }
+}
+
+function summarizeToolNames(tools: readonly SubagentToolSnapshot[]): string[] {
+  const counts = new Map<string, number>()
+  for (const tool of tools) counts.set(tool.name, (counts.get(tool.name) ?? 0) + 1)
+  return [...counts.entries()].map(([name, count]) => (count === 1 ? name : `${name} x${count}`))
+}
+
+function formatQaShardPlannerAttemptSummary(attempt: QaShardPlannerAttemptSummary): string {
+  return [
+    `Attempt ${attempt.attempt}:`,
+    `- tools: ${attempt.usedTools.length ? attempt.usedTools.join(', ') : 'none'}`,
+    `- qa_shard_plan calls: ${attempt.qaShardPlanCalls}`,
+    `- failed qa_shard_plan calls: ${attempt.failedQaShardPlanCalls}`,
+    attempt.lastQaShardPlanPreview ? `- last qa_shard_plan result: ${attempt.lastQaShardPlanPreview}` : undefined,
+    attempt.finalOutput ? `- final output: ${attempt.finalOutput}` : undefined
+  ]
+    .filter(Boolean)
+    .join('\n')
+}
+
+function buildQaShardPlannerFailureMessage(runId: string, attempts: readonly QaShardPlannerAttemptSummary[]): string {
+  return [
+    `QA shard planner did not submit an accepted qa_shard_plan for runId ${runId} after ${attempts.length} attempt(s).`,
+    ...attempts.map(formatQaShardPlannerAttemptSummary)
+  ].join('\n')
+}
+
+function truncateOptionalText(value: string | undefined): string | undefined {
+  if (!value) return undefined
+  const text = singleLine(value)
+  return text ? truncate(text, QA_SHARD_PLANNER_DIAGNOSTIC_TEXT_LIMIT) : undefined
 }
 
 function buildShardPlan(spec: QaRunSpec, shards: readonly QaShardSpec[]): QaShardPlan {

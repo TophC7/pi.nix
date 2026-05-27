@@ -91,14 +91,14 @@ async function runMissionQa(pi: ExtensionAPI, ctx: ExtensionCommandContext, args
   if (!run) return
 
   const spec = compileMissionRunSpec({ target: run.targetUrl, artifacts, mission })
-  await dispatchPreparedQaShards(pi, ctx, spec, async () => {
-    const shardPlan = compileDirectShardPlan(spec)
-    const shardState = persistInitialShardState(ctx, shardPlan, 'qa')
-    return {
-      shardPlan,
-      shardState,
-      fallbackPrompt: buildMissionPrompt(spec, mission, request.extra, artifacts),
-      label: `/qa ${mission.slug}`
+  await dispatchPreparedQaShards(pi, ctx, {
+    spec,
+    label: `/qa ${mission.slug}`,
+    fallbackPrompt: () => buildMissionPrompt(spec, mission, request.extra, artifacts),
+    prepare: async () => {
+      const shardPlan = compileDirectShardPlan(spec)
+      const shardState = persistInitialShardState(ctx, shardPlan, 'qa')
+      return { shardPlan, shardState }
     }
   })
 }
@@ -122,18 +122,18 @@ async function runStagedQa(pi: ExtensionAPI, ctx: ExtensionCommandContext, args:
     artifacts,
     stagedFiles: staged.stagedFiles
   })
-  await dispatchPreparedQaShards(pi, ctx, spec, async () => {
-    const { shardPlan, shardState } = await runQaShardPlannerSubagent(pi, ctx, {
-      spec,
-      context: buildStagedPlannerContext(staged),
-      sourceCommand: 'qa:staged',
-      extra: args.trim()
-    })
-    return {
-      shardPlan,
-      shardState,
-      fallbackPrompt: buildStagedPrompt(spec, staged, args.trim(), artifacts),
-      label: '/qa:staged'
+  await dispatchPreparedQaShards(pi, ctx, {
+    spec,
+    label: '/qa:staged',
+    fallbackPrompt: () => buildStagedPrompt(spec, staged, args.trim(), artifacts),
+    prepare: async () => {
+      const { shardPlan, shardState } = await runQaShardPlannerSubagent(pi, ctx, {
+        spec,
+        context: buildStagedPlannerContext(staged),
+        sourceCommand: 'qa:staged',
+        extra: args.trim()
+      })
+      return { shardPlan, shardState }
     }
   })
 }
@@ -152,17 +152,17 @@ async function runFreehandQa(pi: ExtensionAPI, ctx: ExtensionCommandContext, arg
   if (!run) return
 
   const spec = compileFreehandRunSpec({ target: run.targetUrl, artifacts, prompt })
-  await dispatchPreparedQaShards(pi, ctx, spec, async () => {
-    const { shardPlan, shardState } = await runQaShardPlannerSubagent(pi, ctx, {
-      spec,
-      context: prompt,
-      sourceCommand: 'qa:freehand'
-    })
-    return {
-      shardPlan,
-      shardState,
-      fallbackPrompt: buildFreehandPrompt(spec, prompt, artifacts),
-      label: '/qa:freehand'
+  await dispatchPreparedQaShards(pi, ctx, {
+    spec,
+    label: '/qa:freehand',
+    fallbackPrompt: () => buildFreehandPrompt(spec, prompt, artifacts),
+    prepare: async () => {
+      const { shardPlan, shardState } = await runQaShardPlannerSubagent(pi, ctx, {
+        spec,
+        context: prompt,
+        sourceCommand: 'qa:freehand'
+      })
+      return { shardPlan, shardState }
     }
   })
 }
@@ -267,22 +267,30 @@ function buildWorkerFallbackPrompt(prompt: string, error: string): string {
 async function dispatchPreparedQaShards(
   pi: ExtensionAPI,
   ctx: ExtensionCommandContext,
-  spec: QaRunSpec,
-  prepare: () => Promise<{
-    readonly shardPlan: QaShardPlan
-    readonly shardState: QaShardRunState
-    readonly fallbackPrompt: string
+  input: {
+    readonly spec: QaRunSpec
     readonly label: string
-  }>
+    readonly fallbackPrompt: () => string
+    readonly prepare: () => Promise<{
+      readonly shardPlan: QaShardPlan
+      readonly shardState: QaShardRunState
+    }>
+  }
 ): Promise<void> {
   let handedToCoordinator = false
   try {
-    const input = await prepare()
-    await ensureQaEnvironmentReady(pi, ctx, spec, input.label)
+    const prepared = await input.prepare()
+    await ensureQaEnvironmentReady(pi, ctx, input.spec, input.label)
     handedToCoordinator = true
-    await coordinateQaShards(pi, ctx, { spec, ...input })
+    await coordinateQaShards(pi, ctx, {
+      spec: input.spec,
+      label: input.label,
+      fallbackPrompt: input.fallbackPrompt,
+      shardPlan: prepared.shardPlan,
+      shardState: prepared.shardState
+    })
   } finally {
-    if (!handedToCoordinator) await restoreQaConfigForRun(pi, ctx, spec.runId)
+    if (!handedToCoordinator) await restoreQaConfigForRun(pi, ctx, input.spec.runId)
   }
 }
 
@@ -293,7 +301,7 @@ async function coordinateQaShards(
     readonly spec: QaRunSpec
     readonly shardPlan: QaShardPlan
     readonly shardState: QaShardRunState
-    readonly fallbackPrompt: string
+    readonly fallbackPrompt: () => string
     readonly label: string
   }
 ): Promise<void> {
@@ -318,7 +326,7 @@ async function coordinateQaShards(
     registerActiveRun(input.spec)
     handedToMainAgent = true
     ctx.ui.notify(`${input.label}: QA shard coordinator failed; handing fallback to main agent. ${message}`, 'error')
-    pi.sendUserMessage(buildWorkerFallbackPrompt(input.fallbackPrompt, message), { deliverAs: 'followUp' })
+    pi.sendUserMessage(buildWorkerFallbackPrompt(input.fallbackPrompt(), message), { deliverAs: 'followUp' })
   } finally {
     if (!handedToMainAgent) await restoreQaConfigForRun(pi, ctx, input.spec.runId)
   }
