@@ -7,7 +7,6 @@ import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import type { ExtensionAPI, ExtensionCommandContext } from '@mariozechner/pi-coding-agent'
 import type { RuntimeProfile } from '@pi/lib/runtime-profile'
-import { getQaParallelConfig, type QaParallelConfig } from './config.ts'
 import {
   updateQaShardRunState,
   writeQaShardRunState,
@@ -25,14 +24,12 @@ export interface QaShardCoordinatorInput {
   readonly parentSpec: QaRunSpec
   readonly plan: QaShardPlan
   readonly state: QaShardRunState
-  readonly parallel?: QaParallelConfig
   readonly workerProfile?: RuntimeProfile
   readonly runShardWorker?: (worker: PreparedQaShardWorker) => Promise<void>
 }
 
 export interface QaShardCoordinatorResult {
   readonly state: QaShardRunState
-  readonly parallel: QaParallelConfig
   readonly completed: number
   readonly blocked: number
 }
@@ -55,89 +52,70 @@ export async function runQaShardCoordinator(
   ctx: ExtensionCommandContext,
   input: QaShardCoordinatorInput
 ): Promise<QaShardCoordinatorResult> {
-  const parallel = input.parallel ?? getQaParallelConfig(ctx.cwd)
-  const concurrency = parallel.enabled ? parallel.maxConcurrency : 1
   let state = input.state
   const work = queuedWorkItems(input.plan, state)
 
-  for (const batch of chunkWork(work, concurrency)) {
-    const prepared = batch.map((item) => {
-      state = updateQaShardRunState(state, item.shard.shardId, { status: 'running' })
-      const latestEntry = state.shards.find((entry) => entry.shardId === item.shard.shardId) ?? item.state
-      return { item, worker: prepareQaShardWorker({ parentSpec: input.parentSpec, shard: item.shard, state: latestEntry }) }
-    })
+  for (const item of work) {
+    state = updateQaShardRunState(state, item.shard.shardId, { status: 'running' })
+    const latestEntry = state.shards.find((entry) => entry.shardId === item.shard.shardId) ?? item.state
+    const worker = prepareQaShardWorker({ parentSpec: input.parentSpec, shard: item.shard, state: latestEntry })
     writeQaShardRunState(ctx.cwd, state)
 
-    const failures = input.runShardWorker
-      ? await runInjectedShardWorkerBatch(input.runShardWorker, prepared.map((entry) => entry.worker))
-      : await runSubagentShardWorkerBatch(pi, ctx, input.parentSpec.runId, prepared.map((entry) => entry.worker), input.workerProfile)
-
-    for (const { item, worker } of prepared) {
-      const failure = failures.get(worker.childSpec.runId)
-      const report = readChildReportSummary(ctx.cwd, worker.childSpec)
-      const shardStatus = reportStatusToShardStatus(report.status)
-      if (shardStatus === 'blocked') clearChildRun(worker.childSpec.runId)
-      state = updateQaShardRunState(state, item.shard.shardId, {
-        status: shardStatus,
-        artifactPaths: report.artifactPaths,
-        reportPath: report.reportPath,
-        reportJsonPath: report.reportJsonPath
-      })
-      if (report.error) ctx.ui.notify(`/qa shard ${item.shard.shardId} report error: ${report.error}`, 'error')
-      if (failure && shardStatus === 'blocked') ctx.ui.notify(`/qa shard ${item.shard.shardId} blocked: ${formatError(failure)}`, 'error')
-    }
+    const failure = input.runShardWorker
+      ? await runInjectedShardWorker(input.runShardWorker, worker)
+      : await runSubagentShardWorker(pi, ctx, input.parentSpec.runId, worker, input.workerProfile)
+    const report = readChildReportSummary(ctx.cwd, worker.childSpec)
+    const shardStatus = reportStatusToShardStatus(report.status)
+    if (shardStatus === 'blocked') clearChildRun(worker.childSpec.runId)
+    state = updateQaShardRunState(state, item.shard.shardId, {
+      status: shardStatus,
+      artifactPaths: report.artifactPaths,
+      reportPath: report.reportPath,
+      reportJsonPath: report.reportJsonPath
+    })
+    if (report.error) ctx.ui.notify(`/qa shard ${item.shard.shardId} report error: ${report.error}`, 'error')
+    if (failure && shardStatus === 'blocked') ctx.ui.notify(`/qa shard ${item.shard.shardId} blocked: ${formatError(failure)}`, 'error')
     writeQaShardRunState(ctx.cwd, state)
   }
 
   return {
     state,
-    parallel,
     completed: state.shards.filter((shard) => isTerminalShardStatus(shard.status)).length,
     blocked: state.shards.filter((shard) => shard.status === 'blocked').length
   }
 }
 
-function chunkWork(work: readonly ShardWorkItem[], size: number): ShardWorkItem[][] {
-  const chunks: ShardWorkItem[][] = []
-  const chunkSize = Math.max(1, size)
-  for (let index = 0; index < work.length; index += chunkSize) chunks.push(work.slice(index, index + chunkSize))
-  return chunks
-}
-
-async function runInjectedShardWorkerBatch(
+async function runInjectedShardWorker(
   runShardWorker: (worker: PreparedQaShardWorker) => Promise<void>,
-  workers: readonly PreparedQaShardWorker[]
-): Promise<Map<string, unknown>> {
-  const failures = new Map<string, unknown>()
-  await Promise.all(workers.map(async (worker) => {
-    try {
-      await runShardWorker(worker)
-    } catch (error) {
-      failures.set(worker.childSpec.runId, error)
-    }
-  }))
-  return failures
+  worker: PreparedQaShardWorker
+): Promise<unknown | undefined> {
+  try {
+    await runShardWorker(worker)
+    return undefined
+  } catch (error) {
+    return error
+  }
 }
 
-async function runSubagentShardWorkerBatch(
+async function runSubagentShardWorker(
   pi: ExtensionAPI,
   ctx: ExtensionCommandContext,
   parentRunId: string,
-  workers: readonly PreparedQaShardWorker[],
+  worker: PreparedQaShardWorker,
   runtimeProfile: RuntimeProfile = {}
-): Promise<Map<string, unknown>> {
+): Promise<unknown | undefined> {
   try {
     await runQaShardWorkerSubagents(
       pi,
       ctx,
-      workers,
-      `/qa shards ${workers.map((worker) => worker.shard.shardId).join(', ')}`,
+      [worker],
+      `/qa shard ${worker.shard.shardId}`,
       `agentic-qa:${parentRunId}:shards`,
       runtimeProfile
     )
-    return new Map()
+    return undefined
   } catch (error) {
-    return new Map(workers.map((worker) => [worker.childSpec.runId, error] as const))
+    return error
   }
 }
 

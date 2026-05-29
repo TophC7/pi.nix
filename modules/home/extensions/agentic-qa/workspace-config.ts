@@ -8,11 +8,6 @@ export const QA_WORKSPACE_LOCAL_CONFIG_PATH = path.join(QA_WORKSPACE_CONFIG_DIR,
 export const QA_WORKSPACE_AGENTS_PATH = path.join(QA_WORKSPACE_CONFIG_DIR, 'AGENTS.md')
 export const QA_WORKSPACE_LOCAL_AGENTS_PATH = path.join(QA_WORKSPACE_CONFIG_DIR, 'AGENTS.local.md')
 
-export interface QaParallelConfig {
-  readonly enabled: boolean
-  readonly maxConcurrency: number
-}
-
 export interface QaWorkspaceRuntimeProfiles {
   readonly default?: RuntimeProfile
   readonly planner?: RuntimeProfile
@@ -28,24 +23,19 @@ interface QaWorkspaceDocumentation {
 export interface QaWorkspaceConfig {
   readonly targetUrl?: string
   readonly setup: readonly string[]
-  readonly parallel?: QaParallelConfig
   readonly runtimeProfiles: QaWorkspaceRuntimeProfiles
   readonly instructions?: string
 }
-
-const DEFAULT_QA_PARALLEL_CONFIG: QaParallelConfig = { enabled: false, maxConcurrency: 1 }
-const MAX_QA_PARALLEL_CONCURRENCY = 8
 
 export function loadQaWorkspaceConfig(cwd: string): QaWorkspaceConfig {
   const shared = readWorkspaceJson(cwd, QA_WORKSPACE_CONFIG_PATH)
   const local = readWorkspaceJson(cwd, QA_WORKSPACE_LOCAL_CONFIG_PATH)
   const docs = readWorkspaceDocs(cwd)
   const setup = readSetup(resolveConfigValue(shared, local, 'setup'))
-  const parallel = readParallelConfig(resolveMergedObject(shared, local, 'parallel'))
   const runtimeProfiles = readRuntimeProfiles(shared, local)
   const targetUrl = readTargetUrl(resolveFirstConfigValue(shared, local, ['targetUrl', 'target']))
   const instructions = renderQaWorkspaceInstructions(docs)
-  return { targetUrl, setup, parallel, runtimeProfiles, instructions }
+  return { targetUrl, setup, runtimeProfiles, instructions }
 }
 
 export function readQaWorkspaceSharedConfig(cwd: string): Record<string, unknown> {
@@ -56,11 +46,6 @@ export function writeQaWorkspaceSharedConfig(cwd: string, config: Record<string,
   const filePath = path.join(cwd, QA_WORKSPACE_CONFIG_PATH)
   mkdirSync(path.dirname(filePath), { recursive: true })
   writeFileSync(filePath, `${JSON.stringify(config, null, 2)}\n`)
-}
-
-export function sanitizeQaParallelConfig(config: Partial<QaParallelConfig>): QaParallelConfig {
-  const enabled = config.enabled === true
-  return enabled ? { enabled, maxConcurrency: sanitizeMaxConcurrency(config.maxConcurrency) } : DEFAULT_QA_PARALLEL_CONFIG
 }
 
 function readWorkspaceJson(cwd: string, relativePath: string): Record<string, unknown> {
@@ -138,12 +123,6 @@ function readSetup(value: unknown): string[] {
   return value.flatMap((entry) => (typeof entry === 'string' && entry.trim() ? [entry.trim()] : []))
 }
 
-function readParallelConfig(value: unknown): QaParallelConfig | undefined {
-  if (value === undefined || value === null) return undefined
-  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid QA workspace parallel config: expected object.')
-  return sanitizeQaParallelConfig(value as Partial<QaParallelConfig>)
-}
-
 function readTargetUrl(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined
 }
@@ -161,24 +140,8 @@ function resolveFirstConfigValue(shared: Record<string, unknown>, local: Record<
   return undefined
 }
 
-function resolveMergedObject(shared: Record<string, unknown>, local: Record<string, unknown>, key: string): unknown {
-  const sharedValue = shared[key]
-  if (!Object.hasOwn(local, key)) return sharedValue
-  const localValue = local[key]
-  if (localValue === null) return undefined
-  if (!sharedValue || typeof sharedValue !== 'object' || Array.isArray(sharedValue)) return localValue
-  if (!localValue || typeof localValue !== 'object' || Array.isArray(localValue)) return localValue
-  return { ...(sharedValue as Record<string, unknown>), ...(localValue as Record<string, unknown>) }
-}
-
 function objectOrEmpty(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {}
-}
-
-function sanitizeMaxConcurrency(value: unknown): number {
-  const numeric = typeof value === 'number' ? value : Number(value)
-  if (!Number.isFinite(numeric)) return DEFAULT_QA_PARALLEL_CONFIG.maxConcurrency
-  return Math.max(1, Math.min(MAX_QA_PARALLEL_CONCURRENCY, Math.floor(numeric)))
 }
 
 function isNotFoundError(error: unknown): boolean {

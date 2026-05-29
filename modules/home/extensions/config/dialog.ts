@@ -8,7 +8,7 @@ import {
   type ConfigRegistryRow,
   type ConfigRegistrySection
 } from '@pi/lib/config-registry'
-import { THINKING_LEVELS, formatRuntimeProfileError } from '@pi/lib/runtime-profile'
+import { THINKING_LEVELS, formatRuntimeProfileError, isThinkingLevel } from '@pi/lib/runtime-profile'
 import {
   fitLine,
   openDialog,
@@ -426,12 +426,14 @@ class ConfigDialog implements DialogContent {
       this.tui.requestRender()
       return
     }
+
     const error = row.validate?.(trimmed)
     if (error) {
       this.mode = { kind: 'text', row, input: this.mode.kind === 'text' ? this.mode.input : new Input(), error }
       this.tui.requestRender()
       return
     }
+
     const result = this.saveRow(row, trimmed)
     if (!result.ok) {
       this.mode = { kind: 'text', row, input: this.mode.kind === 'text' ? this.mode.input : new Input(), error: result.error }
@@ -465,7 +467,7 @@ class ConfigDialog implements DialogContent {
       if (row.kind === 'model') row.set(value, this.ctx)
       else if (row.kind === 'text') row.set(value, this.ctx)
       else {
-        const thinking = value && (THINKING_LEVELS as readonly string[]).includes(value) ? (value as (typeof THINKING_LEVELS)[number]) : undefined
+        const thinking = isThinkingLevel(value) ? value : undefined
         row.set(thinking, this.ctx)
       }
       return { ok: true }
