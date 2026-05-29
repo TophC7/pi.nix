@@ -4,6 +4,7 @@
 // context to execute the browser test instead of handing it to the main agent.
 
 import type { ExtensionAPI, ExtensionCommandContext } from '@mariozechner/pi-coding-agent'
+import { runtimeProfileTaskFields, type RuntimeProfile } from '@pi/lib/runtime-profile'
 import { fenced } from './markdown.ts'
 import { renderQaEvidenceProtocolBullets } from './prompt.ts'
 import { registerActiveRun, renderRunSpec, type QaRunSpec } from './run-state.ts'
@@ -47,6 +48,7 @@ export function createQaShardRunSpec(parentSpec: QaRunSpec, shard: QaShardSpec, 
     relativeRunDir,
     relativeArtifactDir: `${relativeRunDir}/artifacts`,
     setup: parentSpec.setup,
+    workspaceInstructions: parentSpec.workspaceInstructions,
     scenarios: [{
       id: shard.scenarioId,
       title: shard.title,
@@ -87,6 +89,7 @@ export function buildQaShardWorkerTask(input: PreparedQaShardWorker): string {
     '- Call qa_finish exactly once for the child run id.',
     '- Do not test scenarios outside this shard.',
     '- Do not ask the main agent to do browser work.',
+    input.childSpec.workspaceInstructions ? `\n${input.childSpec.workspaceInstructions}` : undefined,
     '',
     'Single-shard run spec:',
     fenced('text', renderRunSpec(input.childSpec)),
@@ -122,7 +125,8 @@ export async function runQaShardWorkerSubagents(
   ctx: ExtensionCommandContext,
   inputs: readonly PreparedQaShardWorker[],
   label: string,
-  statusKey: string
+  statusKey: string,
+  runtimeProfile: RuntimeProfile = {}
 ): Promise<unknown> {
   for (const input of inputs) registerQaShardWorkerRun(input)
   const { runSubagent } = await import('@pi/lib/subagents')
@@ -132,7 +136,8 @@ export async function runQaShardWorkerSubagents(
     {
       tasks: inputs.map((input) => ({
         agent: QA_WORKER_AGENT,
-        task: buildQaShardWorkerTask(input)
+        task: buildQaShardWorkerTask(input),
+        ...runtimeProfileTaskFields(runtimeProfile)
       })),
       context: 'fresh',
       agentScope: 'both'

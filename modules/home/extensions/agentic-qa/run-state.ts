@@ -60,6 +60,7 @@ export interface QaRunSpec {
   readonly relativeArtifactDir: string
   readonly mission?: QaMissionRef
   readonly setup: readonly string[]
+  readonly workspaceInstructions?: string
   readonly scenarios: readonly QaScenarioSpec[]
   readonly requiredEvidence: readonly QaRequiredEvidence[]
   readonly outOfScope: readonly string[]
@@ -333,18 +334,28 @@ export interface CompileMissionRunSpecInput {
   readonly target: string
   readonly artifacts: QaArtifactPlan
   readonly mission: QaMission
+  readonly workspaceSetup?: readonly string[]
+  readonly workspaceInstructions?: string
 }
 
 export interface CompileStagedRunSpecInput {
   readonly target: string
   readonly artifacts: QaArtifactPlan
   readonly stagedFiles: readonly string[]
+  readonly workspaceSetup?: readonly string[]
+  readonly workspaceInstructions?: string
 }
 
 export interface CompileFreehandRunSpecInput {
   readonly target: string
   readonly artifacts: QaArtifactPlan
   readonly prompt: string
+  readonly workspaceSetup?: readonly string[]
+  readonly workspaceInstructions?: string
+}
+
+function mergeWorkspaceSetup(workspaceSetup: readonly string[] | undefined, runSetup: readonly string[]): readonly string[] {
+  return [...(workspaceSetup ?? []), ...runSetup]
 }
 
 export function compileMissionRunSpec(input: CompileMissionRunSpecInput): QaRunSpec {
@@ -366,7 +377,8 @@ export function compileMissionRunSpec(input: CompileMissionRunSpecInput): QaRunS
       title: input.mission.title,
       body: input.mission.body
     },
-    setup: sections.setup,
+    setup: mergeWorkspaceSetup(input.workspaceSetup, sections.setup),
+    workspaceInstructions: input.workspaceInstructions,
     scenarios,
     requiredEvidence,
     outOfScope: sections.outOfScope,
@@ -392,7 +404,8 @@ export function compileStagedRunSpec(input: CompileStagedRunSpecInput): QaRunSpe
     runId: input.artifacts.runId,
     relativeRunDir: input.artifacts.relativeRunDir,
     relativeArtifactDir: input.artifacts.relativeArtifactDir,
-    setup: [],
+    setup: input.workspaceSetup ?? [],
+    workspaceInstructions: input.workspaceInstructions,
     scenarios: [scenario],
     requiredEvidence: [],
     outOfScope: [],
@@ -410,7 +423,8 @@ export function compileFreehandRunSpec(input: CompileFreehandRunSpecInput): QaRu
     runId: input.artifacts.runId,
     relativeRunDir: input.artifacts.relativeRunDir,
     relativeArtifactDir: input.artifacts.relativeArtifactDir,
-    setup: [],
+    setup: input.workspaceSetup ?? [],
+    workspaceInstructions: input.workspaceInstructions,
     scenarios: [{
       id: 'S1',
       title,

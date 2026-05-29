@@ -6,9 +6,11 @@ export const PI_LIB_PACKAGE = '@pi/lib' as const
 export default () => {}
 
 export * from './command.ts'
+export * from './config-registry.ts'
 export * from './extension.ts'
 export * from './agent-end.ts'
 export * from './lock.ts'
 export * from './rtk.ts'
+export * from './runtime-profile.ts'
 export * from './subagents/index.ts'
 export * from './ui/index.ts'

@@ -6,15 +6,18 @@
 import type { ExtensionAPI, ExtensionCommandContext } from '@mariozechner/pi-coding-agent'
 import { deferToAgentEnd } from '@pi/lib/agent-end'
 import {
-  applyCommandConfig,
-  captureRestore,
-  getCommandConfig,
-  restoreCommandConfig
-} from '../commands/config.ts'
+  applyMainRuntimeProfile,
+  captureMainRuntimeProfile,
+  formatRuntimeProfileError,
+  hasRuntimeProfileSettings,
+  resolveRuntimeProfileModel,
+  restoreMainRuntimeProfile,
+  type RuntimeProfile
+} from '@pi/lib/runtime-profile'
 import { buildQaArtifactPlan, type QaArtifactPlan } from './artifact-paths.ts'
 import { writeAggregateQaReport } from './aggregate.ts'
 import { runQaShardCoordinator } from './coordinator.ts'
-import { getQaTargetUrl, isLocalhostQaTarget } from './config.ts'
+import { isLocalhostQaTarget } from './config.ts'
 import { fenced } from './markdown.ts'
 import {
   collectStagedQaContext,
@@ -28,6 +31,7 @@ import {
 } from './missions.ts'
 import { deferQaRestoreUntilFinish, restoreQaConfigForRun } from './model-restore.ts'
 import { QA_SYSTEM_PROMPT, renderQaEvidenceProtocolBullets } from './prompt.ts'
+import { loadQaWorkspaceConfig, type QaWorkspaceConfig } from './workspace-config.ts'
 import {
   compileFreehandRunSpec,
   compileMissionRunSpec,
@@ -90,10 +94,17 @@ async function runMissionQa(pi: ExtensionAPI, ctx: ExtensionCommandContext, args
   const run = await prepareQaRun(pi, ctx, artifacts.runId)
   if (!run) return
 
-  const spec = compileMissionRunSpec({ target: run.targetUrl, artifacts, mission })
+  const spec = compileMissionRunSpec({
+    target: run.targetUrl,
+    artifacts,
+    mission,
+    workspaceSetup: run.workspace.setup,
+    workspaceInstructions: run.workspace.instructions
+  })
   await dispatchPreparedQaShards(pi, ctx, {
     spec,
     label: `/qa ${mission.slug}`,
+    profiles: run.profiles,
     fallbackPrompt: () => buildMissionPrompt(spec, mission, request.extra, artifacts),
     prepare: async () => {
       const shardPlan = compileDirectShardPlan(spec)
@@ -120,18 +131,22 @@ async function runStagedQa(pi: ExtensionAPI, ctx: ExtensionCommandContext, args:
   const spec = compileStagedRunSpec({
     target: run.targetUrl,
     artifacts,
-    stagedFiles: staged.stagedFiles
+    stagedFiles: staged.stagedFiles,
+    workspaceSetup: run.workspace.setup,
+    workspaceInstructions: run.workspace.instructions
   })
   await dispatchPreparedQaShards(pi, ctx, {
     spec,
     label: '/qa:staged',
+    profiles: run.profiles,
     fallbackPrompt: () => buildStagedPrompt(spec, staged, args.trim(), artifacts),
     prepare: async () => {
       const { shardPlan, shardState } = await runQaShardPlannerSubagent(pi, ctx, {
         spec,
         context: buildStagedPlannerContext(staged),
         sourceCommand: 'qa:staged',
-        extra: args.trim()
+        extra: args.trim(),
+        runtimeProfile: run.profiles.planner
       })
       return { shardPlan, shardState }
     }
@@ -151,16 +166,24 @@ async function runFreehandQa(pi: ExtensionAPI, ctx: ExtensionCommandContext, arg
   const run = await prepareQaRun(pi, ctx, artifacts.runId)
   if (!run) return
 
-  const spec = compileFreehandRunSpec({ target: run.targetUrl, artifacts, prompt })
+  const spec = compileFreehandRunSpec({
+    target: run.targetUrl,
+    artifacts,
+    prompt,
+    workspaceSetup: run.workspace.setup,
+    workspaceInstructions: run.workspace.instructions
+  })
   await dispatchPreparedQaShards(pi, ctx, {
     spec,
     label: '/qa:freehand',
+    profiles: run.profiles,
     fallbackPrompt: () => buildFreehandPrompt(spec, prompt, artifacts),
     prepare: async () => {
       const { shardPlan, shardState } = await runQaShardPlannerSubagent(pi, ctx, {
         spec,
         context: prompt,
-        sourceCommand: 'qa:freehand'
+        sourceCommand: 'qa:freehand',
+        runtimeProfile: run.profiles.planner
       })
       return { shardPlan, shardState }
     }
@@ -235,12 +258,54 @@ function missionPickerLabel(mission: QaMissionSummary): string {
   return `${mission.slug}${mission.title ? ` — ${mission.title}` : ''} (${mission.relativePath})`
 }
 
+interface QaResolvedRuntimeProfiles {
+  readonly parent: RuntimeProfile
+  readonly setup: RuntimeProfile
+  readonly planner: RuntimeProfile
+  readonly worker: RuntimeProfile
+}
+
+function resolveQaRuntimeProfiles(ctx: ExtensionCommandContext, workspace: QaWorkspaceConfig): QaResolvedRuntimeProfiles {
+  const defaultProfile = workspace.runtimeProfiles.default ?? {}
+  const profiles = {
+    parent: defaultProfile,
+    setup: mergeRuntimeProfiles(defaultProfile, workspace.runtimeProfiles.setup),
+    planner: mergeRuntimeProfiles(defaultProfile, workspace.runtimeProfiles.planner),
+    worker: mergeRuntimeProfiles(defaultProfile, workspace.runtimeProfiles.worker)
+  }
+  validateQaRuntimeProfiles(ctx, profiles)
+  return profiles
+}
+
+function mergeRuntimeProfiles(base: RuntimeProfile | undefined, override: RuntimeProfile | undefined): RuntimeProfile {
+  return { ...(base ?? {}), ...(override ?? {}) }
+}
+
+function validateQaRuntimeProfiles(ctx: ExtensionCommandContext, profiles: QaResolvedRuntimeProfiles): void {
+  for (const [role, profile] of Object.entries(profiles) as Array<[keyof QaResolvedRuntimeProfiles, RuntimeProfile]>) {
+    if (profile.model) resolveRuntimeProfileModel(ctx, profile.model, `/qa ${role} runtime profile`)
+  }
+}
+
 async function prepareQaRun(
   pi: ExtensionAPI,
   ctx: ExtensionCommandContext,
   runId: string
-): Promise<{ readonly targetUrl: string } | undefined> {
-  const targetUrl = getQaTargetUrl()
+): Promise<{
+  readonly targetUrl: string
+  readonly workspace: QaWorkspaceConfig
+  readonly profiles: QaResolvedRuntimeProfiles
+} | undefined> {
+  let workspace: QaWorkspaceConfig
+  let profiles: QaResolvedRuntimeProfiles
+  try {
+    workspace = loadQaWorkspaceConfig(ctx.cwd)
+    profiles = resolveQaRuntimeProfiles(ctx, workspace)
+  } catch (error) {
+    ctx.ui.notify(formatRuntimeProfileError(error), 'error')
+    return undefined
+  }
+  const targetUrl = workspace.targetUrl
   if (!targetUrl) {
     ctx.ui.notify('QA target URL is not configured. Run /config and set the /qa target row.', 'error')
     return undefined
@@ -250,9 +315,9 @@ async function prepareQaRun(
     return undefined
   }
 
-  if (!(await prepareQaAgent(pi, ctx, { kind: 'qa-finish', runId }))) return undefined
+  if (!(await prepareQaAgent(pi, ctx, { kind: 'qa-finish', runId }, profiles.parent))) return undefined
 
-  return { targetUrl }
+  return { targetUrl, workspace, profiles }
 }
 
 function buildWorkerFallbackPrompt(prompt: string, error: string): string {
@@ -270,6 +335,7 @@ async function dispatchPreparedQaShards(
   input: {
     readonly spec: QaRunSpec
     readonly label: string
+    readonly profiles: QaResolvedRuntimeProfiles
     readonly fallbackPrompt: () => string
     readonly prepare: () => Promise<{
       readonly shardPlan: QaShardPlan
@@ -280,14 +346,15 @@ async function dispatchPreparedQaShards(
   let handedToCoordinator = false
   try {
     const prepared = await input.prepare()
-    await ensureQaEnvironmentReady(pi, ctx, input.spec, input.label)
+    await ensureQaEnvironmentReady(pi, ctx, input.spec, input.label, input.profiles.setup)
     handedToCoordinator = true
     await coordinateQaShards(pi, ctx, {
       spec: input.spec,
       label: input.label,
       fallbackPrompt: input.fallbackPrompt,
       shardPlan: prepared.shardPlan,
-      shardState: prepared.shardState
+      shardState: prepared.shardState,
+      workerProfile: input.profiles.worker
     })
   } finally {
     if (!handedToCoordinator) await restoreQaConfigForRun(pi, ctx, input.spec.runId)
@@ -303,6 +370,7 @@ async function coordinateQaShards(
     readonly shardState: QaShardRunState
     readonly fallbackPrompt: () => string
     readonly label: string
+    readonly workerProfile: RuntimeProfile
   }
 ): Promise<void> {
   let handedToMainAgent = false
@@ -311,7 +379,8 @@ async function coordinateQaShards(
     const result = await runQaShardCoordinator(pi, ctx, {
       parentSpec: input.spec,
       plan: input.shardPlan,
-      state: input.shardState
+      state: input.shardState,
+      workerProfile: input.workerProfile
     })
     const aggregate = await writeAggregateQaReport(ctx.cwd, {
       parentSpec: input.spec,
@@ -347,18 +416,29 @@ type QaRestoreMode =
   | { readonly kind: 'agent-end' }
   | { readonly kind: 'qa-finish'; readonly runId: string }
 
-async function prepareQaAgent(pi: ExtensionAPI, ctx: ExtensionCommandContext, restoreMode: QaRestoreMode): Promise<boolean> {
-  const config = getCommandConfig('qa')
-  const shouldRestore = Boolean(config.model || config.thinking)
-  const restore = shouldRestore ? captureRestore(pi, ctx, 'qa') : undefined
-  if (!(await applyCommandConfig(pi, ctx, 'qa', config))) return false
+async function prepareQaAgent(
+  pi: ExtensionAPI,
+  ctx: ExtensionCommandContext,
+  restoreMode: QaRestoreMode,
+  profile?: RuntimeProfile
+): Promise<boolean> {
+  let restore: ReturnType<typeof captureMainRuntimeProfile> | undefined
+  try {
+    const config = profile ?? resolveQaRuntimeProfiles(ctx, loadQaWorkspaceConfig(ctx.cwd)).parent
+    restore = hasRuntimeProfileSettings(config) ? captureMainRuntimeProfile(pi, ctx, '/qa') : undefined
+    await applyMainRuntimeProfile(pi, ctx, config, { source: '/qa runtime profile' })
+  } catch (error) {
+    ctx.ui.notify(formatRuntimeProfileError(error), 'error')
+    return false
+  }
 
   if (restore) {
+    const restoreState = restore
     if (restoreMode.kind === 'qa-finish') {
-      deferQaRestoreUntilFinish(pi, restoreMode.runId, restore)
+      deferQaRestoreUntilFinish(pi, restoreMode.runId, restoreState)
     } else {
       await deferToAgentEnd(pi, async (endCtx) => {
-        await restoreCommandConfig(pi, restore)
+        await restoreMainRuntimeProfile(pi, restoreState)
         endCtx.ui.notify('/qa config restored', 'info')
       })
     }
@@ -370,6 +450,7 @@ async function prepareQaAgent(pi: ExtensionAPI, ctx: ExtensionCommandContext, re
 function buildMissionPrompt(spec: QaRunSpec, mission: QaMission, extra: string, artifacts: QaArtifactPlan): string {
   return [
     QA_SYSTEM_PROMPT,
+    spec.workspaceInstructions,
     qaModeHeader(spec.mode, spec.target),
     renderRunSpec(spec),
     'Mission instructions:',
@@ -392,6 +473,7 @@ function buildStagedPlannerContext(staged: StagedQaContext): string {
 function buildStagedPrompt(spec: QaRunSpec, staged: StagedQaContext, extra: string, artifacts: QaArtifactPlan): string {
   return [
     QA_SYSTEM_PROMPT,
+    spec.workspaceInstructions,
     qaModeHeader(spec.mode, spec.target),
     renderRunSpec(spec),
     `Staged files:\n${staged.stagedFiles.length ? staged.stagedFiles.map((file) => `- ${file}`).join('\n') : '- none'}`,
@@ -407,6 +489,7 @@ function buildStagedPrompt(spec: QaRunSpec, staged: StagedQaContext, extra: stri
 function buildFreehandPrompt(spec: QaRunSpec, prompt: string, artifacts: QaArtifactPlan): string {
   return [
     QA_SYSTEM_PROMPT,
+    spec.workspaceInstructions,
     qaModeHeader(spec.mode, spec.target),
     renderRunSpec(spec),
     `Freehand prompt:\n${prompt}`,

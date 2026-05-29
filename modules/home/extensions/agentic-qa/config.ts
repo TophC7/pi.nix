@@ -1,42 +1,42 @@
-import { CONFIG_PATH, readConfig, writeConfig } from '../commands/config.ts'
+import { registerConfigSection } from '@pi/lib/config-registry'
+import {
+  QA_WORKSPACE_CONFIG_PATH,
+  QA_WORKSPACE_LOCAL_CONFIG_PATH,
+  loadQaWorkspaceConfig,
+  readQaWorkspaceSharedConfig,
+  sanitizeQaParallelConfig,
+  writeQaWorkspaceSharedConfig,
+  type QaParallelConfig
+} from './workspace-config.ts'
 
-export const QA_CONFIG_PATH = CONFIG_PATH
-
-export interface QaParallelConfig {
-  readonly enabled: boolean
-  readonly maxConcurrency: number
-}
+export const QA_CONFIG_PATH = QA_WORKSPACE_CONFIG_PATH
 
 const DEFAULT_QA_PARALLEL_CONFIG: QaParallelConfig = { enabled: false, maxConcurrency: 1 }
-const MAX_QA_PARALLEL_CONCURRENCY = 8
 
 function sanitizeQaTargetUrl(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined
 }
 
-export function getQaTargetUrl(): string | undefined {
-  return sanitizeQaTargetUrl(readConfig().qaTargetUrl)
+export function getQaTargetUrl(cwd: string): string | undefined {
+  return loadQaWorkspaceConfig(cwd).targetUrl
 }
 
-export function saveQaTargetUrl(targetUrl: string | undefined): string | undefined {
-  const next = { ...readConfig(), qaTargetUrl: sanitizeQaTargetUrl(targetUrl) }
-  writeConfig(next)
-  return next.qaTargetUrl
+export function saveQaTargetUrl(targetUrl: string | undefined, cwd: string): string | undefined {
+  const sanitized = sanitizeQaTargetUrl(targetUrl)
+  const next: Record<string, unknown> = { ...readQaWorkspaceSharedConfig(cwd), targetUrl: sanitized }
+  if (!sanitized) delete next.targetUrl
+  writeQaWorkspaceSharedConfig(cwd, next)
+  return sanitized
 }
 
-export function getQaParallelConfig(): QaParallelConfig {
-  const raw = readConfig().qaParallel
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return DEFAULT_QA_PARALLEL_CONFIG
-  const candidate = raw as Record<string, unknown>
-  const enabled = candidate.enabled === true
-  const maxConcurrency = sanitizeMaxConcurrency(candidate.maxConcurrency)
-  return enabled ? { enabled, maxConcurrency } : DEFAULT_QA_PARALLEL_CONFIG
+export function getQaParallelConfig(cwd: string): QaParallelConfig {
+  return loadQaWorkspaceConfig(cwd).parallel ?? DEFAULT_QA_PARALLEL_CONFIG
 }
 
-export function saveQaParallelConfig(config: Partial<QaParallelConfig>): QaParallelConfig {
+export function saveQaParallelConfig(config: Partial<QaParallelConfig>, cwd: string): QaParallelConfig {
   const nextConfig = sanitizeQaParallelConfig(config)
-  const next = { ...readConfig(), qaParallel: nextConfig }
-  writeConfig(next)
+  const next: Record<string, unknown> = { ...readQaWorkspaceSharedConfig(cwd), parallel: nextConfig }
+  writeQaWorkspaceSharedConfig(cwd, next)
   return nextConfig
 }
 
@@ -50,22 +50,42 @@ export function isLocalhostQaTarget(targetUrl: string): boolean {
   }
 }
 
-export function formatQaConfigStatus(targetUrl: string | undefined = getQaTargetUrl()): string {
-  const parallel = getQaParallelConfig()
+export function formatQaConfigStatus(cwd: string, targetUrl?: string): string {
+  const workspace = loadQaWorkspaceConfig(cwd)
+  const profile = workspace.runtimeProfiles.default
+  const resolvedTargetUrl = targetUrl ?? workspace.targetUrl
+  const parallel = workspace.parallel ?? DEFAULT_QA_PARALLEL_CONFIG
   return [
-    `/qa target: ${targetUrl ?? 'unset'}`,
+    `/qa model: ${profile?.model ?? 'default'}`,
+    `/qa thinking: ${profile?.thinking ?? 'default'}`,
+    `/qa target: ${resolvedTargetUrl ?? 'unset'}`,
     `/qa parallel: ${parallel.enabled ? `on (max ${parallel.maxConcurrency})` : 'off'}`,
-    `config: ${QA_CONFIG_PATH}`
+    `writes: ${QA_WORKSPACE_CONFIG_PATH}`,
+    `local override: ${QA_WORKSPACE_LOCAL_CONFIG_PATH}`
   ].join('\n')
 }
 
-function sanitizeQaParallelConfig(config: Partial<QaParallelConfig>): QaParallelConfig {
-  const enabled = config.enabled === true
-  return enabled ? { enabled, maxConcurrency: sanitizeMaxConcurrency(config.maxConcurrency) } : DEFAULT_QA_PARALLEL_CONFIG
-}
-
-function sanitizeMaxConcurrency(value: unknown): number {
-  const numeric = typeof value === 'number' ? value : Number(value)
-  if (!Number.isFinite(numeric)) return DEFAULT_QA_PARALLEL_CONFIG.maxConcurrency
-  return Math.max(1, Math.min(MAX_QA_PARALLEL_CONCURRENCY, Math.floor(numeric)))
+export function registerQaConfigSection(): void {
+  registerConfigSection({
+    id: 'agentic-qa',
+    title: 'Agentic QA',
+    description: 'Workspace-owned localhost target for QA commands.',
+    status: (ctx) => formatQaConfigStatus(ctx.cwd),
+    rows: () => [
+      {
+        kind: 'text' as const,
+        id: 'agentic-qa.target',
+        label: '/qa',
+        fieldLabel: 'target',
+        description: 'Localhost URL used by /qa, /qa:staged, and /qa:freehand.',
+        detail: `Writes shared config at ${QA_WORKSPACE_CONFIG_PATH}; ${QA_WORKSPACE_LOCAL_CONFIG_PATH} may override active values locally.`,
+        source: `writes ${QA_WORKSPACE_CONFIG_PATH}; local override ${QA_WORKSPACE_LOCAL_CONFIG_PATH}`,
+        placeholder: 'http://localhost:5173',
+        unsetLabel: 'unset',
+        get: (ctx) => getQaTargetUrl(ctx.cwd),
+        set: (targetUrl, ctx) => saveQaTargetUrl(targetUrl, ctx.cwd),
+        validate: (value) => (isLocalhostQaTarget(value) ? undefined : 'Target must be a localhost http(s) URL.')
+      }
+    ]
+  })
 }

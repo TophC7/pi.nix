@@ -6,6 +6,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import type { ExtensionAPI, ExtensionCommandContext } from '@mariozechner/pi-coding-agent'
+import type { RuntimeProfile } from '@pi/lib/runtime-profile'
 import { getQaParallelConfig, type QaParallelConfig } from './config.ts'
 import {
   updateQaShardRunState,
@@ -25,6 +26,7 @@ export interface QaShardCoordinatorInput {
   readonly plan: QaShardPlan
   readonly state: QaShardRunState
   readonly parallel?: QaParallelConfig
+  readonly workerProfile?: RuntimeProfile
   readonly runShardWorker?: (worker: PreparedQaShardWorker) => Promise<void>
 }
 
@@ -53,7 +55,7 @@ export async function runQaShardCoordinator(
   ctx: ExtensionCommandContext,
   input: QaShardCoordinatorInput
 ): Promise<QaShardCoordinatorResult> {
-  const parallel = input.parallel ?? getQaParallelConfig()
+  const parallel = input.parallel ?? getQaParallelConfig(ctx.cwd)
   const concurrency = parallel.enabled ? parallel.maxConcurrency : 1
   let state = input.state
   const work = queuedWorkItems(input.plan, state)
@@ -68,7 +70,7 @@ export async function runQaShardCoordinator(
 
     const failures = input.runShardWorker
       ? await runInjectedShardWorkerBatch(input.runShardWorker, prepared.map((entry) => entry.worker))
-      : await runSubagentShardWorkerBatch(pi, ctx, input.parentSpec.runId, prepared.map((entry) => entry.worker))
+      : await runSubagentShardWorkerBatch(pi, ctx, input.parentSpec.runId, prepared.map((entry) => entry.worker), input.workerProfile)
 
     for (const { item, worker } of prepared) {
       const failure = failures.get(worker.childSpec.runId)
@@ -121,7 +123,8 @@ async function runSubagentShardWorkerBatch(
   pi: ExtensionAPI,
   ctx: ExtensionCommandContext,
   parentRunId: string,
-  workers: readonly PreparedQaShardWorker[]
+  workers: readonly PreparedQaShardWorker[],
+  runtimeProfile: RuntimeProfile = {}
 ): Promise<Map<string, unknown>> {
   try {
     await runQaShardWorkerSubagents(
@@ -129,7 +132,8 @@ async function runSubagentShardWorkerBatch(
       ctx,
       workers,
       `/qa shards ${workers.map((worker) => worker.shard.shardId).join(', ')}`,
-      `agentic-qa:${parentRunId}:shards`
+      `agentic-qa:${parentRunId}:shards`,
+      runtimeProfile
     )
     return new Map()
   } catch (error) {

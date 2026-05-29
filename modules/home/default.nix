@@ -61,6 +61,10 @@ let
     # Directory-shaped extension: Pi settings intentionally point at the
     # directory, not commands/index.ts.
     commands.source = ./extensions/commands;
+    config = {
+      source = ./extensions/config;
+      entry = "index.ts";
+    };
 
     # Runtime support modules are linked beside extension packages but are not
     # registered as extension entrypoints.

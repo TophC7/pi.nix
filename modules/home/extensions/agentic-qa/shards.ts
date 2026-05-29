@@ -6,6 +6,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import type { ExtensionAPI, ExtensionCommandContext } from '@mariozechner/pi-coding-agent'
+import { runtimeProfileTaskFields, type RuntimeProfile } from '@pi/lib/runtime-profile'
 import type { SubagentResponse, SubagentToolSnapshot } from '@pi/lib/subagents'
 import { singleLine, truncate } from '../pi-lib/subagents/render-helpers.ts'
 import { containsCredentialLeak } from './artifacts.ts'
@@ -37,6 +38,7 @@ export interface QaShardPlan {
   readonly target: string
   readonly relativeRunDir: string
   readonly relativePlanPath: string
+  readonly workspaceInstructions?: string
   readonly shards: readonly QaShardSpec[]
 }
 
@@ -100,6 +102,7 @@ export interface QaShardPlannerInput {
   readonly context: string
   readonly sourceCommand: QaSourceCommandKind
   readonly extra?: string
+  readonly runtimeProfile?: RuntimeProfile
 }
 
 export interface QaShardPlanToolEvidenceInput {
@@ -335,6 +338,7 @@ export function hydrateQaShardWorkerRun(cwd: string, runId: string): QaRunSpec |
         relativeRunDir: plan.relativeRunDir,
         relativeArtifactDir: path.join(cwd, entry.relativeArtifactDir),
         setup: [],
+        workspaceInstructions: planWorkspaceInstructions(plan),
         scenarios: [],
         requiredEvidence: [],
         outOfScope: [],
@@ -380,6 +384,7 @@ export function buildQaShardPlannerTask(input: QaShardPlannerInput): string {
     '- Do not write JSON files yourself. The qa_shard_plan tool writes shards.json after validation.',
     '- Do not include credentials, tokens, PHI, cookies, passwords, or real user data.',
     '- After qa_shard_plan is accepted, reply with one short sentence. Do not include JSON in chat.',
+    input.spec.workspaceInstructions ? `\n${input.spec.workspaceInstructions}` : undefined,
     '',
     'Compiled provisional run spec:',
     fenced('text', renderRunSpec(input.spec)),
@@ -407,8 +412,13 @@ export async function runQaShardPlannerSubagent(
         pi,
         ctx,
         {
-          agent: QA_PLANNER_AGENT,
-          task,
+          tasks: [
+            {
+              agent: QA_PLANNER_AGENT,
+              task,
+              ...runtimeProfileTaskFields(input.runtimeProfile ?? {})
+            }
+          ],
           context: 'fresh',
           agentScope: 'both'
         },
@@ -498,8 +508,13 @@ function buildShardPlan(spec: QaRunSpec, shards: readonly QaShardSpec[]): QaShar
     target: spec.target,
     relativeRunDir: spec.relativeRunDir,
     relativePlanPath: qaShardPlanPath(spec),
+    workspaceInstructions: spec.workspaceInstructions,
     shards
   }
+}
+
+function planWorkspaceInstructions(plan: QaShardPlan): string | undefined {
+  return plan.workspaceInstructions
 }
 
 function shardFromScenario(spec: QaRunSpec, scenario: QaScenarioSpec): QaShardSpec {

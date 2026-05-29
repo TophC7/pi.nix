@@ -3,3 +3,5 @@
 *.nfs*
 .playwright-mcp
 temp/
+.antigravitycli
+.understand-anything

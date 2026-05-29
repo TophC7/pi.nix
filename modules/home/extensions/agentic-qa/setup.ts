@@ -1,4 +1,5 @@
 import type { ExtensionAPI, ExtensionCommandContext } from '@mariozechner/pi-coding-agent'
+import { runtimeProfileTaskFields, type RuntimeProfile } from '@pi/lib/runtime-profile'
 import { fenced } from './markdown.ts'
 import { renderRunSpec, type QaRunSpec } from './run-state.ts'
 
@@ -24,7 +25,8 @@ export async function ensureQaEnvironmentReady(
   pi: ExtensionAPI,
   ctx: ExtensionCommandContext,
   spec: QaRunSpec,
-  label: string
+  label: string,
+  runtimeProfile: RuntimeProfile = {}
 ): Promise<void> {
   const setupItems = actionableQaSetupItems(spec.setup)
   let setupRan = false
@@ -36,7 +38,7 @@ export async function ensureQaEnvironmentReady(
 
   if (!target.ok && setupItems.length > 0) {
     ctx.ui.notify(`${label}: running one-time QA setup.`, 'info')
-    await runQaEnvironmentSetupSubagent(pi, ctx, spec, setupItems, label)
+    await runQaEnvironmentSetupSubagent(pi, ctx, spec, setupItems, label, runtimeProfile)
     setupRan = true
     target = await waitForQaTarget(spec.target, {
       timeoutMs: POST_SETUP_TARGET_TIMEOUT_MS,
@@ -131,6 +133,7 @@ export function buildQaEnvironmentSetupTask(spec: QaRunSpec, setupItems = action
     '- Use synthetic/local-only data. Do not expose secrets, cookies, tokens, passwords, or PHI.',
     '- If setup cannot be completed, say SETUP_BLOCKED: <reason>.',
     '- If setup is complete and target is reachable, end with SETUP_OK.',
+    spec.workspaceInstructions ? `\n${spec.workspaceInstructions}` : undefined,
     '',
     'Run spec for context:',
     fenced('text', renderRunSpec(spec))
@@ -142,15 +145,21 @@ async function runQaEnvironmentSetupSubagent(
   ctx: ExtensionCommandContext,
   spec: QaRunSpec,
   setupItems: readonly string[],
-  label: string
+  label: string,
+  runtimeProfile: RuntimeProfile
 ): Promise<void> {
   const { extractSubagentText, runSubagent } = await import('@pi/lib/subagents')
   const response = await runSubagent(
     pi,
     ctx,
     {
-      agent: QA_SETUP_AGENT,
-      task: buildQaEnvironmentSetupTask(spec, [...setupItems]),
+      tasks: [
+        {
+          agent: QA_SETUP_AGENT,
+          task: buildQaEnvironmentSetupTask(spec, [...setupItems]),
+          ...runtimeProfileTaskFields(runtimeProfile)
+        }
+      ],
       agentScope: 'both'
     },
     `${label} setup`,

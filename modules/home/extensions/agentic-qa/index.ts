@@ -6,6 +6,7 @@
 import type { ExtensionAPI } from '@mariozechner/pi-coding-agent'
 import { defineExtension } from '@pi/lib'
 import { registerQaCommands } from './commands.ts'
+import { registerQaConfigSection } from './config.ts'
 import { registerQaModelRestoreLifecycle } from './model-restore.ts'
 import { registerPlaywrightCapture } from './playwright-capture.ts'
 import { registerQaTools } from './tools.ts'
@@ -13,6 +14,7 @@ import { registerQaTools } from './tools.ts'
 export default defineExtension({
   name: 'agentic-qa',
   setup: (pi: ExtensionAPI) => {
+    registerQaConfigSection()
     registerQaCommands(pi)
     registerQaTools(pi)
     registerPlaywrightCapture(pi)

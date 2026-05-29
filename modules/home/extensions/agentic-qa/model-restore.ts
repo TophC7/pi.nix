@@ -1,7 +1,7 @@
 import type { ExtensionAPI, ExtensionContext } from '@mariozechner/pi-coding-agent'
-import { restoreCommandConfig, type RestoreState } from '../commands/config.ts'
+import { restoreMainRuntimeProfile, type MainRuntimeRestoreState } from '@pi/lib/runtime-profile'
 
-const pendingQaRestores = new WeakMap<ExtensionAPI, Map<string, RestoreState>>()
+const pendingQaRestores = new WeakMap<ExtensionAPI, Map<string, MainRuntimeRestoreState>>()
 const restoreLifecycleRegistered = new WeakSet<ExtensionAPI>()
 const restoreAbortListeners = new WeakMap<ExtensionAPI, { readonly signal: AbortSignal; readonly listener: () => void }>()
 
@@ -37,7 +37,7 @@ export function registerQaModelRestoreLifecycle(pi: ExtensionAPI): void {
   })
 }
 
-export function deferQaRestoreUntilFinish(pi: ExtensionAPI, runId: string, restore: RestoreState): void {
+export function deferQaRestoreUntilFinish(pi: ExtensionAPI, runId: string, restore: MainRuntimeRestoreState): void {
   let restores = pendingQaRestores.get(pi)
   if (!restores) {
     restores = new Map()
@@ -61,7 +61,7 @@ export async function restoreQaConfigForRun(
     clearQaRestoreAbortListener(pi)
   }
 
-  await restoreCommandConfig(pi, restore)
+  await restoreMainRuntimeProfile(pi, restore)
   ctx.ui.notify('/qa config restored', 'info')
   return true
 }
@@ -73,7 +73,7 @@ export async function restoreAllPendingQaConfig(pi: ExtensionAPI, ctx: Pick<Exte
 
   pendingQaRestores.delete(pi)
   clearQaRestoreAbortListener(pi)
-  await restoreCommandConfig(pi, restore)
+  await restoreMainRuntimeProfile(pi, restore)
   ctx.ui.notify('/qa config restored', 'info')
   return true
 }

@@ -1,12 +1,13 @@
 import { randomUUID } from 'node:crypto'
+import { THINKING_LEVELS, isThinkingLevel, type ThinkingLevel } from '../runtime-profile.ts'
 import type { SubagentRunMode, SubagentRunRequest, SubagentSlotPlan } from './types.ts'
 
 export const SUBAGENT_MAX_PARALLEL_SLOTS = 32
 export const SUBAGENT_MAX_TASK_COUNT = 16
 export const SUBAGENT_MAX_CHAIN_STEPS = 16
 
-export const SUBAGENT_THINKING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh'] as const
-export type SubagentThinkingLevel = (typeof SUBAGENT_THINKING_LEVELS)[number]
+export const SUBAGENT_THINKING_LEVELS = THINKING_LEVELS
+export type SubagentThinkingLevel = ThinkingLevel
 
 export const SUBAGENT_SYSTEM_PROMPT_MODES = ['replace', 'append'] as const
 export type SubagentSystemPromptMode = (typeof SUBAGENT_SYSTEM_PROMPT_MODES)[number]
@@ -304,8 +305,7 @@ function parseAgentScope(value: unknown): AgentScope {
 }
 
 export function parseThinking(value: unknown): SubagentThinkingLevel | undefined {
-  if (typeof value !== 'string') return undefined
-  return (SUBAGENT_THINKING_LEVELS as readonly string[]).includes(value) ? (value as SubagentThinkingLevel) : undefined
+  return isThinkingLevel(value) ? value : undefined
 }
 
 export function parseSystemPromptMode(value: unknown): SubagentSystemPromptMode | undefined {

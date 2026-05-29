@@ -1,14 +1,15 @@
 import type { ExtensionAPI, ExtensionCommandContext } from '@mariozechner/pi-coding-agent'
 import { deferToAgentEnd } from '@pi/lib/agent-end'
 import { captureOptimizedCommand as captureOptimizedCommandShared, type CommandCapture } from '@pi/lib/rtk'
-import { headBytes } from '@pi/lib/subagents/output'
 import {
-  applyCommandConfig,
-  captureRestore,
-  getCommandConfig,
-  restoreCommandConfig,
-  type ManagedCommand
-} from './config'
+  applyMainRuntimeProfile,
+  captureMainRuntimeProfile,
+  formatRuntimeProfileError,
+  hasRuntimeProfileSettings,
+  restoreMainRuntimeProfile
+} from '@pi/lib/runtime-profile'
+import { headBytes } from '@pi/lib/subagents/output'
+import { CONFIG_PATH, getCommandConfig } from './config'
 import { COMMIT_PROMPT, PR_PROMPT } from './prompts'
 
 export type PromptCommand = 'commit' | 'pr'
@@ -55,18 +56,24 @@ export async function runPromptCommand(
   const preCollectedContext = await collectPromptContext(pi, ctx, command)
   if (!preCollectedContext) return
 
-  const config = getCommandConfig(command)
-  const shouldRestore = Boolean(config.model || config.thinking)
-  const restore = shouldRestore ? captureRestore(pi, ctx, command as ManagedCommand) : undefined
-  if (!(await applyCommandConfig(pi, ctx, command, config))) return
+  let restore: ReturnType<typeof captureMainRuntimeProfile> | undefined
+  try {
+    const config = getCommandConfig(command)
+    restore = hasRuntimeProfileSettings(config) ? captureMainRuntimeProfile(pi, ctx, `/${command}`) : undefined
+    await applyMainRuntimeProfile(pi, ctx, config, { source: `${CONFIG_PATH} /${command}` })
+  } catch (error) {
+    ctx.ui.notify(formatRuntimeProfileError(error), 'error')
+    return
+  }
 
   const prompt = buildPrompt(command, PROMPTS[command], preCollectedContext, userPrompt)
   pi.sendUserMessage(prompt, { deliverAs: 'followUp' })
 
   if (restore) {
+    const restoreState = restore
     await deferToAgentEnd(pi, async (endCtx) => {
-      await restoreCommandConfig(pi, restore)
-      endCtx.ui.notify(`/${restore.command} config restored`, 'info')
+      await restoreMainRuntimeProfile(pi, restoreState)
+      endCtx.ui.notify(`${restoreState.label} config restored`, 'info')
     })
   }
 }
