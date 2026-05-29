@@ -113,7 +113,11 @@ export function getConfigSections(): readonly ConfigRegistrySection[] {
 }
 
 export function getConfigRows(ctx: ExtensionCommandContext): readonly ConfigRegistryRow[] {
-  return getConfigSections().flatMap((section) => materializeRows(section, ctx))
+  return getConfigSections().flatMap((section) => getConfigSectionRows(section, ctx))
+}
+
+export function getConfigSectionRows(section: ConfigRegistrySection, ctx: ExtensionCommandContext): readonly ConfigRegistryRow[] {
+  return typeof section.rows === 'function' ? section.rows(ctx) : section.rows
 }
 
 export function formatConfigRegistryStatus(ctx: ExtensionCommandContext): string {
@@ -130,8 +134,4 @@ export function formatConfigRegistryStatus(ctx: ExtensionCommandContext): string
 
 export function configRowSource(row: ConfigRegistryRow, ctx: ExtensionCommandContext): string | undefined {
   return typeof row.source === 'function' ? row.source(ctx) : row.source
-}
-
-function materializeRows(section: ConfigRegistrySection, ctx: ExtensionCommandContext): readonly ConfigRegistryRow[] {
-  return typeof section.rows === 'function' ? section.rows(ctx) : section.rows
 }

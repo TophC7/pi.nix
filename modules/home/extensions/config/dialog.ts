@@ -3,8 +3,10 @@ import type { ExtensionCommandContext, Theme } from '@mariozechner/pi-coding-age
 import { Input, Key, matchesKey, type TUI } from '@mariozechner/pi-tui'
 import {
   configRowSource,
-  getConfigRows,
-  type ConfigRegistryRow
+  getConfigSections,
+  getConfigSectionRows,
+  type ConfigRegistryRow,
+  type ConfigRegistrySection
 } from '@pi/lib/config-registry'
 import { THINKING_LEVELS, formatRuntimeProfileError } from '@pi/lib/runtime-profile'
 import {
@@ -14,10 +16,13 @@ import {
   renderDialogDivider,
   renderDialogFooter,
   renderDialogHeader,
+  renderTabs,
+  createListNav,
   type DialogContent
 } from '@pi/lib/ui'
 
 const FOOTER_KEYS = [
+  { key: '←→', label: 'tab' },
   { key: '↑↓', label: 'setting' },
   { key: 'Enter', label: 'edit' },
   { key: 'd', label: 'default' },
@@ -81,6 +86,7 @@ export function openConfigDialog(ctx: ExtensionCommandContext): void {
 }
 
 class ConfigDialog implements DialogContent {
+  private selectedSectionIndex = 0
   private selectedRowIndex = 0
   private mode: DialogMode = { kind: 'config' }
   private status: string | undefined
@@ -114,24 +120,56 @@ class ConfigDialog implements DialogContent {
     this.handleConfigInput(data)
   }
 
+  private sections(): readonly ConfigRegistrySection[] {
+    const sections = getConfigSections()
+    this.selectedSectionIndex = clamp(this.selectedSectionIndex, 0, Math.max(0, sections.length - 1))
+    return sections
+  }
+
+  private activeSection(sections = this.sections()): ConfigRegistrySection | undefined {
+    return sections[this.selectedSectionIndex]
+  }
+
+  private activeRows(): readonly ConfigRegistryRow[] {
+    const section = this.activeSection()
+    return section ? getConfigSectionRows(section, this.ctx) : []
+  }
+
+  private emptySectionLine(section: ConfigRegistrySection | undefined, width: number): string {
+    const message = section ? `No config rows registered for ${section.title}.` : 'No config sections registered.'
+    return this.theme.fg('muted', padLine(fitLine(message, width), width))
+  }
+
   private renderConfig(width: number): string[] {
-    const rows = getConfigRows(this.ctx)
-    const values = snapshotRowValues(rows, this.ctx)
+    const sections = this.sections()
+    const section = this.activeSection(sections)
+    const rows = section ? getConfigSectionRows(section, this.ctx) : []
     const header = renderDialogHeader({ title: 'Config', theme: this.theme, width })
+    const tabs = renderTabs({
+      tabs: sections.map((entry) => ({ id: entry.id, label: entry.title })),
+      activeId: section?.id,
+      width,
+      theme: this.theme
+    })
     const footer = renderDialogFooter({ theme: this.theme, width, keys: FOOTER_KEYS, status: this.status })
     const bodyRows = rowBudget()
+    const visibleBudget = Math.max(8, bodyRows - 6)
     const safeIndex = clamp(this.selectedRowIndex, 0, Math.max(0, rows.length - 1))
     this.selectedRowIndex = safeIndex
-    const visibleRows = scrollWindow(rows, safeIndex, Math.max(8, bodyRows - 5)).map((row, index) => {
-      const absoluteIndex = windowStart(rows.length, safeIndex, Math.max(8, bodyRows - 5)) + index
-      return this.configRowLine(row, values, absoluteIndex === safeIndex, width)
-    })
+    const start = windowStart(rows.length, safeIndex, visibleBudget)
+    const visibleRowItems = rows.slice(start, start + visibleBudget)
+    const values = snapshotRowValues(visibleRowItems, this.ctx)
+    const visibleRows = visibleRowItems.map((row, index) =>
+      this.configRowLine(row, values, start + index === safeIndex, width)
+    )
     const selected = rows[safeIndex]
-    const details = selected ? this.detailLines(selected, width) : [this.theme.fg('muted', padLine(fitLine('No config rows registered.', width), width))]
+    const details = selected ? this.detailLines(selected, width) : [this.emptySectionLine(section, width)]
     return [
       header,
       renderDialogDivider({ theme: this.theme, width }),
-      ...padRows(visibleRows, Math.max(8, bodyRows - 5), width),
+      tabs,
+      renderDialogDivider({ theme: this.theme, width }),
+      ...padRows(visibleRows, visibleBudget, width),
       renderDialogDivider({ theme: this.theme, width }),
       ...details,
       renderDialogDivider({ theme: this.theme, width }),
@@ -187,6 +225,14 @@ class ConfigDialog implements DialogContent {
   private handleConfigInput(data: string): void {
     if (matchesKey(data, Key.escape) || matchesKey(data, Key.ctrl('c'))) {
       this.close()
+      return
+    }
+    if (matchesKey(data, Key.left)) {
+      this.moveSection(-1)
+      return
+    }
+    if (matchesKey(data, Key.right)) {
+      this.moveSection(1)
       return
     }
     if (matchesKey(data, Key.up)) {
@@ -253,15 +299,31 @@ class ConfigDialog implements DialogContent {
     this.tui.requestRender()
   }
 
+  private moveSection(delta: number): void {
+    const sections = this.sections()
+    const nav = createListNav({ count: sections.length, wrap: true })
+    nav.moveTo(this.selectedSectionIndex)
+    nav.moveTo(nav.index + delta)
+    const nextIndex = nav.index
+    const nextStatus = sections[nextIndex]?.title
+    if (nextIndex === this.selectedSectionIndex && this.selectedRowIndex === 0 && this.status === nextStatus) return
+    this.selectedSectionIndex = nextIndex
+    this.selectedRowIndex = 0
+    this.status = nextStatus
+    this.tui.requestRender()
+  }
+
   private moveRow(delta: number): void {
-    const rows = getConfigRows(this.ctx)
-    this.selectedRowIndex = clamp(this.selectedRowIndex + delta, 0, Math.max(0, rows.length - 1))
+    const rows = this.activeRows()
+    const nextIndex = clamp(this.selectedRowIndex + delta, 0, Math.max(0, rows.length - 1))
+    if (nextIndex === this.selectedRowIndex && this.status === undefined) return
+    this.selectedRowIndex = nextIndex
     this.status = undefined
     this.tui.requestRender()
   }
 
   private async editSelectedRow(): Promise<void> {
-    const row = getConfigRows(this.ctx)[this.selectedRowIndex]
+    const row = this.activeRows()[this.selectedRowIndex]
     if (!row) return
     if (row.kind === 'thinking') {
       this.cycleThinking(row)
@@ -391,7 +453,7 @@ class ConfigDialog implements DialogContent {
   }
 
   private defaultSelectedField(): void {
-    const row = getConfigRows(this.ctx)[this.selectedRowIndex]
+    const row = this.activeRows()[this.selectedRowIndex]
     if (!row) return
     const result = this.saveRow(row, undefined)
     this.status = result.ok ? `${row.label} ${fieldLabel(row)} → ${row.kind === 'text' ? row.unsetLabel ?? 'unset' : 'default'}` : result.error
