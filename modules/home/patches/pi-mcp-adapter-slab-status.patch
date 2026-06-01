@@ -1,21 +1,44 @@
+diff --git a/index.ts b/index.ts
+index 5c90ac1..0a8c009 100644
+--- a/index.ts
++++ b/index.ts
+@@ -10,6 +10,7 @@ import { executeCall, executeConnect, executeDescribe, executeList, executeSearc
+ import { getConfigPathFromArgv, truncateAtWord } from "./utils.ts";
+ import { initializeOAuth, shutdownOAuth } from "./mcp-auth-flow.ts";
+ import { createMcpDirectToolCallRenderer, renderMcpProxyToolCall, renderMcpToolResult } from "./tool-result-renderer.ts";
++import { clearSlabStatus } from "./slab-status.ts";
+ 
+ export default function mcpAdapter(pi: ExtensionAPI) {
+   let state: McpExtensionState | null = null;
+@@ -44,6 +45,8 @@ export default function mcpAdapter(pi: ExtensionAPI) {
+     if (flushError) {
+       throw flushError;
+     }
++
++    clearSlabStatus();
+   }
+ 
+   const earlyConfigPath = getConfigPathFromArgv();
 diff --git a/init.ts b/init.ts
-index 1111111..2222222 100644
+index df522ce..a831746 100644
 --- a/init.ts
 +++ b/init.ts
-@@ -20,5 +20,6 @@ import { UiResourceHandler } from "./ui-resource-handler.ts";
+@@ -22,6 +22,7 @@ import { UiResourceHandler } from "./ui-resource-handler.ts";
  import { openUrl, parallelLimit } from "./utils.ts";
  import { logger } from "./logger.ts";
  import { getMissingConfiguredDirectToolServers } from "./direct-tools.ts";
 +import { clearSlabStatus, writeSlabStatus } from "./slab-status.ts";
  
  const FAILURE_BACKOFF_MS = 60 * 1000;
-@@ -58,5 +59,6 @@ export async function initializeMcp(
+ 
+@@ -66,6 +67,7 @@ export async function initializeMcp(
  
    const serverEntries = Object.entries(config.mcpServers);
    if (serverEntries.length === 0) {
 +    clearSlabStatus();
      return state;
    }
+ 
 @@ -113,8 +115,11 @@ export async function initializeMcp(
        });
  
@@ -28,7 +51,23 @@ index 1111111..2222222 100644
  
    const results = await parallelLimit(startupServers, 10, async ([name, definition]) => {
      try {
-@@ -303,10 +310,12 @@ export async function lazyConnect(state: McpExtensionState, serverName: string):
+@@ -271,11 +276,13 @@ export function updateStatusBar(state: McpExtensionState): void {
+   if (!ui) return;
+   const total = Object.keys(state.config.mcpServers).length;
+   if (total === 0) {
++    clearSlabStatus();
+     ui.setStatus("mcp", undefined);
+     return;
+   }
+-  const connectedCount = state.manager.getAllConnections().size;
+-  ui.setStatus("mcp", ui.theme.fg("accent", `MCP: ${connectedCount}/${total} servers`));
++  const snapshot = writeSlabStatus(state);
++  const tools = snapshot.totalTools > 0 ? ` (${snapshot.totalTools} tools)` : "";
++  ui.setStatus("mcp", ui.theme.fg("accent", `MCP: ${snapshot.connected}/${total} servers${tools}`));
+ }
+ 
+ export function getFailureAgeSeconds(state: McpExtensionState, serverName: string): number | null {
+@@ -304,10 +311,12 @@ export async function lazyConnect(state: McpExtensionState, serverName: string):
  
    try {
      if (state.ui) {
@@ -41,28 +80,9 @@ index 1111111..2222222 100644
        return false;
      }
      state.failureTracker.delete(serverName);
-diff --git a/index.ts b/index.ts
-index 3333333..4444444 100644
---- a/index.ts
-+++ b/index.ts
-@@ -10,4 +10,5 @@ import { getConfigPathFromArgv, truncateAtWord } from "./utils.ts";
- import { initializeOAuth, shutdownOAuth } from "./mcp-auth-flow.ts";
- import { renderMcpToolResult } from "./tool-result-renderer.ts";
-+import { clearSlabStatus } from "./slab-status.ts";
- 
- export default function mcpAdapter(pi: ExtensionAPI) {
-@@ -42,5 +43,7 @@ export default function mcpAdapter(pi: ExtensionAPI) {
-     if (flushError) {
-       throw flushError;
-     }
-+
-+    clearSlabStatus();
-   }
- 
-   const earlyConfigPath = getConfigPathFromArgv();
 diff --git a/slab-status.ts b/slab-status.ts
 new file mode 100644
-index 0000000..5555555
+index 0000000..c937229
 --- /dev/null
 +++ b/slab-status.ts
 @@ -0,0 +1,126 @@

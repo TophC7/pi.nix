@@ -33,9 +33,6 @@ let
         < ${./patches/pi-command-models-compact.patch}
       patch -p1 \
         -d $out/lib/node_modules/@earendil-works/pi-coding-agent \
-        < ${./patches/pi-agent-core-persist-run-failures.patch}
-      patch -p1 \
-        -d $out/lib/node_modules/@earendil-works/pi-coding-agent \
         < ${./patches/pi-ai-discard-failed-tool-continuations.patch}
 
       while IFS= read -r file; do
@@ -125,7 +122,9 @@ let
   externalPackageDeclarations = [
     { name = "ask-user"; package = inputs.pi-ask-user; }
     { name = "rtk-optimizer"; package = inputs.pi-rtk-optimizer; }
-    { name = "pi-tool-display"; package = piPackages.pi-tool-display; }
+    # No runtime deps + loads ./index.ts directly, so the raw source input is
+    # the package, same as ask-user and rtk-optimizer.
+    { name = "pi-tool-display"; package = inputs.pi-tool-display; }
     { name = "pi-claude-bridge"; package = piPackages.pi-claude-bridge; }
     { name = "pi-web-access"; package = piPackages.pi-web-access; }
     # MCP transport for Pi. Reads ~/.pi/agent/mcp.json and registers every
@@ -184,6 +183,13 @@ in
         # Pi auto-loads AGENTS.md from the agent dir as global context.
         ".pi/agent/AGENTS.md".source = ./SOUL.md;
         ".pi/agent/themes/terminal.json".source = ./themes/terminal.json;
+
+        # pi-claude-bridge reads the Claude Code executable path from here, so
+        # it resolves to the Nix store instead of PATH. Replaces the old source
+        # patch that injected the path directly.
+        ".pi/agent/claude-bridge.json".text = builtins.toJSON {
+          provider.pathToClaudeCodeExecutable = lib.getExe claudeCode;
+        };
         ".pi/agent/settings.json".text = builtins.toJSON {
           defaultProvider = cfg.provider;
           defaultModel = cfg.model;

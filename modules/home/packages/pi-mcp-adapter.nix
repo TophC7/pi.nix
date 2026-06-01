@@ -19,7 +19,7 @@
 # the bun2nix nix expression are generated together and must stay paired.
 pkgs.stdenv.mkDerivation {
   pname = "pi-mcp-adapter";
-  version = "2.6.0";
+  version = "2.8.0";
   src = inputs.pi-mcp-adapter;
 
   nativeBuildInputs = [
@@ -36,16 +36,9 @@ pkgs.stdenv.mkDerivation {
   dontUseBunCheck = true;
   dontUseBunInstall = true;
 
+  # All slab-status source mutations (including the updateStatusBar rewrite)
+  # live in this one patch, so it stays robust to upstream drift via fuzz.
   patches = [ ../patches/pi-mcp-adapter-slab-status.patch ];
-
-  postPatch = ''
-    substituteInPlace init.ts \
-      --replace-fail '  if (total === 0) {' '  if (total === 0) {
-    clearSlabStatus();' \
-      --replace-fail '  const connectedCount = state.manager.getAllConnections().size;' '  const snapshot = writeSlabStatus(state);' \
-      --replace-fail '  ui.setStatus("mcp", ui.theme.fg("accent", `MCP: ''${connectedCount}/''${total} servers`));' '  const tools = snapshot.totalTools > 0 ? ` (''${snapshot.totalTools} tools)` : "";
-  ui.setStatus("mcp", ui.theme.fg("accent", `MCP: ''${snapshot.connected}/''${total} servers''${tools}`));'
-  '';
 
   postUnpack = ''
     cp ${lock "pi-mcp-adapter-bun.lock"} $sourceRoot/bun.lock
