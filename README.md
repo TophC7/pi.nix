@@ -167,6 +167,8 @@ External packages are pinned through Nix:
 | Package file | Package |
 | --- | --- |
 | `modules/home/packages/context-mode.nix` | `context-mode` 1.0.161 |
+| `modules/home/packages/impeccable.nix` | Impeccable skill 3.7.1 |
+| `modules/home/packages/pi-agentsmd.nix` | `pi-agentsmd` 0.1.1 |
 | `modules/home/packages/pi-mcp-adapter.nix` | `pi-mcp-adapter` 2.8.0 |
 | `modules/home/packages/pi-web-access.nix` | `pi-web-access` 0.10.7 |
 | `modules/home/packages/pi-claude-bridge.nix` | `pi-claude-bridge` 0.4.0 |

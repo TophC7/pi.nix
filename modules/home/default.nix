@@ -44,6 +44,7 @@ let
         --prefix PATH : ${lib.makeBinPath [ pkgs.bun pkgs.fd pkgs.ripgrep ]} \
         --set PI_SKIP_VERSION_CHECK 1 \
         --set PI_TELEMETRY 0 \
+        --set IMPECCABLE_NO_UPDATE_CHECK 1 \
         --add-flags "$out/lib/node_modules/@earendil-works/pi-coding-agent/dist/cli.js"
 
       runHook postInstall
@@ -127,12 +128,14 @@ let
     { name = "pi-tool-display"; package = inputs.pi-tool-display; }
     { name = "pi-claude-bridge"; package = piPackages.pi-claude-bridge; }
     { name = "pi-web-access"; package = piPackages.pi-web-access; }
+    { name = "pi-agentsmd"; package = piPackages.pi-agentsmd; }
     # MCP transport for Pi. Reads ~/.pi/agent/mcp.json and registers every
     # exposed MCP tool through pi.registerTool() so the model can call them
     # like any built-in. Without this extension Pi has no MCP awareness, and
     # context-mode's `ctx_*` tools never reach the model.
     { name = "pi-mcp-adapter"; package = piPackages.pi-mcp-adapter; }
     { name = "context-mode"; package = piPackages.context-mode; }
+    { name = "impeccable"; package = piPackages.impeccable; }
     # use-fish must load last so its bash tool_call hook runs after every
     # other package's hook. In particular rtk-optimizer needs to see the raw
     # bash command (e.g. `grep -r TODO .`) before we wrap it as

@@ -48,8 +48,16 @@
       url = "github:nicobailon/pi-mcp-adapter";
       flake = false;
     };
+    pi-agentsmd = {
+      url = "github:jvm/pi-mono";
+      flake = false;
+    };
     context-mode = {
       url = "github:mksglu/context-mode";
+      flake = false;
+    };
+    impeccable = {
+      url = "github:pbakaus/impeccable";
       flake = false;
     };
   };
