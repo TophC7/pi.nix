@@ -5,7 +5,7 @@
 // instantiating a full pi-tui Component — for cases where you just need a
 // cursor over a custom-rendered row list with consistent up/down/wrap.
 
-import { matchesKey } from '@mariozechner/pi-tui'
+import { matchesKey } from '@earendil-works/pi-tui'
 
 export interface ListNavOptions {
   readonly count: number
@@ -59,7 +59,7 @@ export function createListNav(options: ListNavOptions): ListNavState {
   return state
 }
 
-export type { KeyId } from '@mariozechner/pi-tui'
+export type { KeyId } from '@earendil-works/pi-tui'
 // Re-export pi-tui interaction primitives so extensions can import everything
 // from a single @pi/lib/ui path.
-export { Key, matchesKey } from '@mariozechner/pi-tui'
+export { Key, matchesKey } from '@earendil-works/pi-tui'

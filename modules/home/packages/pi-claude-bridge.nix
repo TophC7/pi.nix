@@ -1,21 +1,56 @@
 {
   pkgs,
   inputs,
+  b2n,
+  lock,
   ...
 }:
 
 # pi-claude-bridge uses Claude Code (via the Agent SDK) as a Pi model provider.
-# v0.4.0 loads ./src/index.ts directly and reads the Claude executable path from
+# v0.5.0 loads ./src/index.ts directly and reads the Claude executable path from
 # ~/.pi/agent/claude-bridge.json, so no source patching is needed: the home
 # module writes that config (see claude-bridge.json), and zod is already pinned
 # correctly upstream.
-pkgs.buildNpmPackage {
+pkgs.stdenv.mkDerivation {
   pname = "pi-claude-bridge";
-  version = "0.4.0";
+  version = "0.5.0";
   src = inputs.pi-claude-bridge;
 
-  npmDepsHash = "sha256-lITn+l+Of5SQK1+ycNK9fES0bKCvJoKAq/6Nf8tgMY0=";
-  dontNpmBuild = true;
+  nativeBuildInputs = [
+    b2n.hook
+    pkgs.bun
+  ];
+
+  bunDeps = b2n.fetchBunDeps {
+    bunNix = lock "pi-claude-bridge-bun.nix";
+  };
+
+  dontUseBunBuild = true;
+  dontUseBunCheck = true;
+  dontUseBunInstall = true;
+
+  bunInstallFlags = [
+    "--linker=isolated"
+    "--offline"
+    "--production"
+    "--omit=optional"
+  ];
+
+  postUnpack = ''
+    cp ${lock "pi-claude-bridge-bun.lock"} $sourceRoot/bun.lock
+    chmod u+w $sourceRoot/bun.lock
+  '';
+
+  postPatch = ''
+    bun -e '
+      const fs = require("fs");
+      const packageJsonPath = "package.json";
+      const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, "utf8"));
+      packageJson.dependencies = packageJson.dependencies ?? {};
+      packageJson.dependencies.zod = "^4.0.0";
+      fs.writeFileSync(packageJsonPath, JSON.stringify(packageJson, null, 2) + "\n");
+    '
+  '';
 
   installPhase = ''
     runHook preInstall

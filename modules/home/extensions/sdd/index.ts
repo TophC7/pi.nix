@@ -3,7 +3,7 @@
 // lock per durable verb. No authoring mode, no handoff state machine. See the
 // adjacent modules for the moving parts.
 
-import type { ExtensionAPI } from '@mariozechner/pi-coding-agent'
+import type { ExtensionAPI } from '@earendil-works/pi-coding-agent'
 import { defineExtension } from '@pi/lib'
 import { installLockInterceptor } from '@pi/lib/lock'
 import { getActiveCwd, getActiveSpec } from './active-spec.ts'

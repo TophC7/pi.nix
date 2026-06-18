@@ -1,5 +1,5 @@
-import type { ExtensionCommandContext, Theme } from '@mariozechner/pi-coding-agent'
-import { Key, matchesKey, truncateToWidth } from '@mariozechner/pi-tui'
+import type { ExtensionCommandContext, Theme } from '@earendil-works/pi-coding-agent'
+import { Key, matchesKey, truncateToWidth } from '@earendil-works/pi-tui'
 import {
   fitLine,
   openDialog,

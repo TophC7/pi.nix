@@ -1,4 +1,4 @@
-import { visibleWidth } from '@mariozechner/pi-tui'
+import { visibleWidth } from '@earendil-works/pi-tui'
 import { fitLine, padLine, publishWidget } from '@pi/lib/ui'
 import type { BuddyActionResult } from '../actions.ts'
 import { wrapText } from './dossier.ts'

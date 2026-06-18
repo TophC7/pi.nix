@@ -6,7 +6,7 @@
 //    spec frontmatter, and /spec:freehand.
 // <> freehandReleased bypasses only the draft-mode block.
 
-import type { ExtensionAPI } from '@mariozechner/pi-coding-agent'
+import type { ExtensionAPI } from '@earendil-works/pi-coding-agent'
 import {
   closeAll as closeOperationLock,
   extractPath,

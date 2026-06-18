@@ -1,5 +1,5 @@
-import type { Api, Model } from '@mariozechner/pi-ai'
-import type { ExtensionAPI, ExtensionCommandContext } from '@mariozechner/pi-coding-agent'
+import type { Api, Model } from '@earendil-works/pi-ai'
+import type { ExtensionAPI, ExtensionCommandContext } from '@earendil-works/pi-coding-agent'
 
 export const THINKING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh'] as const
 export type ThinkingLevel = (typeof THINKING_LEVELS)[number]

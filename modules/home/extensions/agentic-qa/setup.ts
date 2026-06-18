@@ -1,4 +1,4 @@
-import type { ExtensionAPI, ExtensionCommandContext } from '@mariozechner/pi-coding-agent'
+import type { ExtensionAPI, ExtensionCommandContext } from '@earendil-works/pi-coding-agent'
 import { runtimeProfileTaskFields, type RuntimeProfile } from '@pi/lib/runtime-profile'
 import { fenced } from './markdown.ts'
 import { renderRunSpec, type QaRunSpec } from './run-state.ts'

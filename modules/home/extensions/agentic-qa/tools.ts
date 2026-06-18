@@ -3,7 +3,7 @@
 //   qa_plan -> (Playwright direct tools, captured passively) -> qa_step+ -> qa_finish
 // qa_finish writes the deterministic report.json + generated report.md.
 
-import type { ExtensionAPI, ExtensionContext } from '@mariozechner/pi-coding-agent'
+import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent'
 import { Type } from 'typebox'
 import { singleLine, truncate } from '../pi-lib/subagents/render-helpers.ts'
 import { createQaMissionFile, type QaMissionCreateInput } from './mission-create.ts'

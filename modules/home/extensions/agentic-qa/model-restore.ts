@@ -1,4 +1,4 @@
-import type { ExtensionAPI, ExtensionContext } from '@mariozechner/pi-coding-agent'
+import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent'
 import { restoreMainRuntimeProfile, type MainRuntimeRestoreState } from '@pi/lib/runtime-profile'
 
 const pendingQaRestores = new WeakMap<ExtensionAPI, Map<string, MainRuntimeRestoreState>>()

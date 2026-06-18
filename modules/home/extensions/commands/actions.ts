@@ -1,4 +1,4 @@
-import type { ExtensionAPI, ExtensionCommandContext } from '@mariozechner/pi-coding-agent'
+import type { ExtensionAPI, ExtensionCommandContext } from '@earendil-works/pi-coding-agent'
 import { deferToAgentEnd } from '@pi/lib/agent-end'
 import { captureOptimizedCommand as captureOptimizedCommandShared, type CommandCapture } from '@pi/lib/rtk'
 import {

@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs'
 import { mkdir, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
-import type { ExtensionAPI, ExtensionContext } from '@mariozechner/pi-coding-agent'
+import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent'
 import { containsCredentialLeak, isSafeArtifactPath } from './artifacts.ts'
 import {
   appendEvidence,

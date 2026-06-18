@@ -1,6 +1,6 @@
 import { closeSync, existsSync, openSync, readSync, statSync } from 'node:fs'
 import { join } from 'node:path'
-import type { ExtensionCommandContext } from '@mariozechner/pi-coding-agent'
+import type { ExtensionCommandContext } from '@earendil-works/pi-coding-agent'
 import { headBytes } from '@pi/lib/subagents/output'
 
 const MAX_CONTEXT_BYTES = 360 * 1024

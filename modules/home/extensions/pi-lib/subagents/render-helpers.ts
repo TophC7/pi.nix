@@ -4,7 +4,7 @@
 // them here for back-compat with consumers that still import via this module.
 
 import { homedir } from 'node:os'
-import type { Theme } from '@mariozechner/pi-coding-agent'
+import type { Theme } from '@earendil-works/pi-coding-agent'
 import { formatTokens, truncLine } from '@pi/lib/ui'
 
 export { formatTokens, truncLine }

@@ -1,5 +1,5 @@
-import type { ExtensionCommandContext, Theme } from '@mariozechner/pi-coding-agent'
-import { type Component, type Input, type TUI, truncateToWidth, visibleWidth } from '@mariozechner/pi-tui'
+import type { ExtensionCommandContext, Theme } from '@earendil-works/pi-coding-agent'
+import { type Component, type Input, type TUI, truncateToWidth, visibleWidth } from '@earendil-works/pi-tui'
 import { type OverlayHandle, type OverlayOptions, openOverlay } from './overlay.ts'
 import { padLine } from './render.ts'
 

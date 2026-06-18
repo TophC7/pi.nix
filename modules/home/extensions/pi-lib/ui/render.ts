@@ -1,4 +1,4 @@
-import { visibleWidth } from '@mariozechner/pi-tui'
+import { visibleWidth } from '@earendil-works/pi-tui'
 import { truncLine } from './ansi.ts'
 import type { UiComponentLike } from './contracts.ts'
 

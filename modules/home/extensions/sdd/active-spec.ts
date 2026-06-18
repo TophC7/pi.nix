@@ -5,7 +5,7 @@
 // so the running conversation immediately knows the spec changed. No
 // persistence across sessions: fresh chat starts with no active spec.
 
-import type { ExtensionAPI, ExtensionCommandContext } from '@mariozechner/pi-coding-agent'
+import type { ExtensionAPI, ExtensionCommandContext } from '@earendil-works/pi-coding-agent'
 import { listSpecs, readSpec, type SpecListing, specPath, writeNewSpec } from './files.ts'
 import { setFreehand } from './lock.ts'
 import { buildActiveSpecPrompt } from './prompt.ts'

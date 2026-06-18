@@ -1,4 +1,4 @@
-import { visibleWidth } from '@mariozechner/pi-tui'
+import { visibleWidth } from '@earendil-works/pi-tui'
 import { fitLine, padLine } from '@pi/lib/ui'
 import { getAnimationProfile, getAnimationState, pickFrame } from '../core/animation.ts'
 import type { StoredReaction } from '../core/reactions.ts'

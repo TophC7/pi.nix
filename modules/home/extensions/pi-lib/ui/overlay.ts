@@ -1,5 +1,5 @@
-import type { ExtensionCommandContext, Theme } from '@mariozechner/pi-coding-agent'
-import type { Component, TUI } from '@mariozechner/pi-tui'
+import type { ExtensionCommandContext, Theme } from '@earendil-works/pi-coding-agent'
+import type { Component, TUI } from '@earendil-works/pi-tui'
 import { centeredOverlayOptions } from './layout.ts'
 
 // ABOUT: Generic overlay lifecycle helper around ctx.ui.custom. Wraps the

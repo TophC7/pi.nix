@@ -3,8 +3,8 @@
 // glue are ours. Two entrypoints: createSubagentMessageRenderer (slash flow,
 // driven by runner.ts) and renderSubagentToolResult (model-invoked tool flow).
 
-import type { Theme } from '@mariozechner/pi-coding-agent'
-import { Box, type Component, Container, Markdown, Spacer, Text } from '@mariozechner/pi-tui'
+import type { Theme } from '@earendil-works/pi-coding-agent'
+import { Box, type Component, Container, Markdown, Spacer, Text } from '@earendil-works/pi-tui'
 import { resolveMarkdownTheme } from '@pi/lib/ui/markdown-overlay.ts'
 import {
   formatDuration,

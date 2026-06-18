@@ -1,6 +1,6 @@
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
-import { getAgentDir } from '@mariozechner/pi-coding-agent'
+import { getAgentDir } from '@earendil-works/pi-coding-agent'
 import type {
   SlabConfig,
   SlabContextDisplayMode,

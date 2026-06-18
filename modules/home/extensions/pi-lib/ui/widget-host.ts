@@ -1,4 +1,4 @@
-import { matchesKey } from '@mariozechner/pi-tui'
+import { matchesKey } from '@earendil-works/pi-tui'
 import type { UiComponentLike, UiRenderContext, UiWidgetEntry, UiWidgetPlacement } from './contracts.ts'
 
 // ABOUT: Generic widget host: instance reuse keyed on entry content identity,

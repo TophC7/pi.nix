@@ -2,9 +2,9 @@
 // Pre-renders markdown through pi-tui, owns scroll state, and pads content so
 // callers get predictable clipping plus "more above/below" indicators.
 
-import type { ExtensionCommandContext, Theme } from '@mariozechner/pi-coding-agent'
-import { getMarkdownTheme } from '@mariozechner/pi-coding-agent'
-import { Key, Markdown, type MarkdownTheme, matchesKey } from '@mariozechner/pi-tui'
+import type { ExtensionCommandContext, Theme } from '@earendil-works/pi-coding-agent'
+import { getMarkdownTheme } from '@earendil-works/pi-coding-agent'
+import { Key, Markdown, type MarkdownTheme, matchesKey } from '@earendil-works/pi-tui'
 import {
   type DialogContent,
   openDialog,

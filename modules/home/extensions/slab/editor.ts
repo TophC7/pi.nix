@@ -1,5 +1,5 @@
-import { CustomEditor, type KeybindingsManager } from '@mariozechner/pi-coding-agent'
-import { type EditorTheme, type TUI, truncateToWidth, visibleWidth } from '@mariozechner/pi-tui'
+import { CustomEditor, type KeybindingsManager } from '@earendil-works/pi-coding-agent'
+import { type EditorTheme, type TUI, truncateToWidth, visibleWidth } from '@earendil-works/pi-tui'
 import {
   fitLine,
   padLine,

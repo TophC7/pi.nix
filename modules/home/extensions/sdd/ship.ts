@@ -3,7 +3,7 @@
 // involved. Reads the spec, shows ONE confirm overlay, calls the host-side
 // applySpec helper, writes back IDs and status. No lock, no handoff.
 
-import type { ExtensionAPI, ExtensionCommandContext } from '@mariozechner/pi-coding-agent'
+import type { ExtensionAPI, ExtensionCommandContext } from '@earendil-works/pi-coding-agent'
 import { resolveOrPick } from './active-spec.ts'
 import { readSpec, SPEC_ROOT, writeSpec } from './files.ts'
 import type { Spec } from './parser.ts'

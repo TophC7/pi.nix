@@ -3,7 +3,7 @@
 // context, compile a QaRunSpec, and normally dispatch browser work to fresh Pi
 // subagents; coordinator fallback can prompt the main agent when orchestration fails.
 
-import type { ExtensionAPI, ExtensionCommandContext } from '@mariozechner/pi-coding-agent'
+import type { ExtensionAPI, ExtensionCommandContext } from '@earendil-works/pi-coding-agent'
 import { deferToAgentEnd } from '@pi/lib/agent-end'
 import {
   applyMainRuntimeProfile,

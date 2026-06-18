@@ -166,14 +166,14 @@ External packages are pinned through Nix:
 
 | Package file | Package |
 | --- | --- |
-| `modules/home/packages/context-mode.nix` | `context-mode` 1.0.161 |
+| `modules/home/packages/context-mode.nix` | `context-mode` 1.0.162 |
 | `modules/home/packages/impeccable.nix` | Impeccable skill 3.7.1 |
 | `modules/home/packages/pi-agentsmd.nix` | `pi-agentsmd` 0.1.1 |
-| `modules/home/packages/pi-mcp-adapter.nix` | `pi-mcp-adapter` 2.8.0 |
+| `modules/home/packages/pi-mcp-adapter.nix` | `pi-mcp-adapter` 2.10.0 |
 | `modules/home/packages/pi-web-access.nix` | `pi-web-access` 0.10.7 |
-| `modules/home/packages/pi-claude-bridge.nix` | `pi-claude-bridge` 0.4.0 |
+| `modules/home/packages/pi-claude-bridge.nix` | `pi-claude-bridge` 0.5.0 |
 | `modules/home/packages/playwright-mcp.nix` | nixpkgs `playwright-mcp` with Nix-provided browser bits |
-| `modules/home/packages/rtk.nix` | RTK 0.42.0 |
+| `modules/home/packages/rtk.nix` | RTK 0.42.4 |
 
 Version is owned by the flake inputs. `pi-ask-user`, `pi-rtk-optimizer`, and `pi-tool-display` have no runtime deps and load `./index.ts` directly, so they are consumed as raw source inputs with no package file; `nix flake update` bumps them.
 
@@ -191,8 +191,7 @@ No global npm install is required.
 
 Heavy JavaScript packages are built or linked through Nix:
 
-- Bun/bun2nix for packages that need Bun dependency resolution;
-- `buildNpmPackage` where upstream has suitable npm locks;
+- Bun/bun2nix for packages that need dependency resolution;
 - direct tarball fetches for tiny packaged extensions;
 - nixpkgs-provided Playwright MCP and browser dependencies;
 - generated lock files in `locks/` where upstream does not ship the lock shape this repo needs.

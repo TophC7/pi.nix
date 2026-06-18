@@ -1,6 +1,6 @@
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import type { ThinkingLevel } from '@mariozechner/pi-agent-core'
+import type { ThinkingLevel } from '@earendil-works/pi-agent-core'
 import type { DiscoveredAgent } from './discovery.ts'
 import { buildCappedParentFacingText, capRecentOutput, capToolPreview } from './output.ts'
 import { parseThinking as parseThinkingLevel } from './request.ts'
@@ -47,13 +47,13 @@ interface PiRuntimeModule {
 let piRuntime: Promise<PiRuntimeModule> | undefined
 
 async function loadPiRuntime(): Promise<PiRuntimeModule> {
-  if (!piRuntime) piRuntime = (import('@mariozechner/pi-coding-agent') as Promise<unknown>).then(asPiRuntime)
+  if (!piRuntime) piRuntime = (import('@earendil-works/pi-coding-agent') as Promise<unknown>).then(asPiRuntime)
   return piRuntime
 }
 
 function asPiRuntime(value: unknown): PiRuntimeModule {
   if (!value || typeof value !== 'object')
-    throw new Error('@mariozechner/pi-coding-agent did not export a module object.')
+    throw new Error('@earendil-works/pi-coding-agent did not export a module object.')
   const requiredMembers = [
     'AuthStorage',
     'ModelRegistry',
@@ -62,7 +62,7 @@ function asPiRuntime(value: unknown): PiRuntimeModule {
     'createAgentSession'
   ] as const
   for (const member of requiredMembers) {
-    if (!(member in value)) throw new Error(`@mariozechner/pi-coding-agent missing member: ${member}`)
+    if (!(member in value)) throw new Error(`@earendil-works/pi-coding-agent missing member: ${member}`)
   }
   return value as PiRuntimeModule
 }

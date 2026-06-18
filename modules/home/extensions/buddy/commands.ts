@@ -1,6 +1,6 @@
 import { defineCommand } from '@pi/lib'
 import type { DefinedCommand } from '@pi/lib/command'
-import type { ExtensionCommandContext } from '@mariozechner/pi-coding-agent'
+import type { ExtensionCommandContext } from '@earendil-works/pi-coding-agent'
 import { dispatchBuddyCommand } from './command-router.ts'
 import { openBuddyDialog } from './ui/dialog.ts'
 import { publishBuddySpeech } from './ui/speech.ts'

@@ -1,4 +1,4 @@
-import { truncateToWidth, visibleWidth } from '@mariozechner/pi-tui'
+import { truncateToWidth, visibleWidth } from '@earendil-works/pi-tui'
 import type { UiRenderCapabilities, UiRenderClock } from '@pi/lib/ui'
 import { paint, paintIf, rainbowRole } from './palette.ts'
 import { renderSegment, SLAB_SEGMENT_BY_ID } from './segments.ts'

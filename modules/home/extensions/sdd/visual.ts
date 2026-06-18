@@ -3,7 +3,7 @@
 // resolution, output-path contract, operation lock, and prompt handoff. The
 // agent owns visual judgment and writes the HTML artifact.
 
-import type { ExtensionAPI, ExtensionCommandContext } from '@mariozechner/pi-coding-agent'
+import type { ExtensionAPI, ExtensionCommandContext } from '@earendil-works/pi-coding-agent'
 import { join, relative, resolve } from 'node:path'
 import { deferToAgentEnd } from '@pi/lib/agent-end'
 import { getActiveSpec, pickSpec, setActiveSpec } from './active-spec.ts'

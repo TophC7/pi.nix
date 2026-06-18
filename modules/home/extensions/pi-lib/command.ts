@@ -1,4 +1,4 @@
-import type { ExtensionCommandContext, RegisteredCommand } from '@mariozechner/pi-coding-agent'
+import type { ExtensionCommandContext, RegisteredCommand } from '@earendil-works/pi-coding-agent'
 
 export type CommandName = string
 

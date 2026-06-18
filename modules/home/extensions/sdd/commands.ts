@@ -2,7 +2,7 @@
 // Registers /spec, /spec:check, /spec:ship, /spec:work, /spec:visual,
 // /spec:close, /spec:freehand. Handlers are thin; real work lives in the sibling modules.
 
-import type { ExtensionAPI, ExtensionCommandContext } from '@mariozechner/pi-coding-agent'
+import type { ExtensionAPI, ExtensionCommandContext } from '@earendil-works/pi-coding-agent'
 import { clearActiveSpec, getActiveSpec, pickSpec, setActiveSpec } from './active-spec.ts'
 import { runCheck } from './check.ts'
 import { specExists } from './files.ts'

@@ -5,7 +5,7 @@
 // NOTE: this file is dev-only; it's safe to keep in tree because pi only loads
 // extensions whose names don't start with `__`. Pi will skip it.
 
-import type { Theme } from '@mariozechner/pi-coding-agent'
+import type { Theme } from '@earendil-works/pi-coding-agent'
 import { renderSubagentRun } from './render.ts'
 import {
   combineSubagentUsage,

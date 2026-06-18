@@ -1,4 +1,4 @@
-import type { ExtensionCommandContext } from '@mariozechner/pi-coding-agent'
+import type { ExtensionCommandContext } from '@earendil-works/pi-coding-agent'
 import type { RuntimeProfile, ThinkingLevel } from './runtime-profile.ts'
 
 export type ConfigRowKind = 'model' | 'thinking' | 'text'

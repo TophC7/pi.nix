@@ -4,8 +4,8 @@
 // Component structure; promoting a multi-category settings primitive into
 // @pi/lib/ui is tracked as future work after this spec lands.
 
-import type { Theme } from '@mariozechner/pi-coding-agent'
-import { matchesKey } from '@mariozechner/pi-tui'
+import type { Theme } from '@earendil-works/pi-coding-agent'
+import { matchesKey } from '@earendil-works/pi-tui'
 import {
   type DialogContent,
   fitLine as fitLineShared,

@@ -5,7 +5,7 @@
 
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
-import type { ExtensionAPI, ExtensionCommandContext } from '@mariozechner/pi-coding-agent'
+import type { ExtensionAPI, ExtensionCommandContext } from '@earendil-works/pi-coding-agent'
 import { runtimeProfileTaskFields, type RuntimeProfile } from '@pi/lib/runtime-profile'
 import type { SubagentResponse, SubagentToolSnapshot } from '@pi/lib/subagents'
 import { singleLine, truncate } from '../pi-lib/subagents/render-helpers.ts'

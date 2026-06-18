@@ -8,13 +8,12 @@
 
 pkgs.stdenv.mkDerivation {
   pname = "context-mode";
-  version = "1.0.161";
+  version = "1.0.162";
   src = inputs.context-mode;
 
   nativeBuildInputs = [
     b2n.hook
     pkgs.bun
-    pkgs.nodejs
   ];
 
   bunDeps = b2n.fetchBunDeps {
@@ -34,19 +33,19 @@ pkgs.stdenv.mkDerivation {
     # v1.0.127's package.json lists better-sqlite3 as a dependency, while
     # bun.lock pins it as optional. Keep package.json aligned with bun.lock so
     # Bun does not try to re-resolve the package manifest inside the Nix sandbox.
-    node <<'EOF'
-    const fs = require("fs");
-    const packageJsonPath = "package.json";
-    const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, "utf8"));
-    const betterSqliteVersion = packageJson.dependencies?.["better-sqlite3"];
+    bun -e '
+      const fs = require("fs");
+      const packageJsonPath = "package.json";
+      const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, "utf8"));
+      const betterSqliteVersion = packageJson.dependencies?.["better-sqlite3"];
 
-    if (betterSqliteVersion) {
-      packageJson.optionalDependencies = packageJson.optionalDependencies ?? {};
-      packageJson.optionalDependencies["better-sqlite3"] = betterSqliteVersion;
-      delete packageJson.dependencies["better-sqlite3"];
-      fs.writeFileSync(packageJsonPath, JSON.stringify(packageJson, null, 2) + "\n");
-    }
-    EOF
+      if (betterSqliteVersion) {
+        packageJson.optionalDependencies = packageJson.optionalDependencies ?? {};
+        packageJson.optionalDependencies["better-sqlite3"] = betterSqliteVersion;
+        delete packageJson.dependencies["better-sqlite3"];
+        fs.writeFileSync(packageJsonPath, JSON.stringify(packageJson, null, 2) + "\n");
+      }
+    '
   '';
 
   buildPhase = ''

@@ -5,7 +5,7 @@
 // loops. Hits a hard blocker → comments, marks blocked, moves to next.
 // Stops when no more ready or user interrupts.
 
-import type { ExtensionAPI, ExtensionCommandContext } from '@mariozechner/pi-coding-agent'
+import type { ExtensionAPI, ExtensionCommandContext } from '@earendil-works/pi-coding-agent'
 import { resolveOrPick } from './active-spec.ts'
 import { readSpec, SPEC_ROOT, specPath } from './files.ts'
 import { makeSpecPathBlock, startOperation, WORK_TOOLS } from './lock.ts'

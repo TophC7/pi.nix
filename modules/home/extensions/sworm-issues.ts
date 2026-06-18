@@ -1,7 +1,7 @@
 import { realpathSync } from 'node:fs'
 import net from 'node:net'
 import { resolve } from 'node:path'
-import type { ExtensionAPI } from '@mariozechner/pi-coding-agent'
+import type { ExtensionAPI } from '@earendil-works/pi-coding-agent'
 import { Type } from 'typebox'
 
 const REQUEST_TIMEOUT_MS = 8000

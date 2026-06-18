@@ -1,4 +1,4 @@
-import type { ExtensionAPI } from '@mariozechner/pi-coding-agent'
+import type { ExtensionAPI } from '@earendil-works/pi-coding-agent'
 import { openDialog } from '@pi/lib/ui/dialog.ts'
 import { buildBurdenReport } from './attribution.ts'
 import { BurdenExplorer } from './explorer.ts'

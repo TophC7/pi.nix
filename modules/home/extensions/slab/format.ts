@@ -1,6 +1,6 @@
 import { homedir } from 'node:os'
 import { basename } from 'node:path'
-import { visibleWidth } from '@mariozechner/pi-tui'
+import { visibleWidth } from '@earendil-works/pi-tui'
 import { fitLine, formatTokenCount } from '@pi/lib/ui'
 import type { SlabWorkspaceLabelMode } from './types.ts'
 

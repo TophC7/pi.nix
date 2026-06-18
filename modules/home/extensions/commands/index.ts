@@ -1,4 +1,4 @@
-import type { ExtensionAPI } from '@mariozechner/pi-coding-agent'
+import type { ExtensionAPI } from '@earendil-works/pi-coding-agent'
 import { registerRuntimeProfileConfigSection } from '@pi/lib/config-registry'
 import { runCommit, runPr } from './actions'
 import { COMMAND_PROFILE_IDS, CONFIG_PATH, getCommandConfig, saveCommandConfig } from './config'

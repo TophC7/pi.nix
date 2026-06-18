@@ -1,4 +1,4 @@
-import { visibleWidth } from '@mariozechner/pi-tui'
+import { visibleWidth } from '@earendil-works/pi-tui'
 
 // ABOUT: Low-level ANSI / control-sequence string surgery used across the UI
 // layer. stripControls is intentionally regex-only (no pi-tui dependency) and

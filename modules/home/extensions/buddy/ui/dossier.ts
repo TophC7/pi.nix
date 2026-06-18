@@ -1,5 +1,5 @@
-import type { Theme } from '@mariozechner/pi-coding-agent'
-import { visibleWidth } from '@mariozechner/pi-tui'
+import type { Theme } from '@earendil-works/pi-coding-agent'
+import { visibleWidth } from '@earendil-works/pi-tui'
 import { fitLine, padLine, renderProportionalBar } from '@pi/lib/ui'
 import { levelProgress } from '../core/leveling.ts'
 import { getDumpStat, getPeakStat, RARITY_STARS, STAT_NAMES, type Companion, type StatName } from '../core/types.ts'

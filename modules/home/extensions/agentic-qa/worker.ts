@@ -3,7 +3,7 @@
 // in the parent extension process, then this module launches a fresh agent
 // context to execute the browser test instead of handing it to the main agent.
 
-import type { ExtensionAPI, ExtensionCommandContext } from '@mariozechner/pi-coding-agent'
+import type { ExtensionAPI, ExtensionCommandContext } from '@earendil-works/pi-coding-agent'
 import { runtimeProfileTaskFields, type RuntimeProfile } from '@pi/lib/runtime-profile'
 import { fenced } from './markdown.ts'
 import { renderQaEvidenceProtocolBullets } from './prompt.ts'

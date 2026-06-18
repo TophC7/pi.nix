@@ -1,4 +1,4 @@
-import { Key, matchesKey } from '@mariozechner/pi-tui'
+import { Key, matchesKey } from '@earendil-works/pi-tui'
 import type { TextStyle } from './components.ts'
 import type { UiComponentLike } from './contracts.ts'
 import { fitLine, padLine } from './render.ts'

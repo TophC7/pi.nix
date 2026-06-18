@@ -1,6 +1,6 @@
-import type { Api, Model } from '@mariozechner/pi-ai'
-import type { ExtensionCommandContext, Theme } from '@mariozechner/pi-coding-agent'
-import { Input, Key, matchesKey, type TUI } from '@mariozechner/pi-tui'
+import type { Api, Model } from '@earendil-works/pi-ai'
+import type { ExtensionCommandContext, Theme } from '@earendil-works/pi-coding-agent'
+import { Input, Key, matchesKey, type TUI } from '@earendil-works/pi-tui'
 import {
   configRowSource,
   getConfigSections,

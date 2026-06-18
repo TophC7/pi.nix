@@ -5,7 +5,7 @@
 // real ambiguity, and writes the spec back with a Verification section plus
 // status: verified.
 
-import type { ExtensionAPI, ExtensionCommandContext } from '@mariozechner/pi-coding-agent'
+import type { ExtensionAPI, ExtensionCommandContext } from '@earendil-works/pi-coding-agent'
 import { resolveOrPick } from './active-spec.ts'
 import { readSpec, SPEC_ROOT, specPath } from './files.ts'
 import { CHECK_TOOLS, startOperation } from './lock.ts'

@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { getAgentDir, type ExtensionAPI } from '@mariozechner/pi-coding-agent'
+import { getAgentDir, type ExtensionAPI } from '@earendil-works/pi-coding-agent'
 import { headBytes } from './subagents/output.ts'
 
 export interface RtkExecHost {

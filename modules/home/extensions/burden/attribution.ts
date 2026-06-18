@@ -1,4 +1,4 @@
-import type { ExtensionAPI, ExtensionContext } from '@mariozechner/pi-coding-agent'
+import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent'
 import type { BurdenEntry, BurdenGap, BurdenReport, BurdenSectionKind, BurdenSourceRef } from './types.ts'
 
 interface ToolLike {

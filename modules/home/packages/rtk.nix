@@ -1,16 +1,16 @@
 { pkgs, ... }:
 
 let
-  version = "0.42.0";
+  version = "0.42.4";
   asset =
     {
       x86_64-linux = {
         name = "rtk-x86_64-unknown-linux-musl.tar.gz";
-        hash = "sha256-zdT4esl86Vj3G1OpkYgNatzEHMW8oQRBdaZGMJgBUr4=";
+        hash = "sha256-NJdRFtoR4J5QJQHa91gUPgsi7TpCoQ62f7aTpicNnjY=";
       };
       aarch64-linux = {
         name = "rtk-aarch64-unknown-linux-gnu.tar.gz";
-        hash = "sha256-Yrt0nfHtZPCRSZmMMd6GSTLwR6G+Tg+IKozq2oSeCHE=";
+        hash = "sha256-zCuRwGTrZwwJfBhJE8j7yxqUPVPX/lBTdelroMW2RZ8=";
       };
     }
     .${pkgs.stdenv.hostPlatform.system};

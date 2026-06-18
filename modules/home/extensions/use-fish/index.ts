@@ -1,5 +1,5 @@
-import type { ExtensionAPI } from '@mariozechner/pi-coding-agent'
-import { createLocalBashOperations } from '@mariozechner/pi-coding-agent'
+import type { ExtensionAPI } from '@earendil-works/pi-coding-agent'
+import { createLocalBashOperations } from '@earendil-works/pi-coding-agent'
 
 const ORIGINAL_BASH_COMMAND_KEY = '__piOriginalCommand'
 

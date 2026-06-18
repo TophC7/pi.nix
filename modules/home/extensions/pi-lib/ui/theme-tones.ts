@@ -1,4 +1,4 @@
-import type { TerminalInputHandler, Theme, ThemeColor } from '@mariozechner/pi-coding-agent'
+import type { TerminalInputHandler, Theme, ThemeColor } from '@earendil-works/pi-coding-agent'
 
 export interface RgbColor {
   readonly r: number

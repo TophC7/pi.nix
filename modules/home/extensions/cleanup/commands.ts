@@ -1,4 +1,4 @@
-import type { ExtensionAPI, ExtensionCommandContext } from '@mariozechner/pi-coding-agent'
+import type { ExtensionAPI, ExtensionCommandContext } from '@earendil-works/pi-coding-agent'
 import { captureOptimizedCommand } from '@pi/lib/rtk'
 import { startOperation } from '@pi/lib/lock'
 import { extractSubagentText, runSubagent } from '@pi/lib/subagents'

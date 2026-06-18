@@ -3,7 +3,7 @@
 // runs qa_plan -> Playwright -> qa_step -> qa_finish; Pi writes the deterministic
 // report.json and report.md once safety gates pass.
 
-import type { ExtensionAPI } from '@mariozechner/pi-coding-agent'
+import type { ExtensionAPI } from '@earendil-works/pi-coding-agent'
 import { defineExtension } from '@pi/lib'
 import { registerQaCommands } from './commands.ts'
 import { registerQaConfigSection } from './config.ts'

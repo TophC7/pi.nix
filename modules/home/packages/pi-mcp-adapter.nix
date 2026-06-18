@@ -19,13 +19,12 @@
 # the bun2nix nix expression are generated together and must stay paired.
 pkgs.stdenv.mkDerivation {
   pname = "pi-mcp-adapter";
-  version = "2.8.0";
+  version = "2.10.0";
   src = inputs.pi-mcp-adapter;
 
   nativeBuildInputs = [
     b2n.hook
     pkgs.bun
-    pkgs.nodejs
   ];
 
   bunDeps = b2n.fetchBunDeps {

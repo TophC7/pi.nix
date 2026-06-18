@@ -1,5 +1,5 @@
-import type { ExtensionCommandContext, Theme } from '@mariozechner/pi-coding-agent'
-import { Input, Key, matchesKey, type SettingItem, truncateToWidth, visibleWidth } from '@mariozechner/pi-tui'
+import type { ExtensionCommandContext, Theme } from '@earendil-works/pi-coding-agent'
+import { Input, Key, matchesKey, type SettingItem, truncateToWidth, visibleWidth } from '@earendil-works/pi-tui'
 import {
   type DialogContent,
   type DialogOptions,
