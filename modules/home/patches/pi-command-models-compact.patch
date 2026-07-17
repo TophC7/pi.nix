@@ -32,15 +32,15 @@ diff --git a/dist/core/agent-session.js b/dist/core/agent-session.js
 +    }
 +}
 +
-+function resolveCommandModel(modelRegistry, spec) {
-+    const models = modelRegistry.getAll();
++function resolveCommandModel(modelRuntime, spec) {
++    const models = modelRuntime.getModels();
 +    const exactFull = models.find((model) => `${model.provider}/${model.id}` === spec);
 +    if (exactFull) return exactFull;
 +    const slash = spec.indexOf("/");
 +    if (slash > 0) {
 +        const provider = spec.slice(0, slash);
 +        const id = spec.slice(slash + 1);
-+        const exactProvider = modelRegistry.find(provider, id);
++        const exactProvider = modelRuntime.getModel(provider, id);
 +        if (exactProvider) return exactProvider;
 +    }
 +    const exactId = models.filter((model) => model.id === spec || model.name === spec);
@@ -57,14 +57,14 @@ diff --git a/dist/core/agent-session.js b/dist/core/agent-session.js
 +        thinking: session.thinkingLevel,
 +    };
 +    if (config.model) {
-+        const model = resolveCommandModel(session.modelRegistry, config.model);
++        const model = resolveCommandModel(session._modelRuntime, config.model);
 +        if (model === "ambiguous") {
 +            throw new Error(`Ambiguous /${command} model in ${COMMAND_MODEL_CONFIG_PATH}: ${config.model}`);
 +        }
 +        if (!model) {
 +            throw new Error(`Model not found in ${COMMAND_MODEL_CONFIG_PATH}: ${config.model}`);
 +        }
-+        if (!session.modelRegistry.hasConfiguredAuth(model)) {
++        if (!session._modelRuntime.hasConfiguredAuth(model.provider)) {
 +            throw new Error(`No API key for ${model.provider}/${model.id}`);
 +        }
 +        await session.setModel(model);
