@@ -8,7 +8,7 @@
 
 pkgs.stdenv.mkDerivation {
   pname = "context-mode";
-  version = "1.0.162";
+  version = "1.0.169";
   src = inputs.context-mode;
 
   nativeBuildInputs = [

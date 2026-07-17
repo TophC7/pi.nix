@@ -14,42 +14,26 @@ let
   lock = lib.fs.relativeTo ../../locks;
   claudeCode = inputs.llm-agents.packages.${system}.claude-code;
   piNodePackage = inputs.llm-agents.packages.${system}.pi;
-  piBunPackage = pkgs.stdenvNoCC.mkDerivation {
-    pname = "pi";
-    version = piNodePackage.version or "bun-runtime";
-    nativeBuildInputs = [ pkgs.makeWrapper pkgs.patch ];
-    dontUnpack = true;
+  piBunPackage = piNodePackage.overrideAttrs (old: {
+    nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [
+      pkgs.makeWrapper
+      pkgs.patch
+    ];
 
-    installPhase = ''
-      runHook preInstall
+    # llm-agents now builds Pi as a standalone Bun binary. Apply our source
+    # patches before that compile step so the patched behavior is embedded in
+    # the binary, then wrap the resulting launcher with repo runtime defaults.
+    preInstall = ''
+      patch -p1 < ${./patches/pi-command-models-compact.patch}
+      patch -p1 < ${./patches/pi-ai-discard-failed-tool-continuations.patch}
+    '' + (old.preInstall or "");
 
-      mkdir -p $out/lib/node_modules/@earendil-works $out/bin
-      cp -R --no-preserve=mode,ownership \
-        ${piNodePackage}/lib/node_modules/@earendil-works/pi-coding-agent \
-        $out/lib/node_modules/@earendil-works/pi-coding-agent
-
-      patch -p1 \
-        -d $out/lib/node_modules/@earendil-works/pi-coding-agent \
-        < ${./patches/pi-command-models-compact.patch}
-      patch -p1 \
-        -d $out/lib/node_modules/@earendil-works/pi-coding-agent \
-        < ${./patches/pi-ai-discard-failed-tool-continuations.patch}
-
-      while IFS= read -r file; do
-        substituteInPlace "$file" \
-          --replace-quiet "${pkgs.nodejs}/bin/node" "${pkgs.bun}/bin/bun"
-      done < <(grep -R -l "${pkgs.nodejs}/bin/node" "$out/lib/node_modules" || true)
-
-      makeWrapper ${pkgs.bun}/bin/bun $out/bin/pi \
+    postInstall = (old.postInstall or "") + ''
+      wrapProgram $out/bin/pi \
         --prefix PATH : ${lib.makeBinPath [ pkgs.bun pkgs.fd pkgs.ripgrep ]} \
-        --set PI_SKIP_VERSION_CHECK 1 \
-        --set PI_TELEMETRY 0 \
-        --set IMPECCABLE_NO_UPDATE_CHECK 1 \
-        --add-flags "$out/lib/node_modules/@earendil-works/pi-coding-agent/dist/cli.js"
-
-      runHook postInstall
+        --set IMPECCABLE_NO_UPDATE_CHECK 1
     '';
-  };
+  });
   localPackageDeclarations = {
     caveman.source = ./extensions/caveman.ts;
     clear.source = ./extensions/clear.ts;

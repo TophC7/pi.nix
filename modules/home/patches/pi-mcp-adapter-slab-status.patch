@@ -1,16 +1,14 @@
-diff --git a/index.ts b/index.ts
-index 5c90ac1..0a8c009 100644
 --- a/index.ts
 +++ b/index.ts
-@@ -10,6 +10,7 @@ import { executeCall, executeConnect, executeDescribe, executeList, executeSearc
- import { getConfigPathFromArgv, truncateAtWord } from "./utils.ts";
+@@ -11,6 +11,7 @@
  import { initializeOAuth, shutdownOAuth } from "./mcp-auth-flow.ts";
  import { createMcpDirectToolCallRenderer, renderMcpProxyToolCall, renderMcpToolResult } from "./tool-result-renderer.ts";
+ import { toolErrorOverride } from "./error-signal.ts";
 +import { clearSlabStatus } from "./slab-status.ts";
  
  export default function mcpAdapter(pi: ExtensionAPI) {
    let state: McpExtensionState | null = null;
-@@ -44,6 +45,8 @@ export default function mcpAdapter(pi: ExtensionAPI) {
+@@ -45,6 +46,8 @@
      if (flushError) {
        throw flushError;
      }
@@ -19,19 +17,17 @@ index 5c90ac1..0a8c009 100644
    }
  
    const earlyConfigPath = getConfigPathFromArgv();
-diff --git a/init.ts b/init.ts
-index df522ce..a831746 100644
 --- a/init.ts
 +++ b/init.ts
-@@ -22,6 +22,7 @@ import { UiResourceHandler } from "./ui-resource-handler.ts";
- import { openUrl, parallelLimit } from "./utils.ts";
+@@ -23,6 +23,7 @@
  import { logger } from "./logger.ts";
  import { getMissingConfiguredDirectToolServers } from "./direct-tools.ts";
+ import { throwIfAborted } from "./abort.ts";
 +import { clearSlabStatus, writeSlabStatus } from "./slab-status.ts";
  
  const FAILURE_BACKOFF_MS = 60 * 1000;
  
-@@ -66,6 +67,7 @@ export async function initializeMcp(
+@@ -79,6 +80,7 @@
  
    const serverEntries = Object.entries(config.mcpServers);
    if (serverEntries.length === 0) {
@@ -39,7 +35,7 @@ index df522ce..a831746 100644
      return state;
    }
  
-@@ -113,8 +115,11 @@ export async function initializeMcp(
+@@ -126,8 +128,11 @@
        });
  
    if (ctx.hasUI && startupServers.length > 0) {
@@ -51,7 +47,7 @@ index df522ce..a831746 100644
  
    const results = await parallelLimit(startupServers, 10, async ([name, definition]) => {
      try {
-@@ -271,11 +276,13 @@ export function updateStatusBar(state: McpExtensionState): void {
+@@ -284,11 +289,13 @@
    if (!ui) return;
    const total = Object.keys(state.config.mcpServers).length;
    if (total === 0) {
@@ -67,23 +63,20 @@ index df522ce..a831746 100644
  }
  
  export function getFailureAgeSeconds(state: McpExtensionState, serverName: string): number | null {
-@@ -304,10 +311,12 @@ export async function lazyConnect(state: McpExtensionState, serverName: string):
+@@ -317,10 +324,12 @@
  
    try {
      if (state.ui) {
 +      writeSlabStatus(state, { kind: "connecting", serverName });
        state.ui.setStatus("mcp", `MCP: connecting to ${serverName}...`);
      }
-     const newConnection = await state.manager.connect(serverName, definition);
+     const newConnection = await state.manager.connect(serverName, definition, signal);
      if (newConnection.status === "needs-auth") {
 +      updateStatusBar(state);
        return false;
      }
      state.failureTracker.delete(serverName);
-diff --git a/slab-status.ts b/slab-status.ts
-new file mode 100644
-index 0000000..c937229
---- /dev/null
+--- a/slab-status.ts
 +++ b/slab-status.ts
 @@ -0,0 +1,126 @@
 +import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";

@@ -19,7 +19,7 @@
 # the bun2nix nix expression are generated together and must stay paired.
 pkgs.stdenv.mkDerivation {
   pname = "pi-mcp-adapter";
-  version = "2.10.0";
+  version = "2.11.0";
   src = inputs.pi-mcp-adapter;
 
   nativeBuildInputs = [
@@ -42,6 +42,7 @@ pkgs.stdenv.mkDerivation {
   postUnpack = ''
     cp ${lock "pi-mcp-adapter-bun.lock"} $sourceRoot/bun.lock
     chmod u+w $sourceRoot/bun.lock
+    rm -f $sourceRoot/package-lock.json
   '';
 
   installPhase = ''

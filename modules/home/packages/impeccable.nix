@@ -8,7 +8,7 @@
 
 pkgs.stdenv.mkDerivation {
   pname = "impeccable";
-  version = "3.7.1";
+  version = "3.9.1";
   src = inputs.impeccable;
 
   nativeBuildInputs = [
