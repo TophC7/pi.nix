@@ -148,7 +148,7 @@ in
 
     model = lib.mkOption {
       type = lib.types.str;
-      default = "gpt-5.5";
+      default = "gpt-5.6-sol";
       description = "Default LLM model.";
     };
   };
