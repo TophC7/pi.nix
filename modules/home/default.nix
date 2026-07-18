@@ -36,6 +36,7 @@ let
   });
   localPackageDeclarations = {
     caveman.source = ./extensions/caveman.ts;
+    cd.source = ./extensions/cd.ts;
     clear.source = ./extensions/clear.ts;
     desktop-notify.source = ./extensions/desktop-notify.ts;
     sworm-issues.source = ./extensions/sworm-issues.ts;

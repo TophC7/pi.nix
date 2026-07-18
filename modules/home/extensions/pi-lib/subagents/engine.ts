@@ -33,11 +33,10 @@ const TOOL_ALIASES: Record<string, (typeof BUILTIN_TOOLS)[number]> = {
 }
 
 interface PiRuntimeModule {
-  AuthStorage: { create(): unknown }
-  ModelRegistry: {
-    create(authStorage: unknown): {
-      find(provider: string, modelId: string): unknown
-    }
+  ModelRuntime: {
+    create(options?: Record<string, unknown>): Promise<{
+      getModel(provider: string, modelId: string): unknown
+    }>
   }
   DefaultResourceLoader: new (options: Record<string, unknown>) => { reload(): Promise<void> }
   SessionManager: { inMemory(cwd: string): unknown }
@@ -54,13 +53,7 @@ async function loadPiRuntime(): Promise<PiRuntimeModule> {
 function asPiRuntime(value: unknown): PiRuntimeModule {
   if (!value || typeof value !== 'object')
     throw new Error('@earendil-works/pi-coding-agent did not export a module object.')
-  const requiredMembers = [
-    'AuthStorage',
-    'ModelRegistry',
-    'DefaultResourceLoader',
-    'SessionManager',
-    'createAgentSession'
-  ] as const
+  const requiredMembers = ['ModelRuntime', 'DefaultResourceLoader', 'SessionManager', 'createAgentSession'] as const
   for (const member of requiredMembers) {
     if (!(member in value)) throw new Error(`@earendil-works/pi-coding-agent missing member: ${member}`)
   }
@@ -343,9 +336,6 @@ async function createRunnerSession(
   const tools = resolveToolNames(agent)
   if (factory) return factory({ agent, cwd, agentDir, tools, signal })
   const pi = await loadPiRuntime()
-  const authStorage = pi.AuthStorage.create()
-  const modelRegistry = pi.ModelRegistry.create(authStorage)
-  const model = resolveModel(agent, modelRegistry)
   const loader = new pi.DefaultResourceLoader({
     cwd,
     agentDir,
@@ -357,13 +347,19 @@ async function createRunnerSession(
     appendSystemPromptOverride: (base: unknown[]) =>
       agent.systemPromptMode === 'append' ? [...base, agent.systemPrompt] : base
   })
-  await loader.reload()
+  const [modelRuntime] = await Promise.all([
+    pi.ModelRuntime.create({
+      authPath: join(agentDir, 'auth.json'),
+      modelsPath: join(agentDir, 'models.json')
+    }),
+    loader.reload()
+  ])
+  const model = resolveModel(agent, modelRuntime)
   const created = await pi.createAgentSession({
     cwd,
     agentDir,
     sessionManager: pi.SessionManager.inMemory(cwd),
-    authStorage,
-    modelRegistry,
+    modelRuntime,
     model,
     thinkingLevel: parseThinking(agent.thinking),
     tools,
@@ -390,11 +386,11 @@ async function disposeRunnerSession(session: RunnerSession | undefined): Promise
   }
 }
 
-function resolveModel(agent: DiscoveredAgent, modelRegistry: { find(provider: string, modelId: string): unknown }) {
+function resolveModel(agent: DiscoveredAgent, modelRuntime: { getModel(provider: string, modelId: string): unknown }) {
   if (!agent.model) return undefined
   const [provider, ...rest] = agent.model.split('/')
   const modelId = rest.join('/')
-  return provider && modelId ? modelRegistry.find(provider, modelId) : undefined
+  return provider && modelId ? modelRuntime.getModel(provider, modelId) : undefined
 }
 
 function resolveToolNames(agent: DiscoveredAgent): string[] | undefined {

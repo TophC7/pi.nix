@@ -94,6 +94,7 @@ flake.nix
 | `review` | `/review`, `/review:freehand`; adversarial scout swarm over staged diffs or scoped prompts. |
 | `subagents` | Model-facing `subagent` tool with sequential, parallel, and chained child-agent runs. |
 | `caveman` | `/caveman`; terse response style levels: off, lite, full, ultra, micro. |
+| `cd` | `/cd @/path`; fork current conversation into another working directory and rebuild cwd-bound runtime state. |
 | `clear` | `/clear`; reset current conversation. |
 | `desktop-notify` | Desktop notifications for input requests, completion, follow-ups, and errors. |
 | `sworm-issues` | Sworm epics/issues/comments/dependencies/config tools plus `/ready`, `/issues`, `/claim`. |
