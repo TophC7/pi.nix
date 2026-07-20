@@ -8,9 +8,9 @@ This repo started as a Home Manager module. It has grown into a full agent workb
 
 - **A patched Pi runtime** built from the pinned `llm-agents` input and wrapped to run under Bun.
 - **Home Manager integration** through `inputs.pi-nix.homeManagerModules.default`.
-- **Local Pi extensions** for review, cleanup, spec-driven development, QA, Buddy, Slab UI, Sworm issues, shell policy, and more.
+- **Local Pi extensions** for review, cleanup, spec-driven development, Buddy, Slab UI, Sworm issues, shell policy, and more.
 - **External Pi packages** pinned and installed through Nix: ask-user, RTK optimizer, tool display, Claude bridge, web access, MCP adapter, context-mode.
-- **MCP tools as first-class Pi tools** through `pi-mcp-adapter`, with context-mode and Playwright configured by default.
+- **MCP tools as first-class Pi tools** through `pi-mcp-adapter`, with context-mode configured by default.
 - **Global agent identity** through `modules/home/SOUL.md`, installed as `~/.pi/agent/AGENTS.md`.
 - **Custom terminal UI** through Slab and `modules/home/themes/terminal.json`.
 - **Nix-owned runtime config** under `~/.pi/agent/`: settings, theme, MCP registry, RTK optimizer config, extension links, and package links.
@@ -89,7 +89,6 @@ flake.nix
 | `buddy` | Terminal companion with commands, widgets, persistent DB state, memories, XP, reasoning guard mode, `buddy_remember`, `buddy_observe`. |
 | `burden` | `/burden`, a token attribution explorer for prompt/tool/skill/context cost. |
 | `sdd` | `/spec*` workflow: draft specs, check them, ship to Sworm, work tasks, visualize, close, freehand escape hatch. |
-| `agentic-qa` | `/qa`, `/qa:staged`, `/qa:freehand`, and strict `qa_report` evidence reporting. |
 | `cleanup` | `/cleanup`, `/cleanup:quick`; read-only scouts find obvious cleanup opportunities before apply. |
 | `review` | `/review`, `/review:freehand`; adversarial scout swarm over staged diffs or scoped prompts. |
 | `subagents` | Model-facing `subagent` tool with sequential, parallel, and chained child-agent runs. |
@@ -133,12 +132,6 @@ Review is adversarial and broad: architecture, reuse, quality, idiom, comments, 
 
 Specs hold intent. Sworm holds task state. Operation locks keep draft/check/ship/work phases from bleeding into unrelated file edits.
 
-### Agentic QA
-
-`agentic-qa` is evidence-first QA for localhost targets. It uses `.qa.md` mission files, Playwright/browser evidence, and strict final reports where pass/fail/bug claims need evidence IDs. Unsupported claims are downgraded to inconclusive.
-
-Safety stance: synthetic data, no PHI, no credential handling, localhost by default.
-
 ### Buddy
 
 Buddy is not only decoration. It is a small persistent companion system:
@@ -161,7 +154,6 @@ Default MCP servers:
 | Server | Lifecycle | Purpose |
 | --- | --- | --- |
 | `context-mode` | keep-alive | Context-saving command execution, file processing, indexing, search. |
-| `playwright` | lazy | Browser automation through isolated Chromium. |
 
 External packages are pinned through Nix:
 
@@ -173,7 +165,6 @@ External packages are pinned through Nix:
 | `modules/home/packages/pi-mcp-adapter.nix` | `pi-mcp-adapter` 2.10.0 |
 | `modules/home/packages/pi-web-access.nix` | `pi-web-access` 0.10.7 |
 | `modules/home/packages/pi-claude-bridge.nix` | `pi-claude-bridge` 0.5.0 |
-| `modules/home/packages/playwright-mcp.nix` | nixpkgs `playwright-mcp` with Nix-provided browser bits |
 | `modules/home/packages/rtk.nix` | RTK 0.42.4 |
 
 Version is owned by the flake inputs. `pi-ask-user`, `pi-rtk-optimizer`, and `pi-tool-display` have no runtime deps and load `./index.ts` directly, so they are consumed as raw source inputs with no package file; `nix flake update` bumps them.
@@ -194,7 +185,6 @@ Heavy JavaScript packages are built or linked through Nix:
 
 - Bun/bun2nix for packages that need dependency resolution;
 - direct tarball fetches for tiny packaged extensions;
-- nixpkgs-provided Playwright MCP and browser dependencies;
 - generated lock files in `locks/` where upstream does not ship the lock shape this repo needs.
 
 Runtime command paths in `mcp.json` point into the Nix store. No `npx`, global npm, or runtime package fetch is needed for the default MCP stack.
@@ -236,7 +226,6 @@ modules/home/extensions/buddy/    companion, memory, reasoning, widgets
 modules/home/extensions/sdd/      spec-driven development workflow
 modules/home/extensions/review/   adversarial review workflow
 modules/home/extensions/cleanup/  cleanup workflow
-modules/home/extensions/agentic-qa/ QA workflow and report tool
 modules/home/extensions/commands/ commit/PR/config commands
 modules/home/extensions/burden/   token attribution explorer
 modules/home/extensions/*.ts      small standalone extensions

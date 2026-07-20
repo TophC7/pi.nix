@@ -78,10 +78,6 @@ let
       source = ./extensions/sdd;
       entry = "index.ts";
     };
-    agentic-qa = {
-      source = ./extensions/agentic-qa;
-      entry = "index.ts";
-    };
     cleanup = {
       source = ./extensions/cleanup;
       entry = "index.ts";
@@ -201,16 +197,6 @@ in
               args = [ "${piPackages.context-mode}/start.mjs" ];
               directTools = true;
               lifecycle = "keep-alive";
-            };
-            playwright = {
-              command = "${piPackages.playwright-mcp}/bin/playwright-mcp";
-              args = [
-                "--browser"
-                "chromium"
-                "--isolated"
-              ];
-              directTools = true;
-              lifecycle = "lazy";
             };
           };
         };
