@@ -16,7 +16,7 @@ import { cloneSlabConfig, defaultSlabConfig, loadSlabConfig, saveSlabConfig } fr
 import { SlabEditor, type SlabRightRailState, type SlashCommandMatch } from './editor.ts'
 import { renderSlabFooterLines } from './footer.ts'
 import { collectGitSnapshot } from './git.ts'
-import { readMcpStatusSnapshot } from './mcp.ts'
+import { readMcpStatusSnapshot, startMcpStatusPolling } from './mcp.ts'
 import { SlabConfigPane } from './pane.ts'
 import { createSlabRuntimeState } from './state.ts'
 import type { SlabConfig, SlabGitSnapshot, SlabRuntimeState } from './types.ts'
@@ -132,7 +132,7 @@ class SlabFooter implements Component {
       width,
       caps,
       this.rightRail,
-      readMcpStatusSnapshot(state.clock.now)
+      readMcpStatusSnapshot()
     )
   }
 
@@ -147,6 +147,7 @@ export default function slab(pi: ExtensionAPI): void {
   let gitSnapshot: SlabGitSnapshot | undefined
   let recognizedCommands: ReadonlySet<string> = new Set(BUILTIN_SLASH_COMMAND_NAMES)
   let shimmerTimer: ReturnType<typeof setInterval> | undefined
+  let stopMcpStatusPolling: (() => void) | undefined
 
   function refreshCommandRegistry(): void {
     const names = new Set<string>(BUILTIN_SLASH_COMMAND_NAMES)
@@ -200,6 +201,7 @@ export default function slab(pi: ExtensionAPI): void {
   let state: SlabState | undefined
   let driver: UiRenderDriverHandle | undefined
   let widgetHost: UiWidgetHost | undefined
+  let slabFooter: SlabFooter | undefined
   let rightRail: SlabRightRailState = {}
   let thinkingTonePainter: ThinkingTonePainter | undefined
   let renderRequested = false
@@ -341,7 +343,8 @@ export default function slab(pi: ExtensionAPI): void {
         requestRender()
       }
       if (!widgetHost) throw new Error('slab widget host not initialized')
-      return new SlabFooter(footerData, getState, widgetHost, rightRail)
+      slabFooter = new SlabFooter(footerData, getState, widgetHost, rightRail)
+      return slabFooter
     })
     ctx.ui.setEditorComponent((tui, theme, keybindings) => {
       requestRender = () => tui.requestRender()
@@ -350,22 +353,25 @@ export default function slab(pi: ExtensionAPI): void {
         requestRender()
       }
       if (!widgetHost) throw new Error('slab widget host not initialized')
-      return new SlabEditor(tui, theme, keybindings, getState, widgetHost, rightRail, {
-        recognizedCommands: () => {
-          refreshCommandRegistry()
-          return recognizedCommands
-        },
+      const editor = new SlabEditor(tui, theme, keybindings, getState, widgetHost, rightRail, {
+        recognizedCommands: () => recognizedCommands,
         selectionBackground: (text) => ctx.ui.theme.bg('selectedBg', text),
         paintThinkingBorder: (thinking, text) =>
           thinkingTonePainter?.paint(ctx.ui.theme, thinking, text) ?? ctx.ui.theme.getThinkingBorderColor('off')(text),
         onTextChange: onEditorTextChange
       })
+      tui.setInputRenderScope(editor, () => (slabFooter ? [editor, slabFooter] : [editor]))
+      requestRender = () => tui.requestRenderFor(editor)
+      return editor
     })
+    stopMcpStatusPolling = startMcpStatusPolling(() => requestRender())
     refreshCommandRegistry()
   }
 
   function clear(ctx: ExtensionContext): void {
     stopShimmer()
+    stopMcpStatusPolling?.()
+    stopMcpStatusPolling = undefined
     driver?.dispose()
     driver = undefined
     if (ctx.hasUI) {
@@ -374,6 +380,10 @@ export default function slab(pi: ExtensionAPI): void {
     }
     widgetHost?.dispose()
     widgetHost = undefined
+    slabFooter = undefined
+    requestRender = () => {
+      renderRequested = true
+    }
     rightRail = {}
     thinkingTonePainter?.dispose()
     thinkingTonePainter = undefined

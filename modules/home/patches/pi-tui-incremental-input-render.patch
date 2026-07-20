@@ -1,0 +1,487 @@
+diff --git a/dist/modes/interactive/components/footer.js b/dist/modes/interactive/components/footer.js
+index 4fe5fdb..4cdafcf 100644
+--- a/dist/modes/interactive/components/footer.js
++++ b/dist/modes/interactive/components/footer.js
+@@ -39,6 +39,17 @@ export function formatCwdForFooter(cwd, home) {
+         return cwd;
+     return relativeToHome === "" ? "~" : `~${sep}${relativeToHome}`;
+ }
++function usageNumber(value) {
++    return typeof value === "number" && Number.isFinite(value) ? value : 0;
++}
++function usageCost(usage) {
++    const cost = usage?.cost;
++    if (!cost)
++        return 0;
++    if (Number.isFinite(cost.total))
++        return cost.total ?? 0;
++    return usageNumber(cost.input) + usageNumber(cost.output) + usageNumber(cost.cacheRead) + usageNumber(cost.cacheWrite);
++}
+ /**
+  * Footer component that shows pwd, token stats, and context usage.
+  * Computes token/context stats from session, gets git branch and extension statuses from provider.
+@@ -47,12 +58,16 @@ export class FooterComponent {
+     autoCompactEnabled = true;
+     session;
+     footerData;
++    usageCache;
++    contextUsageCache;
+     constructor(session, footerData) {
+         this.session = session;
+         this.footerData = footerData;
+     }
+     setSession(session) {
+         this.session = session;
++        this.usageCache = undefined;
++        this.contextUsageCache = undefined;
+     }
+     setAutoCompactEnabled(enabled) {
+         this.autoCompactEnabled = enabled;
+@@ -71,30 +86,62 @@ export class FooterComponent {
+     dispose() {
+         // Git watcher cleanup handled by provider
+     }
+-    render(width) {
+-        const state = this.session.state;
+-        // Calculate cumulative usage from ALL session entries (not just post-compaction messages)
+-        let totalInput = 0;
+-        let totalOutput = 0;
+-        let totalCacheRead = 0;
+-        let totalCacheWrite = 0;
+-        let totalCost = 0;
++    getUsageSnapshot() {
++        const getLeafId = this.session.sessionManager.getLeafId;
++        const leafId = typeof getLeafId === "function" ? getLeafId.call(this.session.sessionManager) : undefined;
++        const cacheable = typeof leafId === "string";
++        if (cacheable && this.usageCache?.leafId === leafId)
++            return this.usageCache;
++        const totals = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 };
+         let latestCacheHitRate;
+         for (const entry of this.session.sessionManager.getEntries()) {
++            let usage;
++            if (entry.type === "message" &&
++                (entry.message.role === "assistant" || entry.message.role === "toolResult")) {
++                usage = entry.message.usage;
++            }
++            else if (entry.type === "branch_summary" || entry.type === "compaction") {
++                usage = entry.usage;
++            }
++            if (!usage)
++                continue;
++            totals.input += usage.input ?? 0;
++            totals.output += usage.output ?? 0;
++            totals.cacheRead += usage.cacheRead ?? 0;
++            totals.cacheWrite += usage.cacheWrite ?? 0;
++            totals.cost += usageCost(usage);
+             if (entry.type === "message" && entry.message.role === "assistant") {
+-                totalInput += entry.message.usage.input;
+-                totalOutput += entry.message.usage.output;
+-                totalCacheRead += entry.message.usage.cacheRead;
+-                totalCacheWrite += entry.message.usage.cacheWrite;
+-                totalCost += entry.message.usage.cost.total;
+-                const latestPromptTokens = entry.message.usage.input + entry.message.usage.cacheRead + entry.message.usage.cacheWrite;
+-                latestCacheHitRate =
+-                    latestPromptTokens > 0 ? (entry.message.usage.cacheRead / latestPromptTokens) * 100 : undefined;
++                const latestPromptTokens = (usage.input ?? 0) + (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0);
++                latestCacheHitRate = latestPromptTokens > 0 ? ((usage.cacheRead ?? 0) / latestPromptTokens) * 100 : undefined;
+             }
+         }
++        const snapshot = { leafId, totals, latestCacheHitRate };
++        this.usageCache = cacheable ? snapshot : undefined;
++        return snapshot;
++    }
++    getContextUsage() {
++        const getLeafId = this.session.sessionManager.getLeafId;
++        const leafId = typeof getLeafId === "function" ? getLeafId.call(this.session.sessionManager) : undefined;
++        const cacheable = typeof leafId === "string";
++        const model = this.session.state.model;
++        const modelKey = model ? `${model.provider}\0${model.id}\0${model.contextWindow}` : "";
++        if (cacheable &&
++            !this.session.isStreaming &&
++            this.contextUsageCache?.leafId === leafId &&
++            this.contextUsageCache.modelKey === modelKey) {
++            return this.contextUsageCache.usage;
++        }
++        const usage = this.session.getContextUsage();
++        if (cacheable && !this.session.isStreaming)
++            this.contextUsageCache = { leafId, modelKey, usage };
++        return usage;
++    }
++    render(width) {
++        const state = this.session.state;
++        const { totals: { input: totalInput, output: totalOutput, cacheRead: totalCacheRead, cacheWrite: totalCacheWrite, cost: totalCost }, latestCacheHitRate, } = this.getUsageSnapshot();
+         // Calculate context usage from session (handles compaction correctly).
+         // After compaction, tokens are unknown until the next LLM response.
+-        const contextUsage = this.session.getContextUsage();
++        const contextUsage = this.getContextUsage();
+         const contextWindow = contextUsage?.contextWindow ?? state.model?.contextWindow ?? 0;
+         const contextPercentValue = contextUsage?.percent ?? 0;
+         const contextPercent = contextUsage?.percent !== null ? contextPercentValue.toFixed(1) : "?";
+diff --git a/dist/modes/interactive/interactive-mode.js b/dist/modes/interactive/interactive-mode.js
+index d8d68c6..c1ccff2 100644
+--- a/dist/modes/interactive/interactive-mode.js
++++ b/dist/modes/interactive/interactive-mode.js
+@@ -291,6 +291,7 @@ export class InteractiveMode {
+         this.editor = this.defaultEditor;
+         this.editorContainer = new Container();
+         this.editorContainer.addChild(this.editor);
++        this.ui.setInputRenderScope(this.editor, () => [this.editor]);
+         this.footerDataProvider = new FooterDataProvider(this.sessionManager.getCwd());
+         this.footer = new FooterComponent(this.session, this.footerDataProvider);
+         this.footer.setAutoCompactEnabled(this.session.autoCompactionEnabled);
+diff --git a/node_modules/@earendil-works/pi-tui/dist/components/editor.js b/node_modules/@earendil-works/pi-tui/dist/components/editor.js
+index 6c03aee..5bb044b 100644
+--- a/node_modules/@earendil-works/pi-tui/dist/components/editor.js
++++ b/node_modules/@earendil-works/pi-tui/dist/components/editor.js
+@@ -261,7 +261,7 @@ export class Editor {
+         const newPadding = Number.isFinite(padding) ? Math.max(0, Math.floor(padding)) : 0;
+         if (this.paddingX !== newPadding) {
+             this.paddingX = newPadding;
+-            this.tui.requestRender();
++            this.tui.requestRenderFor(this);
+         }
+     }
+     getAutocompleteMaxVisible() {
+@@ -271,7 +271,7 @@ export class Editor {
+         const newMaxVisible = Number.isFinite(maxVisible) ? Math.max(3, Math.min(20, Math.floor(maxVisible))) : 5;
+         if (this.autocompleteMaxVisible !== newMaxVisible) {
+             this.autocompleteMaxVisible = newMaxVisible;
+-            this.tui.requestRender();
++            this.tui.requestRenderFor(this);
+         }
+     }
+     setAutocompleteProvider(provider) {
+@@ -1876,7 +1876,7 @@ export class Editor {
+         this.autocompleteAbort = undefined;
+         if (!suggestions || !Array.isArray(suggestions.items) || suggestions.items.length === 0) {
+             this.cancelAutocomplete();
+-            this.tui.requestRender();
++            this.tui.requestRenderFor(this);
+             return;
+         }
+         if (options.force && options.explicitTab && suggestions.items.length === 1) {
+@@ -1889,11 +1889,11 @@ export class Editor {
+             this.setCursorCol(result.cursorCol);
+             if (this.onChange)
+                 this.onChange(this.getText());
+-            this.tui.requestRender();
++            this.tui.requestRenderFor(this);
+             return;
+         }
+         this.applyAutocompleteSuggestions(suggestions, options.force ? "force" : "regular");
+-        this.tui.requestRender();
++        this.tui.requestRenderFor(this);
+     }
+     isAutocompleteRequestCurrent(requestId, controller, snapshotText, snapshotLine, snapshotCol) {
+         return (!controller.signal.aborted &&
+diff --git a/node_modules/@earendil-works/pi-tui/dist/tui.d.ts b/node_modules/@earendil-works/pi-tui/dist/tui.d.ts
+index 97666aa..3a95bc7 100644
+--- a/node_modules/@earendil-works/pi-tui/dist/tui.d.ts
++++ b/node_modules/@earendil-works/pi-tui/dist/tui.d.ts
+@@ -209,6 +209,8 @@ export declare class TUI extends Container {
+     private queryCellSize;
+     stop(): void;
+     requestRender(force?: boolean): void;
++    requestRenderFor(component: Component): void;
++    setInputRenderScope(component: Component, getScope?: () => readonly Component[]): void;
+     private scheduleRender;
+     private handleInput;
+     private consumeOsc11BackgroundResponse;
+diff --git a/node_modules/@earendil-works/pi-tui/dist/tui.js b/node_modules/@earendil-works/pi-tui/dist/tui.js
+index 6257443..308163b 100644
+--- a/node_modules/@earendil-works/pi-tui/dist/tui.js
++++ b/node_modules/@earendil-works/pi-tui/dist/tui.js
+@@ -111,6 +111,13 @@ export class TUI extends Container {
+     terminal;
+     previousLines = [];
+     previousKittyImageIds = new Set();
++    sectionRenderCache = new Map();
++    cachedRootChildren = [];
++    sectionOwners = new WeakMap();
++    inputRenderScopes = new WeakMap();
++    scopedRenderRequests = null;
++    lineResetPrevRaw = null;
++    lineResetPrevOut = null;
+     previousWidth = 0;
+     previousHeight = 0;
+     focusedComponent = null;
+@@ -427,6 +434,7 @@ export class TUI extends Container {
+         super.invalidate();
+         for (const overlay of this.overlayStack)
+             overlay.component.invalidate?.();
++        this.clearRenderCaches();
+     }
+     start() {
+         this.stopped = false;
+@@ -496,6 +504,8 @@ export class TUI extends Container {
+         this.terminal.stop();
+     }
+     requestRender(force = false) {
++        // An unscoped request wins over any coalesced scoped request.
++        this.scopedRenderRequests = null;
+         if (force) {
+             this.previousLines = [];
+             this.previousWidth = -1; // -1 triggers widthChanged, forcing a full clear
+@@ -504,6 +514,7 @@ export class TUI extends Container {
+             this.hardwareCursorRow = 0;
+             this.maxLinesRendered = 0;
+             this.previousViewportTop = 0;
++            this.clearRenderCaches();
+             if (this.renderTimer) {
+                 clearTimeout(this.renderTimer);
+                 this.renderTimer = undefined;
+@@ -515,7 +526,7 @@ export class TUI extends Container {
+                 }
+                 this.renderRequested = false;
+                 this.lastRenderAt = performance.now();
+-                this.doRender();
++                this.doRender(null);
+             });
+             return;
+         }
+@@ -524,6 +535,35 @@ export class TUI extends Container {
+         this.renderRequested = true;
+         process.nextTick(() => this.scheduleRender());
+     }
++    /**
++     * Declare which components can change when component handles input. Without
++     * this opt-in, input preserves the original unscoped render behavior.
++     */
++    setInputRenderScope(component, getScope) {
++        if (getScope)
++            this.inputRenderScopes.set(component, getScope);
++        else
++            this.inputRenderScopes.delete(component);
++    }
++    /** Request a render scoped to component and its declared dependencies. */
++    requestRenderFor(component) {
++        const components = this.inputRenderScopes.get(component)?.() ?? [component];
++        if (this.renderRequested) {
++            for (const target of components)
++                this.scopedRenderRequests?.add(target);
++            return;
++        }
++        this.scopedRenderRequests = new Set(components);
++        this.renderRequested = true;
++        process.nextTick(() => this.scheduleRender());
++    }
++    clearRenderCaches() {
++        this.sectionRenderCache.clear();
++        this.cachedRootChildren = [];
++        this.sectionOwners = new WeakMap();
++        this.lineResetPrevRaw = null;
++        this.lineResetPrevOut = null;
++    }
+     scheduleRender() {
+         if (this.stopped || this.renderTimer || !this.renderRequested) {
+             return;
+@@ -535,9 +575,11 @@ export class TUI extends Container {
+             if (this.stopped || !this.renderRequested) {
+                 return;
+             }
++            const renderScope = this.scopedRenderRequests;
++            this.scopedRenderRequests = null;
+             this.renderRequested = false;
+             this.lastRenderAt = performance.now();
+-            this.doRender();
++            this.doRender(renderScope);
+             if (this.renderRequested) {
+                 this.scheduleRender();
+             }
+@@ -612,7 +654,10 @@ export class TUI extends Container {
+                 return;
+             }
+             this.focusedComponent.handleInput(data);
+-            this.requestRender();
++            if (this.inputRenderScopes.has(this.focusedComponent))
++                this.requestRenderFor(this.focusedComponent);
++            else
++                this.requestRender();
+         }
+     }
+     consumeOsc11BackgroundResponse(data) {
+@@ -838,16 +883,102 @@ export class TUI extends Container {
+         }
+         return result;
+     }
++    findRootSection(component) {
++        const cached = this.sectionOwners.get(component);
++        if (cached && this.children.includes(cached))
++            return cached;
++        // Interactive inputs live near the bottom of the root. Search backwards so
++        // resolving the editor never walks the settled chat transcript.
++        for (let index = this.children.length - 1; index >= 0; index--) {
++            const child = this.children[index];
++            if (this.containsComponent(child, component)) {
++                this.sectionOwners.set(component, child);
++                return child;
++            }
++        }
++        return undefined;
++    }
++    renderRoot(width, renderScope) {
++        const rootUnchanged = this.cachedRootChildren.length === this.children.length &&
++            this.children.every((child, index) => this.cachedRootChildren[index] === child);
++        if (!rootUnchanged) {
++            const liveChildren = new Set(this.children);
++            for (const child of this.sectionRenderCache.keys()) {
++                if (!liveChildren.has(child))
++                    this.sectionRenderCache.delete(child);
++            }
++            this.sectionOwners = new WeakMap();
++        }
++        let scopedSections;
++        if (renderScope && renderScope.size > 0 && this.overlayStack.length === 0 && rootUnchanged) {
++            scopedSections = new Set();
++            for (const component of renderScope) {
++                const section = this.findRootSection(component);
++                if (!section) {
++                    scopedSections = undefined;
++                    break;
++                }
++                scopedSections.add(section);
++            }
++            if (scopedSections &&
++                this.children.some((child) => {
++                    const cached = this.sectionRenderCache.get(child);
++                    return !cached || cached.width !== width;
++                })) {
++                scopedSections = undefined;
++            }
++        }
++        const lines = [];
++        let diffStart = 0;
++        let offset = 0;
++        let foundScopedSection = false;
++        let hasKittyImages = false;
++        for (const child of this.children) {
++            const cached = this.sectionRenderCache.get(child);
++            const shouldRender = !scopedSections || scopedSections.has(child);
++            let section;
++            if (shouldRender) {
++                const rendered = [...child.render(width)];
++                section = {
++                    width,
++                    lines: rendered,
++                    hasKittyImages: rendered.some(isImageLine),
++                };
++                this.sectionRenderCache.set(child, section);
++            }
++            else {
++                section = cached;
++            }
++            if (scopedSections?.has(child) && !foundScopedSection) {
++                diffStart = offset;
++                foundScopedSection = true;
++            }
++            for (const line of section.lines)
++                lines.push(line);
++            offset += section.lines.length;
++            hasKittyImages ||= section.hasKittyImages;
++        }
++        this.cachedRootChildren = [...this.children];
++        return { lines, diffStart, hasKittyImages, scoped: scopedSections !== undefined };
++    }
+     static SEGMENT_RESET = "\x1b[0m\x1b]8;;\x07";
+     applyLineResets(lines) {
+         const reset = TUI.SEGMENT_RESET;
++        const output = new Array(lines.length);
++        const previousRaw = this.lineResetPrevRaw;
++        const previousOutput = this.lineResetPrevOut;
+         for (let i = 0; i < lines.length; i++) {
+             const line = lines[i];
+-            if (!isImageLine(line)) {
+-                lines[i] = normalizeTerminalOutput(line) + reset;
++            if (previousRaw && previousOutput && previousRaw[i] === line) {
++                output[i] = previousOutput[i];
++            }
++            else {
++                output[i] = isImageLine(line) ? line : normalizeTerminalOutput(line) + reset;
+             }
+         }
+-        return lines;
++        this.lineResetPrevRaw = lines;
++        this.lineResetPrevOut = output;
++        return output;
+     }
+     collectKittyImageIds(lines) {
+         const ids = new Set();
+@@ -973,7 +1104,7 @@ export class TUI extends Container {
+         }
+         return null;
+     }
+-    doRender() {
++    doRender(renderScope) {
+         if (this.stopped)
+             return;
+         const width = this.terminal.columns;
+@@ -989,11 +1120,15 @@ export class TUI extends Container {
+             const targetScreenRow = targetRow - viewportTop;
+             return targetScreenRow - currentScreenRow;
+         };
+-        // Render all components to get new lines
+-        let newLines = this.render(width);
++        // Scoped input renders reuse settled top-level sections. Unscoped requests
++        // preserve the existing contract for dynamic and extension components.
++        const rootRender = this.renderRoot(width, renderScope);
++        let newLines = rootRender.lines;
++        let frameHasKittyImages = rootRender.hasKittyImages;
+         // Composite overlays into the rendered lines (before differential compare)
+         if (this.overlayStack.length > 0) {
+             newLines = this.compositeOverlays(newLines, width, height);
++            frameHasKittyImages = newLines.some(isImageLine);
+         }
+         // Extract cursor position before applying line resets (marker must be found first)
+         const cursorPos = this.extractCursorPosition(newLines, height);
+@@ -1039,7 +1174,7 @@ export class TUI extends Container {
+             this.previousViewportTop = Math.max(0, bufferLength - height);
+             this.positionHardwareCursor(cursorPos, newLines.length);
+             this.previousLines = newLines;
+-            this.previousKittyImageIds = this.collectKittyImageIds(newLines);
++            this.previousKittyImageIds = frameHasKittyImages ? this.collectKittyImageIds(newLines) : new Set();
+             this.previousWidth = width;
+             this.previousHeight = height;
+         };
+@@ -1079,11 +1214,13 @@ export class TUI extends Container {
+             fullRender(true);
+             return;
+         }
+-        // Find first and last changed lines
++        // Find first and last changed lines. A scoped render guarantees that every
++        // line before diffStart belongs to an unchanged top-level section.
+         let firstChanged = -1;
+         let lastChanged = -1;
+         const maxLines = Math.max(newLines.length, this.previousLines.length);
+-        for (let i = 0; i < maxLines; i++) {
++        const diffStart = rootRender.scoped ? rootRender.diffStart : 0;
++        for (let i = diffStart; i < maxLines; i++) {
+             const oldLine = i < this.previousLines.length ? this.previousLines[i] : "";
+             const newLine = i < newLines.length ? newLines[i] : "";
+             if (oldLine !== newLine) {
+@@ -1100,7 +1237,7 @@ export class TUI extends Container {
+             }
+             lastChanged = newLines.length - 1;
+         }
+-        if (firstChanged !== -1) {
++        if (firstChanged !== -1 && (frameHasKittyImages || this.previousKittyImageIds.size > 0)) {
+             const expandedRange = this.expandChangedRangeForKittyImages(firstChanged, lastChanged, newLines);
+             firstChanged = expandedRange.firstChanged;
+             lastChanged = expandedRange.lastChanged;
+@@ -1158,7 +1295,7 @@ export class TUI extends Container {
+             }
+             this.positionHardwareCursor(cursorPos, newLines.length);
+             this.previousLines = newLines;
+-            this.previousKittyImageIds = this.collectKittyImageIds(newLines);
++            this.previousKittyImageIds = frameHasKittyImages ? this.collectKittyImageIds(newLines) : new Set();
+             this.previousWidth = width;
+             this.previousHeight = height;
+             this.previousViewportTop = prevViewportTop;
+@@ -1312,7 +1449,7 @@ export class TUI extends Container {
+         // Position hardware cursor for IME
+         this.positionHardwareCursor(cursorPos, newLines.length);
+         this.previousLines = newLines;
+-        this.previousKittyImageIds = this.collectKittyImageIds(newLines);
++        this.previousKittyImageIds = frameHasKittyImages ? this.collectKittyImageIds(newLines) : new Set();
+         this.previousWidth = width;
+         this.previousHeight = height;
+     }

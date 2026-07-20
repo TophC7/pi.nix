@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, statSync } from 'node:fs'
+import { readFile, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 
@@ -31,32 +31,61 @@ export interface SlabMcpStatusSnapshot {
 }
 
 const STATUS_MAX_AGE_MS = 120_000
+const STATUS_POLL_INTERVAL_MS = 1_000
 let cachedPath: string | undefined
 let cachedMtime = 0
 let cachedSnapshot: SlabMcpStatusSnapshot | undefined
 
 export function readMcpStatusSnapshot(now = Date.now()): SlabMcpStatusSnapshot | undefined {
-  const path = mcpStatusPath()
-  if (!existsSync(path)) {
-    cachedMtime = 0
-    cachedSnapshot = undefined
-    return undefined
-  }
+  if (!cachedSnapshot || now - cachedSnapshot.updatedAt > STATUS_MAX_AGE_MS) return undefined
+  return cachedSnapshot
+}
 
+async function refreshMcpStatusSnapshot(): Promise<boolean> {
+  const previousMtime = cachedMtime
+  const previousSnapshot = cachedSnapshot
+  const path = mcpStatusPath()
   try {
-    const stat = statSync(path)
-    if (stat.mtimeMs !== cachedMtime) {
-      cachedMtime = stat.mtimeMs
-      cachedSnapshot = parseSnapshot(JSON.parse(readFileSync(path, 'utf-8')))
+    const file = await stat(path)
+    if (file.mtimeMs !== cachedMtime) {
+      cachedMtime = file.mtimeMs
+      cachedSnapshot = parseSnapshot(JSON.parse(await readFile(path, 'utf-8')))
     }
   } catch {
     cachedMtime = 0
     cachedSnapshot = undefined
-    return undefined
+  }
+  return cachedMtime !== previousMtime || cachedSnapshot !== previousSnapshot
+}
+
+export function startMcpStatusPolling(onChange: () => void): () => void {
+  let disposed = false
+  let inFlight = false
+  let visibleSnapshot = readMcpStatusSnapshot()
+
+  const poll = async (): Promise<void> => {
+    if (disposed || inFlight) return
+    inFlight = true
+    try {
+      const changed = await refreshMcpStatusSnapshot()
+      if (disposed) return
+      const nextVisibleSnapshot = readMcpStatusSnapshot()
+      if (changed || nextVisibleSnapshot !== visibleSnapshot) {
+        visibleSnapshot = nextVisibleSnapshot
+        onChange()
+      }
+    } finally {
+      inFlight = false
+    }
   }
 
-  if (!cachedSnapshot || now - cachedSnapshot.updatedAt > STATUS_MAX_AGE_MS) return undefined
-  return cachedSnapshot
+  void poll()
+  const timer = setInterval(() => void poll(), STATUS_POLL_INTERVAL_MS)
+  ;(timer as { unref?: () => void }).unref?.()
+  return () => {
+    disposed = true
+    clearInterval(timer)
+  }
 }
 
 function mcpStatusPath(): string {

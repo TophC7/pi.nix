@@ -32,26 +32,58 @@ function usageCost(usage: UsageLike | undefined): number {
 
 function entryUsage(entry: unknown): UsageLike | undefined {
   if (!entry || typeof entry !== 'object') return undefined
-  const record = entry as { type?: unknown; message?: unknown }
+  const record = entry as { type?: unknown; message?: unknown; usage?: UsageLike }
+  if (record.type === 'branch_summary' || record.type === 'compaction') return record.usage
   if (record.type !== 'message' || !record.message || typeof record.message !== 'object') return undefined
   const message = record.message as { role?: unknown; usage?: UsageLike }
-  if (message.role !== 'assistant') return undefined
-  return message.usage
+  return message.role === 'assistant' || message.role === 'toolResult' ? message.usage : undefined
 }
 
-let cachedEntries: unknown[] | undefined
-let cachedUsage: SlabUsageTotals | undefined
+interface SessionManagerView {
+  getEntries?: () => readonly unknown[]
+  getLeafId?: () => string | null | undefined
+}
 
-function sessionEntries(ctx: ExtensionContext): readonly unknown[] {
-  const manager = ctx.sessionManager as unknown as {
-    getEntries?: () => readonly unknown[]
-  }
-  return manager.getEntries?.() ?? []
+type ContextUsage = ReturnType<ExtensionContext['getContextUsage']>
+
+interface SessionCache {
+  usage?: { leafId: string; totals: SlabUsageTotals }
+  context?: { leafId: string; model: string; usage: ContextUsage }
+}
+
+const sessionCaches = new WeakMap<SessionManagerView, SessionCache>()
+
+function sessionManager(ctx: ExtensionContext): SessionManagerView {
+  return ctx.sessionManager as unknown as SessionManagerView
+}
+
+function sessionCache(manager: SessionManagerView): SessionCache {
+  const cached = sessionCaches.get(manager)
+  if (cached) return cached
+  const created: SessionCache = {}
+  sessionCaches.set(manager, created)
+  return created
+}
+
+function contextUsage(ctx: ExtensionContext): ContextUsage {
+  const manager = sessionManager(ctx)
+  const leafId = manager.getLeafId?.()
+  if (typeof leafId !== 'string') return ctx.getContextUsage()
+
+  const model = modelCacheKey(ctx.model)
+  const cached = sessionCaches.get(manager)?.context
+  if (cached?.leafId === leafId && cached.model === model) return cached.usage
+
+  const usage = ctx.getContextUsage()
+  sessionCache(manager).context = { leafId, model, usage }
+  return usage
 }
 
 export function computeUsageTotals(ctx: ExtensionContext): SlabUsageTotals {
-  const entries = sessionEntries(ctx)
-  if (Object.is(entries, cachedEntries) && cachedUsage) return cachedUsage
+  const manager = sessionManager(ctx)
+  const leafId = manager.getLeafId?.()
+  const cached = sessionCaches.get(manager)?.usage
+  if (typeof leafId === 'string' && cached?.leafId === leafId) return cached.totals
   const usage: SlabUsageTotals = {
     input: 0,
     output: 0,
@@ -59,7 +91,7 @@ export function computeUsageTotals(ctx: ExtensionContext): SlabUsageTotals {
     cacheWrite: 0,
     cost: 0
   }
-  for (const entry of entries) {
+  for (const entry of manager.getEntries?.() ?? []) {
     const item = entryUsage(entry)
     if (!item) continue
     usage.input += usageNumber(item.input)
@@ -68,8 +100,7 @@ export function computeUsageTotals(ctx: ExtensionContext): SlabUsageTotals {
     usage.cacheWrite += usageNumber(item.cacheWrite)
     usage.cost += usageCost(item)
   }
-  cachedEntries = entries as unknown[]
-  cachedUsage = usage
+  if (typeof leafId === 'string') sessionCache(manager).usage = { leafId, totals: usage }
   return usage
 }
 
@@ -81,6 +112,10 @@ function provider(model: ExtensionContext['model']): string | undefined {
 function modelId(model: ExtensionContext['model']): string | undefined {
   const value = model?.id
   return typeof value === 'string' ? value : undefined
+}
+
+function modelCacheKey(model: ExtensionContext['model']): string {
+  return `${provider(model) ?? ''}\0${modelId(model) ?? ''}\0${contextWindow(model)}`
 }
 
 function contextWindow(model: ExtensionContext['model']): number {
@@ -102,7 +137,7 @@ export function createSlabRuntimeState(
   options: CreateSlabRuntimeStateOptions = {}
 ): SlabRuntimeState {
   const cwd = ctx.cwd
-  const contextUsage = ctx.getContextUsage()
+  const currentContextUsage = contextUsage(ctx)
   const id = modelId(ctx.model)
   return {
     workspace: {
@@ -120,9 +155,9 @@ export function createSlabRuntimeState(
       thinking: options.thinking ?? 'off'
     },
     context: {
-      tokens: contextUsage?.tokens ?? null,
-      window: contextUsage?.contextWindow ?? contextWindow(ctx.model),
-      percent: contextUsage?.percent ?? null
+      tokens: currentContextUsage?.tokens ?? null,
+      window: currentContextUsage?.contextWindow ?? contextWindow(ctx.model),
+      percent: currentContextUsage?.percent ?? null
     },
     usage: computeUsageTotals(ctx),
     statuses: snapshot.statuses,

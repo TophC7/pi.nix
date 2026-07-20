@@ -25,6 +25,7 @@ let
     preInstall = ''
       patch -p1 < ${./patches/pi-command-models-compact.patch}
       patch -p1 < ${./patches/pi-ai-discard-failed-tool-continuations.patch}
+      patch -p1 < ${./patches/pi-tui-incremental-input-render.patch}
     '' + (old.preInstall or "");
 
     postInstall = (old.postInstall or "") + ''

@@ -196,6 +196,7 @@ Local patches adapt upstream behavior:
 | --- | --- |
 | `pi-command-models-compact.patch` | Compact command model handling. |
 | `pi-ai-discard-failed-tool-continuations.patch` | Avoid carrying failed tool continuations forward. |
+| `pi-tui-incremental-input-render.patch` | Reuse settled TUI sections during editor input and cache session-derived footer work. |
 | `pi-mcp-adapter-slab-status.patch` | Publish MCP status for Slab. |
 
 ## Quirks worth knowing

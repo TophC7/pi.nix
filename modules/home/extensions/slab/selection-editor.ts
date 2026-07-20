@@ -117,13 +117,11 @@ export class SelectionEditor extends CustomEditor {
     if (!range) this.selectionAnchor = undefined
     if (range && this.selectionKeybindings.matches(data, 'tui.input.copy')) {
       void copyToClipboard(this.expandedSelectionText(range)).catch(() => {})
-      this.tui.requestRender()
       return
     }
 
     if (range && this.selectionKeybindings.matches(data, 'app.interrupt')) {
       this.selectionAnchor = undefined
-      this.tui.requestRender()
       return
     }
 
@@ -205,7 +203,6 @@ export class SelectionEditor extends CustomEditor {
     if (!move) return false
     this.selectionAnchor ??= { ...this.getCursor() }
     move()
-    this.tui.requestRender()
     return true
   }
 
@@ -214,7 +211,6 @@ export class SelectionEditor extends CustomEditor {
     internals.state.cursorLine = position.line
     internals.setCursorCol(position.col)
     this.selectionAnchor = undefined
-    this.tui.requestRender()
   }
 
   private deleteSelection(): number | undefined {
@@ -236,7 +232,6 @@ export class SelectionEditor extends CustomEditor {
     this.reconcilePasteRegistry(internals)
     this.selectionAnchor = undefined
     this.onChange?.(this.getText())
-    this.tui.requestRender()
     return internals.undoStack.length
   }
 
@@ -294,7 +289,6 @@ export class SelectionEditor extends CustomEditor {
       const anchorLine = this.getLines()[anchor.line]
       if (anchorLine === undefined || anchor.col > anchorLine.length) this.selectionAnchor = undefined
     }
-    this.tui.requestRender()
   }
 
   private renderSelection(rawLines: string[]): string[] {
