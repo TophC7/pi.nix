@@ -12,7 +12,6 @@ let
   system = pkgs.stdenv.hostPlatform.system;
   b2n = inputs.bun2nix.packages.${system}.default;
   lock = lib.fs.relativeTo ../../locks;
-  claudeCode = inputs.llm-agents.packages.${system}.claude-code;
   piNodePackage = inputs.llm-agents.packages.${system}.pi;
   piBunPackage = piNodePackage.overrideAttrs (old: {
     nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [
@@ -98,7 +97,6 @@ let
       inputs
       b2n
       lock
-      claudeCode
       ;
   };
   externalPackageDeclarations = [
@@ -107,7 +105,6 @@ let
     # No runtime deps + loads ./index.ts directly, so the raw source input is
     # the package, same as ask-user and rtk-optimizer.
     { name = "pi-tool-display"; package = inputs.pi-tool-display; }
-    { name = "pi-claude-bridge"; package = piPackages.pi-claude-bridge; }
     { name = "pi-web-access"; package = piPackages.pi-web-access; }
     { name = "pi-agentsmd"; package = piPackages.pi-agentsmd; }
     # MCP transport for Pi. Reads ~/.pi/agent/mcp.json and registers every
@@ -168,12 +165,6 @@ in
         ".pi/agent/AGENTS.md".source = ./SOUL.md;
         ".pi/agent/themes/terminal.json".source = ./themes/terminal.json;
 
-        # pi-claude-bridge reads the Claude Code executable path from here, so
-        # it resolves to the Nix store instead of PATH. Replaces the old source
-        # patch that injected the path directly.
-        ".pi/agent/claude-bridge.json".text = builtins.toJSON {
-          provider.pathToClaudeCodeExecutable = lib.getExe claudeCode;
-        };
         ".pi/agent/settings.json".text = builtins.toJSON {
           defaultProvider = cfg.provider;
           defaultModel = cfg.model;

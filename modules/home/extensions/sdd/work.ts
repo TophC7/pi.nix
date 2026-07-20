@@ -41,7 +41,7 @@ export async function runWork(pi: ExtensionAPI, ctx: ExtensionCommandContext, ar
 }
 
 function buildWorkPrompt(slug: string, path: string, epicId: string): string {
-  // CLAUDE: Do NOT lead this prompt with slash-command-shaped text (e.g.
+  // IMPORTANT: Do NOT lead this prompt with slash-command-shaped text (e.g.
   // `/spec:work ...`). Pi's command parser will hijack the first token and
   // corrupt the prompt body. Lead with prose.
   return `Work loop for spec ${slug} (epic ${epicId}).

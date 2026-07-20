@@ -9,7 +9,7 @@ This repo started as a Home Manager module. It has grown into a full agent workb
 - **A patched Pi runtime** built from the pinned `llm-agents` input and wrapped to run under Bun.
 - **Home Manager integration** through `inputs.pi-nix.homeManagerModules.default`.
 - **Local Pi extensions** for review, cleanup, spec-driven development, Buddy, Slab UI, Sworm issues, shell policy, and more.
-- **External Pi packages** pinned and installed through Nix: ask-user, RTK optimizer, tool display, Claude bridge, web access, MCP adapter, context-mode.
+- **External Pi packages** pinned and installed through Nix: ask-user, RTK optimizer, tool display, web access, MCP adapter, context-mode.
 - **MCP tools as first-class Pi tools** through `pi-mcp-adapter`, with context-mode configured by default.
 - **Global agent identity** through `modules/home/SOUL.md`, installed as `~/.pi/agent/AGENTS.md`.
 - **Custom terminal UI** through Slab and `modules/home/themes/terminal.json`.
@@ -164,7 +164,6 @@ External packages are pinned through Nix:
 | `modules/home/packages/pi-agentsmd.nix` | `pi-agentsmd` 0.1.1 |
 | `modules/home/packages/pi-mcp-adapter.nix` | `pi-mcp-adapter` 2.10.0 |
 | `modules/home/packages/pi-web-access.nix` | `pi-web-access` 0.10.7 |
-| `modules/home/packages/pi-claude-bridge.nix` | `pi-claude-bridge` 0.5.0 |
 | `modules/home/packages/rtk.nix` | RTK 0.42.4 |
 
 Version is owned by the flake inputs. `pi-ask-user`, `pi-rtk-optimizer`, and `pi-tool-display` have no runtime deps and load `./index.ts` directly, so they are consumed as raw source inputs with no package file; `nix flake update` bumps them.

@@ -183,12 +183,12 @@ function sampleState(config: SlabConfig): SlabEditorState {
       ),
       providers: { availableCount: 2 },
       model: {
-        id: 'claude-sonnet-4-20250514',
-        provider: 'anthropic',
-        displayName: 'Sonnet 4',
+        id: 'gpt-5.6-sol',
+        provider: 'openai-codex',
+        displayName: 'GPT-5.6 Sol',
         thinking: 'high'
       },
-      context: { tokens: 46_800, window: 200_000, percent: 23.4 },
+      context: { tokens: 46_800, window: 272_000, percent: 17.2 },
       usage: {
         input: 12_400,
         output: 3_100,

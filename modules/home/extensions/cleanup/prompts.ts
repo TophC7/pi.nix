@@ -75,7 +75,7 @@ Return concise findings only. For each finding include:
 }
 
 export function cleanupApplyPrompt(args: CleanupApplyArgs): string {
-  // CLAUDE: Do NOT lead this prompt with slash-command-shaped text (e.g.
+  // IMPORTANT: Do NOT lead this prompt with slash-command-shaped text (e.g.
   // `/cleanup ...`). Pi's command parser will hijack the first token and
   // corrupt the prompt body. Lead with prose.
   return `Apply cleanup findings to the working tree.

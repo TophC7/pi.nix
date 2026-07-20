@@ -45,7 +45,7 @@ export async function runCheck(pi: ExtensionAPI, ctx: ExtensionCommandContext, a
 }
 
 function buildCheckPrompt(slug: string, path: string): string {
-  // CLAUDE: Do NOT lead this prompt with slash-command-shaped text (e.g.
+  // IMPORTANT: Do NOT lead this prompt with slash-command-shaped text (e.g.
   // `/spec:check ...`). Pi's command parser will hijack the first token and
   // corrupt the prompt body. Lead with prose.
   return `Verification phase for spec ${slug}.

@@ -161,7 +161,7 @@ function singleCompleted(): SubagentRunResult {
         '```'
       ].join('\n')
     },
-    model: 'anthropic/claude-sonnet-4'
+    model: 'openai-codex/gpt-5.6-sol'
   })
   return baseResult({
     id: 'run-2',

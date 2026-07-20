@@ -15,8 +15,8 @@
 
     # Intentionally NOT following our nixpkgs. llm-agents pins its own, newer
     # nixpkgs; forcing our older mix.nix one breaks eval of its package set
-    # (e.g. vessel-browser wants electron_42). pi and claude-code are JS tools
-    # we rewrap against our own bun, so their runtime closure is unaffected.
+    # (e.g. vessel-browser wants electron_42). Pi is a JS tool we rewrap against
+    # our own Bun, so its runtime closure is unaffected.
     llm-agents.url = "github:numtide/llm-agents.nix";
 
     bun2nix.follows = "llm-agents/bun2nix";
@@ -38,10 +38,6 @@
     };
     pi-tool-display = {
       url = "github:MasuRii/pi-tool-display";
-      flake = false;
-    };
-    pi-claude-bridge = {
-      url = "github:elidickinson/pi-claude-bridge";
       flake = false;
     };
     pi-mcp-adapter = {
@@ -86,7 +82,6 @@
           pkgs = import nixpkgs { inherit system; };
           b2n = inputs.bun2nix.packages.${system}.default;
           lock = lib.fs.relativeTo ./locks;
-          claudeCode = inputs.llm-agents.packages.${system}.claude-code;
           piPackages = lib.fs.importAttrs ./modules/home/packages {
             inherit
               lib
@@ -94,7 +89,6 @@
               inputs
               b2n
               lock
-              claudeCode
               ;
           };
         in

@@ -415,22 +415,6 @@
         "type": "github"
       }
     },
-    "pi-claude-bridge": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1783359098,
-        "narHash": "sha256-UHSvO6CQOMmoH0lZ9tyfoLhhw2qVDxBf7E4yfhedokM=",
-        "owner": "elidickinson",
-        "repo": "pi-claude-bridge",
-        "rev": "7e412185a62c2cdbbaee020de9e01e94e11d8851",
-        "type": "github"
-      },
-      "original": {
-        "owner": "elidickinson",
-        "repo": "pi-claude-bridge",
-        "type": "github"
-      }
-    },
     "pi-mcp-adapter": {
       "flake": false,
       "locked": {
@@ -512,7 +496,6 @@
         ],
         "pi-agentsmd": "pi-agentsmd",
         "pi-ask-user": "pi-ask-user",
-        "pi-claude-bridge": "pi-claude-bridge",
         "pi-mcp-adapter": "pi-mcp-adapter",
         "pi-rtk-optimizer": "pi-rtk-optimizer",
         "pi-tool-display": "pi-tool-display",
