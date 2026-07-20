@@ -85,7 +85,7 @@ flake.nix
 | Extension | What it adds |
 | --- | --- |
 | `commands` | `/commit`, `/pr`, `/config`; git-context-aware commit and PR workflows with model/thinking overrides. |
-| `slab` | Custom footer/input surface, status segments, widgets, command shimmer, MCP status, config pane. |
+| `slab` | Custom footer/input surface, standard text selection/editing, status segments, widgets, command shimmer, MCP status, config pane. |
 | `buddy` | Terminal companion with commands, widgets, persistent DB state, memories, XP, reasoning guard mode, `buddy_remember`, `buddy_observe`. |
 | `burden` | `/burden`, a token attribution explorer for prompt/tool/skill/context cost. |
 | `sdd` | `/spec*` workflow: draft specs, check them, ship to Sworm, work tasks, visualize, close, freehand escape hatch. |

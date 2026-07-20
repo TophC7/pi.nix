@@ -1,4 +1,4 @@
-import { CustomEditor, type KeybindingsManager } from '@earendil-works/pi-coding-agent'
+import { type KeybindingsManager } from '@earendil-works/pi-coding-agent'
 import { type EditorTheme, type TUI, truncateToWidth, visibleWidth } from '@earendil-works/pi-tui'
 import {
   fitLine,
@@ -13,6 +13,7 @@ import {
 import { formatWorkspaceLabel } from './format.ts'
 import { paint, paintIf, rainbowRole } from './palette.ts'
 import { renderSlabLine } from './renderer.ts'
+import { SelectionEditor } from './selection-editor.ts'
 import { renderSegment, SLAB_SEGMENT_BY_ID } from './segments.ts'
 import type { SlabConfig, SlabRuntimeState, SlabSegmentRenderContext, SlabSegmentRenderResult } from './types.ts'
 
@@ -432,6 +433,7 @@ function capabilities(): UiRenderCapabilities {
 
 export interface SlabEditorHooks {
   recognizedCommands(): ReadonlySet<string>
+  selectionBackground(text: string): string
   paintThinkingBorder?(thinking: string | undefined | null, text: string): string
   onTextChange?(text: string, match: SlashCommandMatch | undefined): void
 }
@@ -443,7 +445,7 @@ export interface SlabRightRailState {
   gapWidth?: number
 }
 
-export class SlabEditor extends CustomEditor {
+export class SlabEditor extends SelectionEditor {
   private currentSlashMatch: SlashCommandMatch | undefined
 
   constructor(
@@ -455,7 +457,7 @@ export class SlabEditor extends CustomEditor {
     private readonly rightRail: SlabRightRailState,
     private readonly hooks: SlabEditorHooks
   ) {
-    super(tui, theme, keybindings)
+    super(tui, theme, keybindings, hooks.selectionBackground)
   }
 
   handleInput(data: string): void {

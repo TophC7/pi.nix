@@ -355,6 +355,7 @@ export default function slab(pi: ExtensionAPI): void {
           refreshCommandRegistry()
           return recognizedCommands
         },
+        selectionBackground: (text) => ctx.ui.theme.bg('selectedBg', text),
         paintThinkingBorder: (thinking, text) =>
           thinkingTonePainter?.paint(ctx.ui.theme, thinking, text) ?? ctx.ui.theme.getThinkingBorderColor('off')(text),
         onTextChange: onEditorTextChange
