@@ -1,6 +1,7 @@
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent'
 import { registerRuntimeProfileConfigSection } from '@pi/lib/config-registry'
 import { runCommit, runPr } from './actions'
+import { registerCompactRuntimeProfile } from './compact'
 import { COMMAND_PROFILE_IDS, CONFIG_PATH, getCommandConfig, saveCommandConfig } from './config'
 
 const COMMAND_DESCRIPTIONS: Record<(typeof COMMAND_PROFILE_IDS)[number], string> = {
@@ -11,6 +12,7 @@ const COMMAND_DESCRIPTIONS: Record<(typeof COMMAND_PROFILE_IDS)[number], string>
 
 export default function commandsExtension(pi: ExtensionAPI) {
   registerCommandsConfigSection()
+  registerCompactRuntimeProfile(pi)
   pi.registerCommand('commit', {
     description: 'Commit staged changes. Optional prompt adds instructions. Configure with `/config`.',
     handler: async (args, ctx) => runCommit(pi, ctx, args)

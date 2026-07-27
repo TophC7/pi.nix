@@ -16,7 +16,7 @@ import { cloneSlabConfig, defaultSlabConfig, loadSlabConfig, saveSlabConfig } fr
 import { SlabEditor, type SlabRightRailState, type SlashCommandMatch } from './editor.ts'
 import { renderSlabFooterLines } from './footer.ts'
 import { collectGitSnapshot } from './git.ts'
-import { readMcpStatusSnapshot, startMcpStatusPolling } from './mcp.ts'
+import { readMcpStatusSnapshot, subscribeMcpStatus } from './mcp.ts'
 import { SlabConfigPane } from './pane.ts'
 import { createSlabRuntimeState } from './state.ts'
 import type { SlabConfig, SlabGitSnapshot, SlabRuntimeState } from './types.ts'
@@ -147,7 +147,6 @@ export default function slab(pi: ExtensionAPI): void {
   let gitSnapshot: SlabGitSnapshot | undefined
   let recognizedCommands: ReadonlySet<string> = new Set(BUILTIN_SLASH_COMMAND_NAMES)
   let shimmerTimer: ReturnType<typeof setInterval> | undefined
-  let stopMcpStatusPolling: (() => void) | undefined
 
   function refreshCommandRegistry(): void {
     const names = new Set<string>(BUILTIN_SLASH_COMMAND_NAMES)
@@ -364,14 +363,11 @@ export default function slab(pi: ExtensionAPI): void {
       requestRender = () => tui.requestRenderFor(editor)
       return editor
     })
-    stopMcpStatusPolling = startMcpStatusPolling(() => requestRender())
     refreshCommandRegistry()
   }
 
   function clear(ctx: ExtensionContext): void {
     stopShimmer()
-    stopMcpStatusPolling?.()
-    stopMcpStatusPolling = undefined
     driver?.dispose()
     driver = undefined
     if (ctx.hasUI) {
@@ -457,7 +453,12 @@ export default function slab(pi: ExtensionAPI): void {
     refresh(ctx)
   })
 
+  // Subscribed at load rather than in install() so adapter snapshots emitted
+  // before the footer exists still land in the cache.
+  const stopMcpStatus = subscribeMcpStatus(pi, () => requestRender())
+
   pi.on('session_shutdown', async (_event, ctx) => {
+    stopMcpStatus()
     clear(ctx)
     state = undefined
   })

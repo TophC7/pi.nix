@@ -19,7 +19,7 @@
 # the bun2nix nix expression are generated together and must stay paired.
 pkgs.stdenv.mkDerivation {
   pname = "pi-mcp-adapter";
-  version = "2.11.0";
+  version = "2.15.0";
   src = inputs.pi-mcp-adapter;
 
   nativeBuildInputs = [
@@ -34,10 +34,6 @@ pkgs.stdenv.mkDerivation {
   dontUseBunBuild = true;
   dontUseBunCheck = true;
   dontUseBunInstall = true;
-
-  # All slab-status source mutations (including the updateStatusBar rewrite)
-  # live in this one patch, so it stays robust to upstream drift via fuzz.
-  patches = [ ../patches/pi-mcp-adapter-slab-status.patch ];
 
   postUnpack = ''
     cp ${lock "pi-mcp-adapter-bun.lock"} $sourceRoot/bun.lock

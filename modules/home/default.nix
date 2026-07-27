@@ -23,7 +23,6 @@ let
     # patches before that compile step so the patched behavior is embedded in
     # the binary, then wrap the resulting launcher with repo runtime defaults.
     preInstall = ''
-      patch -p1 < ${./patches/pi-command-models-compact.patch}
       patch -p1 < ${./patches/pi-ai-discard-failed-tool-continuations.patch}
       patch -p1 < ${./patches/pi-tui-incremental-input-render.patch}
     '' + (old.preInstall or "");

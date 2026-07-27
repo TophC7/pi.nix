@@ -1,139 +1,66 @@
-import { readFile, stat } from 'node:fs/promises'
-import { homedir } from 'node:os'
-import { join, resolve } from 'node:path'
+import type { ExtensionAPI } from '@earendil-works/pi-coding-agent'
+
+// INFO: pi-mcp-adapter publishes status snapshots on pi's shared extension event
+// bus, documented in its README under "Runtime status snapshots". The channel
+// name carries the payload version, so an adapter that bumps it sends us nothing
+// and the footer falls back to the plain `mcp` status text.
+const MCP_STATUS_EVENT = 'pi-mcp-adapter/status/v1'
 
 export type SlabMcpServerStatus = 'connected' | 'needs-auth' | 'failed' | 'cached' | 'not-connected'
 
 export interface SlabMcpServerSnapshot {
   readonly name: string
   readonly status: SlabMcpServerStatus
-  readonly toolCount: number
-  readonly failedAgeSeconds?: number
-}
-
-export interface SlabMcpActivitySnapshot {
-  readonly kind: 'connecting'
-  readonly serverName?: string
 }
 
 export interface SlabMcpStatusSnapshot {
-  readonly version: 1
-  readonly updatedAt: number
   readonly total: number
-  readonly connected: number
   readonly ok: number
-  readonly cached: number
-  readonly needsAuth: number
-  readonly failed: number
   readonly totalTools: number
   readonly servers: readonly SlabMcpServerSnapshot[]
-  readonly activity?: SlabMcpActivitySnapshot
 }
 
-const STATUS_MAX_AGE_MS = 120_000
-const STATUS_POLL_INTERVAL_MS = 1_000
-let cachedPath: string | undefined
-let cachedMtime = 0
 let cachedSnapshot: SlabMcpStatusSnapshot | undefined
 
-export function readMcpStatusSnapshot(now = Date.now()): SlabMcpStatusSnapshot | undefined {
-  if (!cachedSnapshot || now - cachedSnapshot.updatedAt > STATUS_MAX_AGE_MS) return undefined
+export function readMcpStatusSnapshot(): SlabMcpStatusSnapshot | undefined {
   return cachedSnapshot
 }
 
-async function refreshMcpStatusSnapshot(): Promise<boolean> {
-  const previousMtime = cachedMtime
-  const previousSnapshot = cachedSnapshot
-  const path = mcpStatusPath()
-  try {
-    const file = await stat(path)
-    if (file.mtimeMs !== cachedMtime) {
-      cachedMtime = file.mtimeMs
-      cachedSnapshot = parseSnapshot(JSON.parse(await readFile(path, 'utf-8')))
-    }
-  } catch {
-    cachedMtime = 0
+/** Mirror adapter status snapshots into the footer, redrawing on every update. */
+export function subscribeMcpStatus(pi: ExtensionAPI, onChange: () => void): () => void {
+  const unsubscribe = pi.events.on(MCP_STATUS_EVENT, (payload) => {
+    cachedSnapshot = parseSnapshot(payload)
+    onChange()
+  })
+
+  return () => {
+    unsubscribe()
     cachedSnapshot = undefined
   }
-  return cachedMtime !== previousMtime || cachedSnapshot !== previousSnapshot
-}
-
-export function startMcpStatusPolling(onChange: () => void): () => void {
-  let disposed = false
-  let inFlight = false
-  let visibleSnapshot = readMcpStatusSnapshot()
-
-  const poll = async (): Promise<void> => {
-    if (disposed || inFlight) return
-    inFlight = true
-    try {
-      const changed = await refreshMcpStatusSnapshot()
-      if (disposed) return
-      const nextVisibleSnapshot = readMcpStatusSnapshot()
-      if (changed || nextVisibleSnapshot !== visibleSnapshot) {
-        visibleSnapshot = nextVisibleSnapshot
-        onChange()
-      }
-    } finally {
-      inFlight = false
-    }
-  }
-
-  void poll()
-  const timer = setInterval(() => void poll(), STATUS_POLL_INTERVAL_MS)
-  ;(timer as { unref?: () => void }).unref?.()
-  return () => {
-    disposed = true
-    clearInterval(timer)
-  }
-}
-
-function mcpStatusPath(): string {
-  if (cachedPath) return cachedPath
-  const configured = process.env.PI_CODING_AGENT_DIR?.trim()
-  const agentDir = configured ? resolveHome(configured) : join(homedir(), '.pi', 'agent')
-  cachedPath = join(agentDir, 'mcp-status.json')
-  return cachedPath
-}
-
-function resolveHome(path: string): string {
-  if (path === '~') return homedir()
-  if (path.startsWith('~/')) return resolve(homedir(), path.slice(2))
-  return resolve(path)
 }
 
 function parseSnapshot(value: unknown): SlabMcpStatusSnapshot | undefined {
   if (!value || typeof value !== 'object') return undefined
-  const record = value as Partial<SlabMcpStatusSnapshot>
-  if (record.version !== 1 || !Number.isFinite(record.updatedAt) || !Array.isArray(record.servers)) return undefined
+  const record = value as { readonly servers?: unknown; readonly totalTools?: unknown }
+  if (!Array.isArray(record.servers)) return undefined
+
+  const servers = record.servers.map(parseServer).filter((server): server is SlabMcpServerSnapshot => Boolean(server))
+  const ok = servers.filter((server) => server.status === 'connected' || server.status === 'cached').length
   return {
-    version: 1,
-    updatedAt: numberValue(record.updatedAt),
-    total: numberValue(record.total),
-    connected: numberValue(record.connected),
-    ok: numberValue(record.ok),
-    cached: numberValue(record.cached),
-    needsAuth: numberValue(record.needsAuth),
-    failed: numberValue(record.failed),
+    total: servers.length,
+    ok,
     totalTools: numberValue(record.totalTools),
-    servers: record.servers.map(parseServer).filter((server): server is SlabMcpServerSnapshot => Boolean(server)),
-    ...(record.activity?.kind === 'connecting' ? { activity: { kind: 'connecting', serverName: stringValue(record.activity.serverName) } } : {})
+    servers
   }
 }
 
 function parseServer(value: unknown): SlabMcpServerSnapshot | undefined {
   if (!value || typeof value !== 'object') return undefined
-  const record = value as Partial<SlabMcpServerSnapshot>
+  const record = value as { readonly name?: unknown; readonly status?: unknown; readonly disabled?: unknown }
   const name = stringValue(record.name)
-  const status = statusValue(record.status)
-  if (!name || !status) return undefined
-  const failedAgeSeconds = Number.isFinite(record.failedAgeSeconds) ? numberValue(record.failedAgeSeconds) : undefined
-  return {
-    name,
-    status,
-    toolCount: numberValue(record.toolCount),
-    ...(failedAgeSeconds !== undefined ? { failedAgeSeconds } : {})
-  }
+  // Disabled servers are configured off on purpose, so they stay out of the counts.
+  if (!name || record.disabled === true || record.status === 'disabled') return undefined
+  return { name, status: statusValue(record.status) ?? 'not-connected' }
 }
 
 function statusValue(value: unknown): SlabMcpServerStatus | undefined {

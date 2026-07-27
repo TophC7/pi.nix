@@ -63,7 +63,8 @@ export function renderMcpFooterLine(
   mcpState?: SlabMcpStatusSnapshot
 ): string | undefined {
   const authServer = parseAuthServer(extensionStatuses.get('mcp-auth'))
-  if (mcpState) return renderStructuredMcpLine(mcpState, authServer, capabilities, width)
+  const connecting = parseConnecting(extensionStatuses.get('mcp'))
+  if (mcpState) return renderStructuredMcpLine(mcpState, authServer, capabilities, width, connecting)
 
   const statuses = MCP_STATUS_KEYS
     .map((key) => normalizeMcpStatus(key, extensionStatuses.get(key)))
@@ -78,7 +79,8 @@ function renderStructuredMcpLine(
   state: SlabMcpStatusSnapshot,
   activeAuthServer: string | undefined,
   capabilities: UiRenderCapabilities,
-  width: number
+  width: number,
+  connecting: McpConnecting | undefined
 ): string | undefined {
   if (state.total === 0) return undefined
 
@@ -87,8 +89,8 @@ function renderStructuredMcpLine(
   const label = paintIf(capabilities.color, 'cyan', 'mcp')
   const okCount = Math.max(0, state.ok)
 
-  if (state.activity?.kind === 'connecting') {
-    const server = state.activity.serverName
+  if (connecting) {
+    const server = connecting.serverName
     if (mode === 'tight') return `${label} ${icon.busy}${server ? ` ${server}` : ''}`
     return `${label} ${icon.busy} connecting${server ? ` ${server}` : ''}`
   }
@@ -137,6 +139,21 @@ function joinMcpParts(parts: readonly string[], capabilities: UiRenderCapabiliti
 
 function separator(capabilities: UiRenderCapabilities): string {
   return paintIf(capabilities.color, 'dim', capabilities.unicode ? ' · ' : ' | ')
+}
+
+interface McpConnecting {
+  readonly serverName?: string
+}
+
+// ABOUT: The adapter's snapshots only describe settled state, so an in-flight
+// connection is read off its `mcp` status text, which reads either
+// "MCP: connecting to 3 servers..." on startup or "MCP: connecting to ctx..."
+// for a single reconnect.
+function parseConnecting(raw: string | undefined): McpConnecting | undefined {
+  const text = stripControls(raw ?? '').replace(/\s+/g, ' ').replace(/\.{3}$/, '').trim()
+  const target = text.match(/connecting to\s+(.+)$/i)?.[1]?.trim()
+  if (!target) return undefined
+  return /^\d+ servers?$/i.test(target) ? {} : { serverName: target }
 }
 
 function parseAuthServer(raw: string | undefined): string | undefined {

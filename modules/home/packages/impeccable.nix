@@ -8,7 +8,7 @@
 
 pkgs.stdenv.mkDerivation {
   pname = "impeccable";
-  version = "3.9.1";
+  version = "4.0.2";
   src = inputs.impeccable;
 
   nativeBuildInputs = [
@@ -49,7 +49,9 @@ pkgs.stdenv.mkDerivation {
       fi
     done < <(find "$skill_dir" -type f -name '*.md')
 
-    sed -i '/^allowed-tools:$/,+1d' "$skill_dir/SKILL.md"
+    # Drop the whole allowed-tools block, however many entries upstream lists.
+    # A fixed line count leaves orphaned list items behind in the frontmatter.
+    sed -i '/^allowed-tools:$/,/^---$/{/^allowed-tools:$/d; /^ *- /d}' "$skill_dir/SKILL.md"
 
     while IFS= read -r file; do
       substituteInPlace "$file" \

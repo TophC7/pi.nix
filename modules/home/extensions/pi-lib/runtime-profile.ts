@@ -1,5 +1,5 @@
 import type { Api, Model } from '@earendil-works/pi-ai'
-import type { ExtensionAPI, ExtensionCommandContext } from '@earendil-works/pi-coding-agent'
+import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from '@earendil-works/pi-coding-agent'
 
 export const THINKING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh'] as const
 export type ThinkingLevel = (typeof THINKING_LEVELS)[number]
@@ -60,7 +60,7 @@ export function normalizeModelSpec(value: string, source: string): string {
 }
 
 export function resolveRuntimeProfileModel(
-  ctx: ExtensionCommandContext,
+  ctx: ExtensionContext,
   modelSpec: string,
   source: string
 ): Model<Api> {

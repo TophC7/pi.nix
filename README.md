@@ -159,12 +159,12 @@ External packages are pinned through Nix:
 
 | Package file | Package |
 | --- | --- |
-| `modules/home/packages/context-mode.nix` | `context-mode` 1.0.162 |
-| `modules/home/packages/impeccable.nix` | Impeccable skill 3.7.1 |
-| `modules/home/packages/pi-agentsmd.nix` | `pi-agentsmd` 0.1.1 |
-| `modules/home/packages/pi-mcp-adapter.nix` | `pi-mcp-adapter` 2.10.0 |
-| `modules/home/packages/pi-web-access.nix` | `pi-web-access` 0.10.7 |
-| `modules/home/packages/rtk.nix` | RTK 0.42.4 |
+| `modules/home/packages/context-mode.nix` | `context-mode` 1.0.169 |
+| `modules/home/packages/impeccable.nix` | Impeccable skill 4.0.2 |
+| `modules/home/packages/pi-agentsmd.nix` | `pi-agentsmd` 0.1.3 |
+| `modules/home/packages/pi-mcp-adapter.nix` | `pi-mcp-adapter` 2.15.0 |
+| `modules/home/packages/pi-web-access.nix` | `pi-web-access` 0.14.0 |
+| `modules/home/packages/rtk.nix` | RTK 0.44.0 |
 
 Version is owned by the flake inputs. `pi-ask-user`, `pi-rtk-optimizer`, and `pi-tool-display` have no runtime deps and load `./index.ts` directly, so they are consumed as raw source inputs with no package file; `nix flake update` bumps them.
 
@@ -194,10 +194,8 @@ Local patches adapt upstream behavior:
 
 | Patch | Intent |
 | --- | --- |
-| `pi-command-models-compact.patch` | Compact command model handling. |
 | `pi-ai-discard-failed-tool-continuations.patch` | Avoid carrying failed tool continuations forward. |
 | `pi-tui-incremental-input-render.patch` | Reuse settled TUI sections during editor input and cache session-derived footer work. |
-| `pi-mcp-adapter-slab-status.patch` | Publish MCP status for Slab. |
 
 ## Quirks worth knowing
 
