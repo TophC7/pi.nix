@@ -92,6 +92,7 @@ flake.nix
 | `cleanup` | `/cleanup`, `/cleanup:quick`; read-only scouts find obvious cleanup opportunities before apply. |
 | `review` | `/review`, `/review:freehand`; adversarial scout swarm over staged diffs or scoped prompts. |
 | `subagents` | Model-facing `subagent` tool with sequential, parallel, and chained child-agent runs. |
+| `claude` | Claude models through direct Claude CLI subscription auth; Pi owns prompt, tools, permissions, and compaction. |
 | `caveman` | `/caveman`; terse response style levels: off, lite, full, ultra, micro. |
 | `cd` | `/cd @/path`; fork current conversation into another working directory and rebuild cwd-bound runtime state. |
 | `clear` | `/clear`; reset current conversation. |
@@ -219,6 +220,7 @@ modules/home/lib/                 extension-system Nix helpers
 modules/home/packages/            Nix package definitions for Pi add-ons
 modules/home/patches/             local upstream patches
 modules/home/extensions/pi-lib/   shared extension library
+modules/home/extensions/claude/   direct Claude provider
 modules/home/extensions/slab/     terminal UI surface
 modules/home/extensions/buddy/    companion, memory, reasoning, widgets
 modules/home/extensions/sdd/      spec-driven development workflow

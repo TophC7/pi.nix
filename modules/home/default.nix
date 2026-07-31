@@ -13,6 +13,7 @@ let
   b2n = inputs.bun2nix.packages.${system}.default;
   lock = lib.fs.relativeTo ../../locks;
   piNodePackage = inputs.llm-agents.packages.${system}.pi;
+  claudeCodePackage = inputs.llm-agents.packages.${system}.claude-code;
   piBunPackage = piNodePackage.overrideAttrs (old: {
     nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [
       pkgs.makeWrapper
@@ -29,7 +30,7 @@ let
 
     postInstall = (old.postInstall or "") + ''
       wrapProgram $out/bin/pi \
-        --prefix PATH : ${lib.makeBinPath [ pkgs.bun pkgs.fd pkgs.ripgrep ]} \
+        --prefix PATH : ${lib.makeBinPath [ pkgs.bun pkgs.fd pkgs.ripgrep claudeCodePackage ]} \
         --set IMPECCABLE_NO_UPDATE_CHECK 1
     '';
   });
@@ -87,6 +88,10 @@ let
     };
     subagents = {
       source = ./extensions/subagents;
+      entry = "index.ts";
+    };
+    claude = {
+      source = ./extensions/claude;
       entry = "index.ts";
     };
   };
