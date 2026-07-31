@@ -106,9 +106,12 @@ export function roll(userId: string, speciesList: readonly string[]): Roll {
 
 export function statBar(name: string, value: number, width = 10): string {
   const clamped = Math.max(0, Math.min(100, value))
-  const bar = renderProportionalBar([
-    { label: 'filled', value: clamped, char: '█' },
-    { label: 'empty', value: 100 - clamped, char: '░' }
-  ], { width })
+  const bar = renderProportionalBar(
+    [
+      { label: 'filled', value: clamped, char: '█' },
+      { label: 'empty', value: 100 - clamped, char: '░' }
+    ],
+    { width }
+  )
   return `${name.padEnd(9)} [${bar}] ${clamped}`
 }

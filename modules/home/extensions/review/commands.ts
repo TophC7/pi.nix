@@ -2,7 +2,13 @@ import type { ExtensionAPI, ExtensionCommandContext } from '@earendil-works/pi-c
 import { startOperation } from '@pi/lib/lock'
 import { captureOptimizedCommand } from '@pi/lib/rtk'
 import { extractSubagentText, runSubagent } from '@pi/lib/subagents'
-import { captureFreehandReviewContext, captureStagedReviewContext, MAX_DIFF_BYTES, splitZ, type ReviewContextCapture } from './context.ts'
+import {
+  captureFreehandReviewContext,
+  captureStagedReviewContext,
+  MAX_DIFF_BYTES,
+  splitZ,
+  type ReviewContextCapture
+} from './context.ts'
 import { reviewReportPrompt, reviewScoutTask } from './prompts.ts'
 import { REVIEW_AGENT_REGISTRY } from './schema.ts'
 import { synthesizeReview } from './synthesis.ts'
@@ -46,10 +52,17 @@ export async function runReview(pi: ExtensionAPI, ctx: ExtensionCommandContext, 
       cwd: ctx.cwd,
       signal: ctx.signal
     }),
-    captureOptimizedCommand(pi, 'git diff --staged', { cwd: ctx.cwd, signal: ctx.signal, maxBytes: MAX_DIFF_BYTES })
+    captureOptimizedCommand(pi, 'git diff --staged', {
+      cwd: ctx.cwd,
+      signal: ctx.signal,
+      maxBytes: MAX_DIFF_BYTES
+    })
   ])
   if ((nameOnly.code ?? 1) !== 0) {
-    ctx.ui.notify(`/review could not read staged files: ${nameOnly.stderr || 'git diff --staged --name-only failed'}`, 'error')
+    ctx.ui.notify(
+      `/review could not read staged files: ${nameOnly.stderr || 'git diff --staged --name-only failed'}`,
+      'error'
+    )
     return
   }
   const files = splitZ(nameOnly.stdout ?? '')
@@ -64,7 +77,12 @@ export async function runReview(pi: ExtensionAPI, ctx: ExtensionCommandContext, 
     return
   }
 
-  const reviewContext = captureStagedReviewContext(ctx, { diff: diffText, files, guidance, notes: diff.notes })
+  const reviewContext = captureStagedReviewContext(ctx, {
+    diff: diffText,
+    files,
+    guidance,
+    notes: diff.notes
+  })
   await runReviewPipeline(pi, ctx, {
     context: reviewContext,
     targetLabel: 'staged changes',
@@ -134,11 +152,16 @@ async function runReviewPipeline(pi: ExtensionAPI, ctx: ExtensionCommandContext,
     try {
       startOperation(pi, 'review', REVIEW_TRIAGE_TOOLS)
     } catch (error) {
-      ctx.ui.notify(`/review cannot start triage turn: ${error instanceof Error ? error.message : String(error)}`, 'error')
+      ctx.ui.notify(
+        `/review cannot start triage turn: ${error instanceof Error ? error.message : String(error)}`,
+        'error'
+      )
       return
     }
 
-    pi.sendUserMessage(reviewReportPrompt(synthesis.report), { deliverAs: 'followUp' })
+    pi.sendUserMessage(reviewReportPrompt(synthesis.report), {
+      deliverAs: 'followUp'
+    })
     ctx.ui.notify(
       `/review: scouts complete; ${synthesis.findings.length} finding(s), ${synthesis.quarantined.length} quarantined card(s).`,
       'info'

@@ -1,4 +1,13 @@
-export const BASIS_VALUES = ['research', 'empirical', 'deduction', 'analogy', 'definition', 'llm_output', 'assumption', 'vibes'] as const
+export const BASIS_VALUES = [
+  'research',
+  'empirical',
+  'deduction',
+  'analogy',
+  'definition',
+  'llm_output',
+  'assumption',
+  'vibes'
+] as const
 export type Basis = (typeof BASIS_VALUES)[number]
 
 export const EDGE_TYPES = ['supports', 'depends_on', 'contradicts', 'questions'] as const
@@ -54,8 +63,17 @@ export const FINDING_TYPES = [
 ] as const
 export type FindingType = (typeof FINDING_TYPES)[number]
 
-export const CAUTION_FINDINGS = ['load_bearing_vibes', 'echo_chamber', 'unchallenged_chain', 'unverified_hedge'] as const
-export const KUDOS_FINDINGS = ['well_sourced_load_bearer', 'productive_stress_test', 'grounded_premise_adopted'] as const
+export const CAUTION_FINDINGS = [
+  'load_bearing_vibes',
+  'echo_chamber',
+  'unchallenged_chain',
+  'unverified_hedge'
+] as const
+export const KUDOS_FINDINGS = [
+  'well_sourced_load_bearer',
+  'productive_stress_test',
+  'grounded_premise_adopted'
+] as const
 
 export interface Finding {
   readonly type: FindingType

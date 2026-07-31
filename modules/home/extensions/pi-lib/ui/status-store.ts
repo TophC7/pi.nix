@@ -71,8 +71,13 @@ function sharedGlobalState(): SharedUiStatusStoreGlobalState {
   // Pi loads each extension through jiti with moduleCache disabled, so every
   // extension can receive its own @pi/lib module instance. Keep the shared UI
   // store on globalThis so producers (Buddy) and hosts (Slab) meet in one bus.
-  const root = globalThis as typeof globalThis & { [GLOBAL_STATE_KEY]?: SharedUiStatusStoreGlobalState }
-  root[GLOBAL_STATE_KEY] ??= { store: createUiStatusStore(), nextGeneratedId: 1 }
+  const root = globalThis as typeof globalThis & {
+    [GLOBAL_STATE_KEY]?: SharedUiStatusStoreGlobalState
+  }
+  root[GLOBAL_STATE_KEY] ??= {
+    store: createUiStatusStore(),
+    nextGeneratedId: 1
+  }
   return root[GLOBAL_STATE_KEY]
 }
 

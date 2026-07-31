@@ -38,10 +38,15 @@ export function hasRuntimeProfileSettings(profile: RuntimeProfile | undefined): 
 export function readRuntimeProfileConfig(value: unknown, source: string): RuntimeProfile {
   if (value === undefined || value === null) return {}
   if (typeof value !== 'object' || Array.isArray(value)) {
-    throw new RuntimeProfileError(`Invalid runtime profile in ${source}: expected an object with optional model/thinking.`)
+    throw new RuntimeProfileError(
+      `Invalid runtime profile in ${source}: expected an object with optional model/thinking.`
+    )
   }
 
-  const candidate = value as { readonly model?: unknown; readonly thinking?: unknown }
+  const candidate = value as {
+    readonly model?: unknown
+    readonly thinking?: unknown
+  }
   return {
     model: readModelSpec(candidate.model, source),
     thinking: readThinkingLevel(candidate.thinking, source)
@@ -59,11 +64,7 @@ export function normalizeModelSpec(value: string, source: string): string {
   return spec
 }
 
-export function resolveRuntimeProfileModel(
-  ctx: ExtensionContext,
-  modelSpec: string,
-  source: string
-): Model<Api> {
+export function resolveRuntimeProfileModel(ctx: ExtensionContext, modelSpec: string, source: string): Model<Api> {
   const spec = normalizeModelSpec(modelSpec, source)
   const slash = spec.indexOf('/')
   const provider = spec.slice(0, slash)
@@ -96,13 +97,19 @@ export async function applyMainRuntimeProfile(
   if (profile.model) {
     const model = resolveRuntimeProfileModel(ctx, profile.model, options.source)
     const ok = await pi.setModel(model)
-    if (!ok) throw new RuntimeProfileError(`No API key for runtime profile model in ${options.source}: ${model.provider}/${model.id}.`)
+    if (!ok)
+      throw new RuntimeProfileError(
+        `No API key for runtime profile model in ${options.source}: ${model.provider}/${model.id}.`
+      )
   }
 
   if (profile.thinking) pi.setThinkingLevel(profile.thinking)
 }
 
-export async function restoreMainRuntimeProfile(pi: ExtensionAPI, restore: MainRuntimeRestoreState | undefined): Promise<void> {
+export async function restoreMainRuntimeProfile(
+  pi: ExtensionAPI,
+  restore: MainRuntimeRestoreState | undefined
+): Promise<void> {
   if (!restore) return
   if (restore.model) await pi.setModel(restore.model)
   pi.setThinkingLevel(restore.thinking)

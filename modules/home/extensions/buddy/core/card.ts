@@ -14,9 +14,8 @@ export function renderCard(companion: Companion): string {
   const emptyLine = `| ${' '.repeat(inner)} |`
   const line = (text: string) => `| ${text.padEnd(inner)} |`
   const progress = levelProgress(companion.xp)
-  const levelLine = progress.level >= 50
-    ? 'Lv.50 MAX'
-    : `Lv.${progress.level} · ${progress.currentXp}/${progress.neededXp} XP to next`
+  const levelLine =
+    progress.level >= 50 ? 'Lv.50 MAX' : `Lv.${progress.level} · ${progress.currentXp}/${progress.neededXp} XP to next`
 
   return [
     topBorder,
@@ -35,35 +34,11 @@ export function renderCard(companion: Companion): string {
 }
 
 export function hatchAnimation(companion: Companion): string {
-  const egg1 = [
-    '        ',
-    '   .--. ',
-    '  /    \\',
-    ' |  ??  |',
-    '  \\    /',
-    "   '--' "
-  ].join('\n')
-  const egg2 = [
-    '    *   ',
-    '   .--. ',
-    '  / *  \\',
-    ' | \\??/ |',
-    '  \\  * /',
-    "   '--' "
-  ].join('\n')
-  const crack = [
-    '    *    ',
-    '   \\  /   ',
-    "    `´    "
-  ].join('\n')
+  const egg1 = ['        ', '   .--. ', '  /    \\', ' |  ??  |', '  \\    /', "   '--' "].join('\n')
+  const egg2 = ['    *   ', '   .--. ', '  / *  \\', ' | \\??/ |', '  \\  * /', "   '--' "].join('\n')
+  const crack = ['    *    ', '   \\  /   ', '    `´    '].join('\n')
   const art = renderSprite(companion)
-  const hatched = [
-    '  · ✦ · ',
-    ' ✦ · · ✦ ',
-    ...art,
-    ' ✦ · · ✦ ',
-    '  · ✦ · '
-  ].join('\n')
+  const hatched = ['  · ✦ · ', ' ✦ · · ✦ ', ...art, ' ✦ · · ✦ ', '  · ✦ · '].join('\n')
 
   return [egg1, egg2, crack, hatched, renderCard(companion)].join('\n\n')
 }

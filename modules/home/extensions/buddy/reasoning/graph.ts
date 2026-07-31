@@ -9,8 +9,12 @@ export interface SessionGraph {
 }
 
 export function loadSessionGraph(db: Database, sessionId: string): SessionGraph {
-  const claims = db.query('SELECT * FROM reasoning_claims WHERE session_id = ? ORDER BY created_at ASC').all(sessionId) as StoredClaim[]
-  const edges = db.query('SELECT * FROM reasoning_edges WHERE session_id = ? ORDER BY created_at ASC').all(sessionId) as StoredEdge[]
+  const claims = db
+    .query('SELECT * FROM reasoning_claims WHERE session_id = ? ORDER BY created_at ASC')
+    .all(sessionId) as StoredClaim[]
+  const edges = db
+    .query('SELECT * FROM reasoning_edges WHERE session_id = ? ORDER BY created_at ASC')
+    .all(sessionId) as StoredEdge[]
   const nodes = new Map(claims.map((claim) => [claim.id, claim]))
   const outgoing = new Map<string, StoredEdge[]>()
   const incoming = new Map<string, StoredEdge[]>()
@@ -26,7 +30,11 @@ export function nodesByBasis(graph: SessionGraph, bases: readonly Basis[]): Stor
   return [...graph.nodes.values()].filter((node) => bases.includes(node.basis))
 }
 
-export function downstreamCount(graph: SessionGraph, claimId: string, types: readonly EdgeType[] = ['supports', 'depends_on']): number {
+export function downstreamCount(
+  graph: SessionGraph,
+  claimId: string,
+  types: readonly EdgeType[] = ['supports', 'depends_on']
+): number {
   return (graph.incoming.get(claimId) ?? []).filter((edge) => types.includes(edge.type)).length
 }
 
@@ -48,8 +56,10 @@ export function longestChainNodesFrom(graph: SessionGraph, claimId: string, type
 export function chainHasChallenge(graph: SessionGraph, chain: readonly string[]): boolean {
   const ids = new Set(chain)
   for (const id of chain) {
-    for (const edge of graph.outgoing.get(id) ?? []) if ((edge.type === 'contradicts' || edge.type === 'questions') && ids.has(edge.to_claim)) return true
-    for (const edge of graph.incoming.get(id) ?? []) if ((edge.type === 'contradicts' || edge.type === 'questions') && ids.has(edge.from_claim)) return true
+    for (const edge of graph.outgoing.get(id) ?? [])
+      if ((edge.type === 'contradicts' || edge.type === 'questions') && ids.has(edge.to_claim)) return true
+    for (const edge of graph.incoming.get(id) ?? [])
+      if ((edge.type === 'contradicts' || edge.type === 'questions') && ids.has(edge.from_claim)) return true
   }
   return false
 }
@@ -70,4 +80,3 @@ function push(map: Map<string, StoredEdge[]>, key: string, value: StoredEdge): v
   list.push(value)
   map.set(key, list)
 }
-

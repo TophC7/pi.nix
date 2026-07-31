@@ -3,7 +3,11 @@ import { REASONING_CONFIG } from './config.ts'
 import { sessionDayStartMs } from './session.ts'
 
 export type PurgeScope = 'session' | 'all'
-export interface PurgeResult { readonly claims: number; readonly edges: number; readonly findings: number }
+export interface PurgeResult {
+  readonly claims: number
+  readonly edges: number
+  readonly findings: number
+}
 
 const PRUNE_THROTTLE_MS = 60 * 60 * 1000
 let lastPruneMs = 0
@@ -17,7 +21,12 @@ export function pruneOldSessionsThrottled(db: Database, nowMs = Date.now()): Pur
 export function pruneOldSessions(db: Database, nowMs = Date.now()): PurgeResult {
   const cutoff = nowMs - REASONING_CONFIG.SESSION_RETENTION_DAYS * 24 * 60 * 60 * 1000
   const sessions = db.query('SELECT DISTINCT session_id FROM reasoning_claims').all() as Array<{ session_id: string }>
-  const stale = sessions.map((row) => row.session_id).filter((id) => { const start = sessionDayStartMs(id); return start !== null && start < cutoff })
+  const stale = sessions
+    .map((row) => row.session_id)
+    .filter((id) => {
+      const start = sessionDayStartMs(id)
+      return start !== null && start < cutoff
+    })
   return purgeSessions(db, stale)
 }
 
@@ -26,7 +35,9 @@ export function purgeReasoning(db: Database, scope: PurgeScope, sessionId?: stri
 }
 
 function purgeSessions(db: Database, sessionIds: readonly string[]): PurgeResult {
-  let claims = 0, edges = 0, findings = 0
+  let claims = 0,
+    edges = 0,
+    findings = 0
   for (const id of sessionIds) {
     claims += db.query('DELETE FROM reasoning_claims WHERE session_id = ?').run(id).changes
     edges += db.query('DELETE FROM reasoning_edges WHERE session_id = ?').run(id).changes
@@ -42,4 +53,3 @@ function purgeAll(db: Database): PurgeResult {
   db.query('DELETE FROM reasoning_observe_seq').run()
   return { claims, edges, findings }
 }
-

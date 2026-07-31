@@ -10,11 +10,11 @@ const BLOCKED_ENVIRONMENT_VARIABLES = [
   'CLAUDE_CODE_USE_BEDROCK',
   'CLAUDE_CODE_USE_FOUNDRY',
   'CLAUDE_CODE_USE_MANTLE',
-  'CLAUDE_CODE_USE_VERTEX',
+  'CLAUDE_CODE_USE_VERTEX'
 ] as const
 
 export function claudeEnvironment(
-  inherited: Record<string, string | undefined> = process.env,
+  inherited: Record<string, string | undefined> = process.env
 ): Record<string, string | undefined> {
   const environment: Record<string, string | undefined> = {
     ...inherited,
@@ -31,10 +31,9 @@ export function claudeEnvironment(
     ENABLE_CLAUDEAI_MCP_SERVERS: '0',
     // Pi executes every tool itself. Claude's deferred MCP tool search hides
     // large catalogs behind ToolSearch instead of emitting Pi tool calls.
-    ENABLE_TOOL_SEARCH: 'false',
+    ENABLE_TOOL_SEARCH: 'false'
   }
-  for (const variable of BLOCKED_ENVIRONMENT_VARIABLES)
-    delete environment[variable]
+  for (const variable of BLOCKED_ENVIRONMENT_VARIABLES) delete environment[variable]
   return environment
 }
 
@@ -67,11 +66,10 @@ export function claudeArguments(options: {
     '--system-prompt',
     options.systemPrompt,
     '--model',
-    options.model,
+    options.model
   ]
 
-  if (options.effort)
-    args.push('--effort', options.effort, '--thinking-display', 'summarized')
+  if (options.effort) args.push('--effort', options.effort, '--thinking-display', 'summarized')
   if (options.resume) args.push('--resume', options.resume)
   if (options.mcpConfig) args.push('--mcp-config', options.mcpConfig)
   if (options.persistSession === false) args.push('--no-session-persistence')

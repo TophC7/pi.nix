@@ -46,11 +46,7 @@ export function textInRange(lines: readonly string[], range: TextRange): string 
 export function deleteRange(lines: readonly string[], range: TextRange): { lines: string[]; cursor: TextPosition } {
   const before = (lines[range.start.line] ?? '').slice(0, range.start.col)
   const after = (lines[range.end.line] ?? '').slice(range.end.col)
-  const next = [
-    ...lines.slice(0, range.start.line),
-    `${before}${after}`,
-    ...lines.slice(range.end.line + 1)
-  ]
+  const next = [...lines.slice(0, range.start.line), `${before}${after}`, ...lines.slice(range.end.line + 1)]
 
   return {
     lines: next.length > 0 ? next : [''],
@@ -77,11 +73,7 @@ export function rangeOnVisualLine(
   return { start: start - visualStart, end: end - visualStart }
 }
 
-export function styleTextRange(
-  text: string,
-  range: RelativeRange,
-  style: (selected: string) => string
-): string {
+export function styleTextRange(text: string, range: RelativeRange, style: (selected: string) => string): string {
   if (range.start >= range.end) return text
 
   const parts: [string, string, string] = ['', '', '']

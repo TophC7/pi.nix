@@ -686,5 +686,4 @@ export default function swormIssuesExtension(pi: ExtensionAPI) {
       }
     }
   })
-
 }

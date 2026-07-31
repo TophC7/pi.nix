@@ -18,20 +18,18 @@ export interface ToolBridge {
 export function createToolBridge(
   tools: Tool[],
   queryContext: QueryContext,
-  bunExecutable: string,
+  bunExecutable: string
 ): ToolBridge | undefined {
   if (tools.length === 0) return undefined
 
   const directory = mkdtempSync(join(tmpdir(), 'pi-claude-tools-'))
   const socketPath = join(directory, 'bridge.sock')
   const manifestPath = join(directory, 'tools.json')
-  const processPath = fileURLToPath(
-    new URL('./mcp-process.ts', import.meta.url),
-  )
+  const processPath = fileURLToPath(new URL('./mcp-process.ts', import.meta.url))
   const manifest = tools.map((tool) => ({
     name: tool.name,
     description: tool.description,
-    inputSchema: tool.parameters,
+    inputSchema: tool.parameters
   }))
   writeFileSync(manifestPath, JSON.stringify(manifest))
 
@@ -57,13 +55,8 @@ export function createToolBridge(
     }
   })
   readinessTimeout = setTimeout(
-    () =>
-      rejectReady(
-        new Error(
-          'Claude MCP tool bridge did not become ready within 10 seconds',
-        ),
-      ),
-    10_000,
+    () => rejectReady(new Error('Claude MCP tool bridge did not become ready within 10 seconds')),
+    10_000
   )
 
   const fail = (error: Error) => {
@@ -75,10 +68,10 @@ export function createToolBridge(
         content: [
           {
             type: 'text',
-            text: `Claude MCP bridge failed: ${error.message}`,
-          },
+            text: `Claude MCP bridge failed: ${error.message}`
+          }
         ],
-        isError: true,
+        isError: true
       })
     }
     queryContext.pendingToolCalls.clear()
@@ -100,11 +93,7 @@ export function createToolBridge(
         try {
           message = JSON.parse(line) as McpToPiMessage
         } catch {
-          fail(
-            new Error(
-              `Claude MCP bridge emitted invalid JSON: ${line.slice(0, 500)}`,
-            ),
-          )
+          fail(new Error(`Claude MCP bridge emitted invalid JSON: ${line.slice(0, 500)}`))
           return
         }
         if (message.type === 'ready') markReady()
@@ -124,9 +113,9 @@ export function createToolBridge(
     mcpServers: {
       [MCP_SERVER_NAME]: {
         command: bunExecutable,
-        args: [processPath, manifestPath, socketPath],
-      },
-    },
+        args: [processPath, manifestPath, socketPath]
+      }
+    }
   })
 
   return {
@@ -135,26 +124,20 @@ export function createToolBridge(
     close() {
       if (closed) return
       closed = true
-      rejectReady(
-        new Error('Claude MCP tool bridge closed before becoming ready'),
-      )
+      rejectReady(new Error('Claude MCP tool bridge closed before becoming ready'))
       for (const socket of sockets) socket.destroy()
       server.close(() => rmSync(directory, { recursive: true, force: true }))
-    },
+    }
   }
 }
 
-function handleCall(
-  call: Extract<McpToPiMessage, { type: 'call' }>,
-  socket: Socket,
-  queryContext: QueryContext,
-): void {
+function handleCall(call: Extract<McpToPiMessage, { type: 'call' }>, socket: Socket, queryContext: QueryContext): void {
   const deliver = (result: McpResult) => {
     const message: PiToMcpMessage = {
       type: 'result',
       requestId: call.requestId,
       content: result.content,
-      isError: result.isError,
+      isError: result.isError
     }
     socket.write(`${JSON.stringify(message)}\n`)
   }

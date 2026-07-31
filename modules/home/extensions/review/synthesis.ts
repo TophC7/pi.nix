@@ -54,7 +54,10 @@ function parseReviewCards(raw: string): ParseResult {
 
     const parsedHeader = parseReviewCardHeader(headerLine)
     if (!parsedHeader.ok) {
-      quarantined.push({ rawHeader: headerLine.trim(), reasons: parsedHeader.errors })
+      quarantined.push({
+        rawHeader: headerLine.trim(),
+        reasons: parsedHeader.errors
+      })
       continue
     }
 

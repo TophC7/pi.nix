@@ -71,12 +71,7 @@ export function renderFooterColumns(
   return lines
 }
 
-function joinFooterLine(
-  left: string,
-  right: string,
-  width: number,
-  capabilities: UiRenderCapabilities
-): string {
+function joinFooterLine(left: string, right: string, width: number, capabilities: UiRenderCapabilities): string {
   const safeWidth = Math.max(0, width)
   const cleanRight = fit(right, safeWidth, capabilities)
   const rightWidth = visibleWidth(cleanRight)

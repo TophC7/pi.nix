@@ -27,7 +27,11 @@ export function resolveProjectRoot(hint?: string | null): ResolvedRoot {
 
 function isValidAbsoluteDir(value: unknown): value is string {
   if (typeof value !== 'string' || !isAbsolute(value)) return false
-  try { return statSync(value).isDirectory() } catch { return false }
+  try {
+    return statSync(value).isDirectory()
+  } catch {
+    return false
+  }
 }
 
 function findMarker(start: string): { root: string; marker: string } | null {
@@ -44,4 +48,3 @@ function findMarker(start: string): { root: string; marker: string } | null {
   }
   return null
 }
-

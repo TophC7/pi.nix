@@ -212,17 +212,11 @@ function sampleState(config: SlabConfig): SlabEditorState {
 }
 
 export function renderSlabConfigPreview(config: SlabConfig, width: number): string[] {
-  const footer = renderSlabFooterLines(
-    new Map([['mcp', 'MCP: 3/4 servers']]),
-    ['Harbordrift [◉_◉]'],
-    width,
-    { color: true, unicode: true }
-  )
-  if (!config.enabled)
-    return [
-      'stock Pi input (slab disabled)',
-      ...footer
-    ]
+  const footer = renderSlabFooterLines(new Map([['mcp', 'MCP: 3/4 servers']]), ['Harbordrift [◉_◉]'], width, {
+    color: true,
+    unicode: true
+  })
+  if (!config.enabled) return ['stock Pi input (slab disabled)', ...footer]
   return [
     ...wrapSlabEditorLines(['╭────╮', 'Ask Pi to refactor this module', '╰────╯', 'autocomplete preview'], {
       state: sampleState(config),

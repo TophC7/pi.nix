@@ -18,9 +18,14 @@ export function renderBuddyDossier(companion: Companion, width = 56, theme?: Dos
   const safeWidth = Math.max(MIN_WIDTH, width)
   const peak = getPeakStat(companion.stats)
   const dump = getDumpStat(companion.stats)
-  const stats = STAT_NAMES.map((stat) => renderStatLine(stat, companion.stats[stat], statEmphasis(stat, peak, dump), theme))
+  const stats = STAT_NAMES.map((stat) =>
+    renderStatLine(stat, companion.stats[stat], statEmphasis(stat, peak, dump), theme)
+  )
   const level = levelProgress(companion.xp)
-  const xpLine = level.level >= 50 ? 'lvl 50 MAX' : `lvl ${level.level} ${bar(level.progress, BAR_WIDTH)} ${level.currentXp}/${level.neededXp}`
+  const xpLine =
+    level.level >= 50
+      ? 'lvl 50 MAX'
+      : `lvl ${level.level} ${bar(level.progress, BAR_WIDTH)} ${level.currentXp}/${level.neededXp}`
   const statsWidth = Math.max(1, ...stats.map((line) => visibleWidth(line)))
   const leftWidth = Math.max(1, safeWidth - statsWidth - visibleWidth(COLUMN_GAP))
   const sprite = renderBuddyPresenceSprite(companion, {
@@ -59,7 +64,12 @@ function joinColumns(
   return lines
 }
 
-function renderStatLine(stat: StatName, value: number, emphasis: StatEmphasis, theme: DossierTheme | undefined): string {
+function renderStatLine(
+  stat: StatName,
+  value: number,
+  emphasis: StatEmphasis,
+  theme: DossierTheme | undefined
+): string {
   const clamped = Math.max(0, Math.min(100, value))
   const line = `${stat.padEnd(9)}  ${bar(clamped / 100, BAR_WIDTH)} ${String(clamped).padStart(3)}`
   if (!theme) return line
@@ -76,10 +86,13 @@ function statEmphasis(stat: StatName, peak: StatName, dump: StatName): StatEmpha
 
 function bar(progress: number, width: number): string {
   const clamped = Math.max(0, Math.min(1, progress))
-  return renderProportionalBar([
-    { label: 'filled', value: clamped, char: '█' },
-    { label: 'empty', value: 1 - clamped, char: '░' }
-  ], { width })
+  return renderProportionalBar(
+    [
+      { label: 'filled', value: clamped, char: '█' },
+      { label: 'empty', value: 1 - clamped, char: '░' }
+    ],
+    { width }
+  )
 }
 
 function divider(width: number): string {

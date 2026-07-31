@@ -1,34 +1,15 @@
-import type {
-  AssistantMessageEventStream,
-  Context,
-  Model,
-  SimpleStreamOptions,
-  Tool,
-} from '@earendil-works/pi-ai'
+import type { AssistantMessageEventStream, Context, Model, SimpleStreamOptions, Tool } from '@earendil-works/pi-ai'
 import * as piAi from '@earendil-works/pi-ai'
 import { getModels } from '@earendil-works/pi-ai/compat'
-import type {
-  ExtensionAPI,
-  ExtensionContext,
-} from '@earendil-works/pi-coding-agent'
-import {
-  claudeArguments,
-  claudeEnvironment,
-} from './claude-command.js'
+import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent'
+import { claudeArguments, claudeEnvironment } from './claude-command.js'
 import { ClaudeProcess } from './claude-process.js'
 import { claudeEffort } from './effort.js'
-import {
-  extractAllToolResults,
-  type McpResult,
-} from './extract-tool-results.js'
+import { extractAllToolResults, type McpResult } from './extract-tool-results.js'
 import { createToolBridge, type ToolBridge } from './mcp-bridge.js'
 import { MCP_TOOL_PREFIX } from './mcp-names.js'
 import { applyLongContext, buildModels, claudeCodeModelId } from './models.js'
-import {
-  makePromptStream,
-  userMessage,
-  type InputContent,
-} from './prompt-stream.js'
+import { makePromptStream, userMessage, type InputContent } from './prompt-stream.js'
 import { QueryContext } from './query-state.js'
 import {
   bootstrapPrompt,
@@ -39,7 +20,7 @@ import {
   restoredSessionState,
   SESSION_ENTRY_TYPE,
   type ContextDigest,
-  type PersistedSessionState,
+  type PersistedSessionState
 } from './session-state.js'
 import { ClaudeTurn } from './stream-events.js'
 
@@ -67,7 +48,7 @@ type Runtime = {
 
 const globalState = globalThis as Record<symbol, unknown>
 const runtime = (globalState[RUNTIME_KEY] as Runtime | undefined) ?? {
-  activeQueries: new Set<QueryContext>(),
+  activeQueries: new Set<QueryContext>()
 }
 if (!globalState[RUNTIME_KEY]) globalState[RUNTIME_KEY] = runtime
 
@@ -83,7 +64,7 @@ function streamClaudeCore(
   provider: ProviderRuntime,
   model: Model<any>,
   context: Context,
-  options: SimpleStreamOptions | undefined,
+  options: SimpleStreamOptions | undefined
 ): AssistantMessageEventStream {
   const stream = newAssistantMessageEventStream()
   const piSessionId = provider.activeSessionId
@@ -93,9 +74,7 @@ function streamClaudeCore(
   if (owner) {
     owner.latestMessages = context.messages
     owner.turn = new ClaudeTurn(model, stream, owner.toolNames)
-    void deliverToolResults(owner, results, trailingSteer(context)).catch(
-      (error) => owner.turn?.fail(asError(error)),
-    )
+    void deliverToolResults(owner, results, trailingSteer(context)).catch((error) => owner.turn?.fail(asError(error)))
     return stream
   }
   if (context.messages.at(-1)?.role === 'toolResult') {
@@ -122,10 +101,7 @@ function streamClaudeCore(
   let aligned = false
   if (candidate && !('reset' in state)) {
     const cached = session.validated
-    if (
-      cached?.messageCount === state.messageCount &&
-      cached.contextHash === state.contextHash
-    ) {
+    if (cached?.messageCount === state.messageCount && cached.contextHash === state.contextHash) {
       historyDigest = cached
       aligned = true
     } else {
@@ -136,20 +112,13 @@ function streamClaudeCore(
   } else {
     historyDigest = contextDigest(history)
   }
-  const resume =
-    aligned && state && !('reset' in state) ? state.claudeSessionId : undefined
-  const prompt =
-    aligned || history.length === 0
-      ? currentPrompt(context.messages)
-      : bootstrapPrompt(context.messages)
-  if (prompt.length === 0)
-    return failedStream(stream, model, new Error('Claude prompt is empty'))
+  const resume = aligned && state && !('reset' in state) ? state.claudeSessionId : undefined
+  const prompt = aligned || history.length === 0 ? currentPrompt(context.messages) : bootstrapPrompt(context.messages)
+  if (prompt.length === 0) return failedStream(stream, model, new Error('Claude prompt is empty'))
 
   const query = new QueryContext()
   query.latestMessages = context.messages
-  const { tools, toolNames } = isolated
-    ? { tools: [], toolNames: new Map<string, string>() }
-    : resolveTools(context)
+  const { tools, toolNames } = isolated ? { tools: [], toolNames: new Map<string, string>() } : resolveTools(context)
   query.toolNames = toolNames
   query.turn = new ClaudeTurn(model, stream, toolNames)
 
@@ -171,15 +140,13 @@ function streamClaudeCore(
         resume,
         mcpConfig: bridge?.mcpConfig,
         persistSession: !isolated,
-        maxTurns: isolated ? 1 : undefined,
+        maxTurns: isolated ? 1 : undefined
       }),
       cwd,
-      env: claudeEnvironment(),
+      env: claudeEnvironment()
     })
     if (bridge) {
-      void bridge.ready
-        .then(() => input.attach(claude))
-        .catch((error) => input.fail(asError(error)))
+      void bridge.ready.then(() => input.attach(claude)).catch((error) => input.fail(asError(error)))
     } else {
       input.attach(claude)
     }
@@ -230,18 +197,11 @@ function streamClaudeCore(
     () => aborted,
     () => {
       if (!isolated && !aborted && piSessionId)
-        persistCompletedSession(
-          provider,
-          piSessionId,
-          model,
-          query,
-          historyDigest,
-        )
-    },
+        persistCompletedSession(provider, piSessionId, model, query, historyDigest)
+    }
   )
     .catch((error) => {
-      if (!isolated && piSessionId)
-        invalidateSession(provider, piSessionId, true)
+      if (!isolated && piSessionId) invalidateSession(provider, piSessionId, true)
       query.turn?.fail(asError(error), aborted)
     })
     .finally(() => {
@@ -257,12 +217,11 @@ async function consume(
   input: ReturnType<typeof makePromptStream>,
   query: QueryContext,
   wasAborted: () => boolean,
-  onTerminal: () => void,
+  onTerminal: () => void
 ): Promise<void> {
   for await (const message of claude) {
     if (wasAborted()) return
-    if (typeof message.session_id === 'string')
-      query.claudeSessionId = message.session_id
+    if (typeof message.session_id === 'string') query.claudeSessionId = message.session_id
     if (message.type === 'result') input.end()
     const terminal = query.turn?.handle(message) ?? false
     if (terminal) {
@@ -270,8 +229,7 @@ async function consume(
       return
     }
   }
-  if (!wasAborted())
-    throw new Error('Claude Code output ended before a terminal result')
+  if (!wasAborted()) throw new Error('Claude Code output ended before a terminal result')
 }
 
 function persistCompletedSession(
@@ -279,19 +237,16 @@ function persistCompletedSession(
   piSessionId: string,
   model: Model<any>,
   query: QueryContext,
-  historyDigest: ContextDigest,
+  historyDigest: ContextDigest
 ): void {
   if (!query.claudeSessionId || !query.turn) return
-  const appendedMessages = [
-    ...query.latestMessages.slice(historyDigest.messageCount),
-    query.turn.message,
-  ]
+  const appendedMessages = [...query.latestMessages.slice(historyDigest.messageCount), query.turn.message]
   const digest = extendContextDigest(historyDigest, appendedMessages)
   const state: PersistedSessionState = {
     version: 2,
     claudeSessionId: query.claudeSessionId,
     modelId: model.id,
-    ...digest,
+    ...digest
   }
   const session = provider.sessions.get(piSessionId) ?? {}
   session.persisted = state
@@ -300,11 +255,7 @@ function persistCompletedSession(
   session.binding?.append(state)
 }
 
-function invalidateSession(
-  provider: ProviderRuntime,
-  piSessionId: string,
-  persistReset: boolean,
-): void {
+function invalidateSession(provider: ProviderRuntime, piSessionId: string, persistReset: boolean): void {
   const session = provider.sessions.get(piSessionId) ?? {}
   session.active?.cleanup?.()
   session.active = undefined
@@ -314,17 +265,13 @@ function invalidateSession(
   if (persistReset) session.binding?.append(session.persisted)
 }
 
-function bindSession(
-  pi: ExtensionAPI,
-  ctx: ExtensionContext,
-  provider: ProviderRuntime,
-): SessionRuntime {
+function bindSession(pi: ExtensionAPI, ctx: ExtensionContext, provider: ProviderRuntime): SessionRuntime {
   const piSessionId = ctx.sessionManager.getSessionId()
   const session = provider.sessions.get(piSessionId) ?? {}
   provider.activeSessionId = piSessionId
   session.binding = {
     append: (state) => pi.appendEntry(SESSION_ENTRY_TYPE, state),
-    cwd: ctx.cwd,
+    cwd: ctx.cwd
   }
   session.persisted = restoredSessionState(ctx.sessionManager.getBranch())
   session.validated = undefined
@@ -353,7 +300,7 @@ function toolResults(context: Context): McpResult[] {
       content?: unknown
       toolCallId?: string
       isError?: boolean
-    }>,
+    }>
   )
 }
 
@@ -373,13 +320,8 @@ function queryForResults(results: McpResult[]): QueryContext | undefined {
   return undefined
 }
 
-async function deliverToolResults(
-  query: QueryContext,
-  results: McpResult[],
-  steer: InputContent[],
-): Promise<void> {
-  if (steer.length > 0 && query.promptStream)
-    await query.promptStream.push(userMessage(steer, 'next'))
+async function deliverToolResults(query: QueryContext, results: McpResult[], steer: InputContent[]): Promise<void> {
+  if (steer.length > 0 && query.promptStream) await query.promptStream.push(userMessage(steer, 'next'))
   for (const result of results) {
     const id = result.toolCallId
     if (!id) continue
@@ -394,26 +336,19 @@ async function deliverToolResults(
 }
 
 function trailingSteer(context: Context): InputContent[] {
-  return context.messages.at(-1)?.role === 'user'
-    ? currentPrompt(context.messages)
-    : []
+  return context.messages.at(-1)?.role === 'user' ? currentPrompt(context.messages) : []
 }
 
-function emptyStream(
-  stream: AssistantMessageEventStream,
-  model: Model<any>,
-): AssistantMessageEventStream {
+function emptyStream(stream: AssistantMessageEventStream, model: Model<any>): AssistantMessageEventStream {
   const turn = new ClaudeTurn(model, stream, new Map())
-  queueMicrotask(() =>
-    turn.handle({ type: 'result', subtype: 'success', result: '' }),
-  )
+  queueMicrotask(() => turn.handle({ type: 'result', subtype: 'success', result: '' }))
   return stream
 }
 
 function failedStream(
   stream: AssistantMessageEventStream,
   model: Model<any>,
-  error: Error,
+  error: Error
 ): AssistantMessageEventStream {
   const turn = new ClaudeTurn(model, stream, new Map())
   queueMicrotask(() => turn.fail(error))
@@ -425,8 +360,7 @@ function asError(error: unknown): Error {
 }
 
 function errorMessage(error: unknown): string {
-  if (error && typeof error === 'object' && 'message' in error)
-    return String((error as { message: unknown }).message)
+  if (error && typeof error === 'object' && 'message' in error) return String((error as { message: unknown }).message)
   return String(error)
 }
 
@@ -434,19 +368,15 @@ export default function claude(pi: ExtensionAPI): void {
   process.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = '1'
   const provider: ProviderRuntime = {
     isolateNextStream: false,
-    sessions: new Map<string, SessionRuntime>(),
+    sessions: new Map<string, SessionRuntime>()
   }
 
-  const streamClaude = (
-    model: Model<any>,
-    context: Context,
-    options?: SimpleStreamOptions,
-  ) => streamClaudeCore(provider, model, context, options)
+  const streamClaude = (model: Model<any>, context: Context, options?: SimpleStreamOptions) =>
+    streamClaudeCore(provider, model, context, options)
 
   pi.on('session_start', (event, ctx) => {
     bindSession(pi, ctx, provider)
-    if (event.reason === 'fork')
-      invalidateSession(provider, ctx.sessionManager.getSessionId(), true)
+    if (event.reason === 'fork') invalidateSession(provider, ctx.sessionManager.getSessionId(), true)
   })
 
   pi.on('session_tree', (_event, ctx) => {
@@ -462,7 +392,7 @@ export default function claude(pi: ExtensionAPI): void {
       () => {
         provider.isolateNextStream = false
       },
-      { once: true },
+      { once: true }
     )
   })
 
@@ -484,6 +414,6 @@ export default function claude(pi: ExtensionAPI): void {
     apiKey: 'not-used',
     api: PROVIDER_ID,
     models: applyLongContext(models),
-    streamSimple: streamClaude as any,
+    streamSimple: streamClaude as any
   })
 }

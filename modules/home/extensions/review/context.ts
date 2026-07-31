@@ -35,7 +35,12 @@ export interface ReviewContextCapture {
 
 export function captureStagedReviewContext(
   ctx: ExtensionCommandContext,
-  args: { diff: string; files: readonly string[]; guidance?: string; notes?: readonly string[] }
+  args: {
+    diff: string
+    files: readonly string[]
+    guidance?: string
+    notes?: readonly string[]
+  }
 ): ReviewContextCapture {
   const files = args.files
   const builder = createContextBuilder()
@@ -96,7 +101,10 @@ export function captureFreehandReviewContext(
 }
 
 export function splitZ(raw: string): string[] {
-  return raw.split('\0').map((part) => part.trim()).filter(Boolean)
+  return raw
+    .split('\0')
+    .map((part) => part.trim())
+    .filter(Boolean)
 }
 
 function manifestsFor(files: readonly string[]): string[] {
@@ -135,10 +143,14 @@ function missingManifestNotes(cwd: string, files: readonly string[]): string[] {
   const notes: string[] = []
   const jsLike = files.some((file) => /\.(ts|tsx|js|jsx|mjs|cjs|svelte|vue)$/.test(file))
   if (jsLike && !existsSync(join(cwd, 'package.json'))) {
-    notes.push('No package.json found at repo root despite staged JS/TS-like files; reviewers must not assume npm scripts or dependencies.')
+    notes.push(
+      'No package.json found at repo root despite staged JS/TS-like files; reviewers must not assume npm scripts or dependencies.'
+    )
   }
   if (jsLike && !existsSync(join(cwd, 'tsconfig.json'))) {
-    notes.push('No tsconfig.json found at repo root despite staged TS-like files; reviewers must verify TypeScript assumptions from local context.')
+    notes.push(
+      'No tsconfig.json found at repo root despite staged TS-like files; reviewers must verify TypeScript assumptions from local context.'
+    )
   }
   return notes
 }

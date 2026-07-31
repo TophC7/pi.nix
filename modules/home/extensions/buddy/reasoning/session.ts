@@ -13,4 +13,3 @@ export function sessionDayStartMs(sessionId: string): number | null {
   const ms = Date.parse(day + 'T00:00:00.000Z')
   return Number.isFinite(ms) ? ms : null
 }
-

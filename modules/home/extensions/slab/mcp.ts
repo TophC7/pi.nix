@@ -41,7 +41,10 @@ export function subscribeMcpStatus(pi: ExtensionAPI, onChange: () => void): () =
 
 function parseSnapshot(value: unknown): SlabMcpStatusSnapshot | undefined {
   if (!value || typeof value !== 'object') return undefined
-  const record = value as { readonly servers?: unknown; readonly totalTools?: unknown }
+  const record = value as {
+    readonly servers?: unknown
+    readonly totalTools?: unknown
+  }
   if (!Array.isArray(record.servers)) return undefined
 
   const servers = record.servers.map(parseServer).filter((server): server is SlabMcpServerSnapshot => Boolean(server))
@@ -56,7 +59,11 @@ function parseSnapshot(value: unknown): SlabMcpStatusSnapshot | undefined {
 
 function parseServer(value: unknown): SlabMcpServerSnapshot | undefined {
   if (!value || typeof value !== 'object') return undefined
-  const record = value as { readonly name?: unknown; readonly status?: unknown; readonly disabled?: unknown }
+  const record = value as {
+    readonly name?: unknown
+    readonly status?: unknown
+    readonly disabled?: unknown
+  }
   const name = stringValue(record.name)
   // Disabled servers are configured off on purpose, so they stay out of the counts.
   if (!name || record.disabled === true || record.status === 'disabled') return undefined
@@ -64,7 +71,11 @@ function parseServer(value: unknown): SlabMcpServerSnapshot | undefined {
 }
 
 function statusValue(value: unknown): SlabMcpServerStatus | undefined {
-  return value === 'connected' || value === 'needs-auth' || value === 'failed' || value === 'cached' || value === 'not-connected'
+  return value === 'connected' ||
+    value === 'needs-auth' ||
+    value === 'failed' ||
+    value === 'cached' ||
+    value === 'not-connected'
     ? value
     : undefined
 }

@@ -415,11 +415,7 @@ function joinInputAdjacent(
   return lines
 }
 
-function joinRightAlignedLine(
-  rightLine: string,
-  width: number,
-  caps: UiRenderCapabilities
-): string {
+function joinRightAlignedLine(rightLine: string, width: number, caps: UiRenderCapabilities): string {
   return leftPadVisible(fit(rightLine, width, caps), width)
 }
 
@@ -520,9 +516,10 @@ export class SlabEditor extends SelectionEditor {
       ? joinInputAdjacent(editorSurface, rightRail.editorLines, editorWidth, rightWidth, caps)
       : editorSurface
     const topSurface = topRightWidgets.map((line) => joinRightAlignedLine(line, safeWidth, caps))
-    const mainSurface = rightRail.topLine && useInputRight
-      ? [...topSurface, joinRightOnlyLine(rightRail.topLine, editorWidth, rightWidth, caps), ...joinedSurface]
-      : [...topSurface, ...joinedSurface]
+    const mainSurface =
+      rightRail.topLine && useInputRight
+        ? [...topSurface, joinRightOnlyLine(rightRail.topLine, editorWidth, rightWidth, caps), ...joinedSurface]
+        : [...topSurface, ...joinedSurface]
     const above = renderWidgetLines(
       this.widgetHost,
       state.snapshot.widgets,

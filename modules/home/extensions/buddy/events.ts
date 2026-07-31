@@ -1,6 +1,12 @@
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent'
 import { getCompanion } from './core/companion.ts'
-import { getActiveReaction, inferPromptReaction, inferToolReaction, reactionFromState, storeReaction } from './core/reactions.ts'
+import {
+  getActiveReaction,
+  inferPromptReaction,
+  inferToolReaction,
+  reactionFromState,
+  storeReaction
+} from './core/reactions.ts'
 import type { Companion } from './core/types.ts'
 import { getBuddyDatabase } from './db/index.ts'
 import { buildBuddyContext } from './prompts.ts'
@@ -30,9 +36,17 @@ interface MessageEndEvent {
   readonly message?: { readonly role?: string; readonly content?: unknown }
 }
 
-const COMPLETION_REGEX = /\b(?:I(?:'ve| have) (?:implemented|added|created|updated|fixed|refactored|written|deployed|pushed|committed|completed|finished)|(?:all )?tests? (?:pass(?:ed|ing)?|are passing)|(?:the )?(?:fix|change|implementation) is (?:in place|complete|done)|successfully (?:deployed|committed|pushed|built)|(?:build|compilation) (?:succeeded|passed))\b/i
-const ONGOING_REGEX = /^(?:I'?ll |Let me |I (?:need to|should|will|can)|Looking at|Checking|Reading|I'm (?:going to|working on|looking at))/i
-const COMPLETION_REACTIONS = ['ooh, new code. looking.', 'that landed.', 'progress registered.', 'task complete.', 'bits moved.'] as const
+const COMPLETION_REGEX =
+  /\b(?:I(?:'ve| have) (?:implemented|added|created|updated|fixed|refactored|written|deployed|pushed|committed|completed|finished)|(?:all )?tests? (?:pass(?:ed|ing)?|are passing)|(?:the )?(?:fix|change|implementation) is (?:in place|complete|done)|successfully (?:deployed|committed|pushed|built)|(?:build|compilation) (?:succeeded|passed))\b/i
+const ONGOING_REGEX =
+  /^(?:I'?ll |Let me |I (?:need to|should|will|can)|Looking at|Checking|Reading|I'm (?:going to|working on|looking at))/i
+const COMPLETION_REACTIONS = [
+  'ooh, new code. looking.',
+  'that landed.',
+  'progress registered.',
+  'task complete.',
+  'bits moved.'
+] as const
 
 export function registerBuddyEvents(pi: ExtensionAPI): void {
   activePi = pi
@@ -114,7 +128,11 @@ function assistantText(content: unknown): string {
   if (typeof content === 'string') return content
   if (!Array.isArray(content)) return ''
   return content
-    .map((item) => (item && typeof item === 'object' && typeof (item as { text?: unknown }).text === 'string') ? (item as { text: string }).text : '')
+    .map((item) =>
+      item && typeof item === 'object' && typeof (item as { text?: unknown }).text === 'string'
+        ? (item as { text: string }).text
+        : ''
+    )
     .join(' ')
 }
 

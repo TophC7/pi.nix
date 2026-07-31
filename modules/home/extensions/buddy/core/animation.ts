@@ -82,7 +82,11 @@ export function getAnimationProfile(species: string): AnimationProfile {
   return base
 }
 
-export function getAnimationState(companion: Companion, reaction: StoredReaction | null, now = Date.now()): AnimationState {
+export function getAnimationState(
+  companion: Companion,
+  reaction: StoredReaction | null,
+  now = Date.now()
+): AnimationState {
   if (reaction && reaction.expiresAt > now) {
     switch (reaction.state) {
       case 'excited':

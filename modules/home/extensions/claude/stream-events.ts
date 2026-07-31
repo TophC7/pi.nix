@@ -2,7 +2,7 @@ import {
   calculateCost,
   type AssistantMessage,
   type AssistantMessageEventStream,
-  type Model,
+  type Model
 } from '@earendil-works/pi-ai'
 import type { ClaudeMessage } from './claude-process.js'
 import { MCP_TOOL_PREFIX } from './mcp-names.js'
@@ -21,7 +21,7 @@ export class ClaudeTurn {
   constructor(
     private readonly model: Model<any>,
     private readonly stream: AssistantMessageEventStream,
-    private readonly toolNames: Map<string, string>,
+    private readonly toolNames: Map<string, string>
   ) {
     this.message = newAssistantMessage(model)
   }
@@ -42,8 +42,7 @@ export class ClaudeTurn {
     if (message.subtype !== 'success') throw new Error(resultError(message))
 
     if (message.usage) updateUsage(this.message, message.usage, this.model)
-    if (!this.sawStreamEvent && message.result)
-      this.emitFallbackText(message.result)
+    if (!this.sawStreamEvent && message.result) this.emitFallbackText(message.result)
     this.finish(this.message.stopReason === 'length' ? 'length' : 'stop')
     return true
   }
@@ -55,7 +54,7 @@ export class ClaudeTurn {
     this.stream.push({
       type: 'error',
       reason: aborted ? 'aborted' : 'error',
-      error: this.message,
+      error: this.message
     })
     this.finished = true
     this.stream.end()
@@ -63,8 +62,7 @@ export class ClaudeTurn {
 
   private handleStreamEvent(event: any): void {
     if (event?.type === 'message_start') {
-      if (event.message?.usage)
-        updateUsage(this.message, event.message.usage, this.model)
+      if (event.message?.usage) updateUsage(this.message, event.message.usage, this.model)
       return
     }
 
@@ -78,18 +76,18 @@ export class ClaudeTurn {
         this.stream.push({
           type: 'text_start',
           contentIndex,
-          partial: this.message,
+          partial: this.message
         })
       } else if (block?.type === 'thinking') {
         this.message.content.push({
           type: 'thinking',
           thinking: '',
-          thinkingSignature: '',
+          thinkingSignature: ''
         })
         this.stream.push({
           type: 'thinking_start',
           contentIndex,
-          partial: this.message,
+          partial: this.message
         })
       } else if (block?.type === 'tool_use') {
         this.sawToolCall = true
@@ -99,12 +97,12 @@ export class ClaudeTurn {
           id: block.id,
           name: this.piToolName(block.name),
           arguments: block.input ?? {},
-          partialJson: '',
+          partialJson: ''
         } as any)
         this.stream.push({
           type: 'toolcall_start',
           contentIndex,
-          partial: this.message,
+          partial: this.message
         })
       }
       return
@@ -120,34 +118,25 @@ export class ClaudeTurn {
           type: 'text_delta',
           contentIndex,
           delta: event.delta.text,
-          partial: this.message,
+          partial: this.message
         })
-      } else if (
-        event.delta?.type === 'thinking_delta' &&
-        block.type === 'thinking'
-      ) {
+      } else if (event.delta?.type === 'thinking_delta' && block.type === 'thinking') {
         block.thinking += event.delta.thinking
         this.stream.push({
           type: 'thinking_delta',
           contentIndex,
           delta: event.delta.thinking,
-          partial: this.message,
+          partial: this.message
         })
-      } else if (
-        event.delta?.type === 'signature_delta' &&
-        block.type === 'thinking'
-      ) {
+      } else if (event.delta?.type === 'signature_delta' && block.type === 'thinking') {
         block.thinkingSignature += event.delta.signature
-      } else if (
-        event.delta?.type === 'input_json_delta' &&
-        block.type === 'toolCall'
-      ) {
+      } else if (event.delta?.type === 'input_json_delta' && block.type === 'toolCall') {
         block.partialJson += event.delta.partial_json
         this.stream.push({
           type: 'toolcall_delta',
           contentIndex,
           delta: event.delta.partial_json,
-          partial: this.message,
+          partial: this.message
         })
       }
       return
@@ -162,14 +151,14 @@ export class ClaudeTurn {
           type: 'text_end',
           contentIndex,
           content: block.text,
-          partial: this.message,
+          partial: this.message
         })
       } else if (block.type === 'thinking') {
         this.stream.push({
           type: 'thinking_end',
           contentIndex,
           content: block.thinking,
-          partial: this.message,
+          partial: this.message
         })
       } else if (block.type === 'toolCall') {
         block.arguments = parseJson(block.partialJson, block.arguments)
@@ -179,7 +168,7 @@ export class ClaudeTurn {
           type: 'toolcall_end',
           contentIndex,
           toolCall: block,
-          partial: this.message,
+          partial: this.message
         })
       }
       return
@@ -204,19 +193,19 @@ export class ClaudeTurn {
     this.stream.push({
       type: 'text_start',
       contentIndex,
-      partial: this.message,
+      partial: this.message
     })
     this.stream.push({
       type: 'text_delta',
       contentIndex,
       delta: text,
-      partial: this.message,
+      partial: this.message
     })
     this.stream.push({
       type: 'text_end',
       contentIndex,
       content: text,
-      partial: this.message,
+      partial: this.message
     })
   }
 
@@ -235,12 +224,9 @@ export class ClaudeTurn {
   }
 
   private piToolName(name: string): string {
-    const mapped =
-      this.toolNames.get(name) ?? this.toolNames.get(name.toLowerCase())
+    const mapped = this.toolNames.get(name) ?? this.toolNames.get(name.toLowerCase())
     if (mapped) return mapped
-    return name.toLowerCase().startsWith(MCP_TOOL_PREFIX)
-      ? name.slice(MCP_TOOL_PREFIX.length)
-      : name
+    return name.toLowerCase().startsWith(MCP_TOOL_PREFIX) ? name.slice(MCP_TOOL_PREFIX.length) : name
   }
 }
 
@@ -257,29 +243,19 @@ function newAssistantMessage(model: Model<any>): AssistantMessage {
       cacheRead: 0,
       cacheWrite: 0,
       totalTokens: 0,
-      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }
     },
     stopReason: 'stop',
-    timestamp: Date.now(),
+    timestamp: Date.now()
   }
 }
 
-function updateUsage(
-  output: AssistantMessage,
-  usage: Record<string, number | undefined>,
-  model: Model<any>,
-): void {
+function updateUsage(output: AssistantMessage, usage: Record<string, number | undefined>, model: Model<any>): void {
   output.usage.input = usage.input_tokens ?? output.usage.input
   output.usage.output = usage.output_tokens ?? output.usage.output
-  output.usage.cacheRead =
-    usage.cache_read_input_tokens ?? output.usage.cacheRead
-  output.usage.cacheWrite =
-    usage.cache_creation_input_tokens ?? output.usage.cacheWrite
-  output.usage.totalTokens =
-    output.usage.input +
-    output.usage.output +
-    output.usage.cacheRead +
-    output.usage.cacheWrite
+  output.usage.cacheRead = usage.cache_read_input_tokens ?? output.usage.cacheRead
+  output.usage.cacheWrite = usage.cache_creation_input_tokens ?? output.usage.cacheWrite
+  output.usage.totalTokens = output.usage.input + output.usage.output + output.usage.cacheRead + output.usage.cacheWrite
   calculateCost(model, output.usage)
 }
 
@@ -289,10 +265,7 @@ function mapStopReason(reason?: string): 'stop' | 'length' | 'toolUse' {
   return 'stop'
 }
 
-function mapToolArguments(
-  toolName: string,
-  input: Record<string, unknown>,
-): Record<string, unknown> {
+function mapToolArguments(toolName: string, input: Record<string, unknown>): Record<string, unknown> {
   const renames: Record<string, string> =
     {
       read: { file_path: 'path' },
@@ -302,23 +275,19 @@ function mapToolArguments(
         old_string: 'oldText',
         new_string: 'newText',
         old_text: 'oldText',
-        new_text: 'newText',
-      },
+        new_text: 'newText'
+      }
     }[toolName.toLowerCase()] ?? {}
   const result: Record<string, unknown> = {}
   for (const [key, value] of Object.entries(input)) {
     const mapped = renames[key] ?? key
     if (!(mapped in result)) result[mapped] = value
   }
-  if (toolName.toLowerCase() === 'bash' && result.timeout == null)
-    result.timeout = 120
+  if (toolName.toLowerCase() === 'bash' && result.timeout == null) result.timeout = 120
   return result
 }
 
-function parseJson(
-  input: string,
-  fallback: Record<string, unknown>,
-): Record<string, unknown> {
+function parseJson(input: string, fallback: Record<string, unknown>): Record<string, unknown> {
   if (!input) return fallback
   try {
     return JSON.parse(input)
@@ -329,7 +298,6 @@ function parseJson(
 
 function resultError(message: ClaudeMessage): string {
   if (typeof message.error === 'string') return message.error
-  if (typeof message.result === 'string' && message.result)
-    return message.result
+  if (typeof message.result === 'string' && message.result) return message.result
   return `Claude Code failed (${message.subtype ?? 'unknown result'})`
 }

@@ -91,7 +91,10 @@ function buildAgentRoots(options: DiscoverAgentsOptions, agentDir: string, scope
     addRoot({ dir: options.userAgentsDir, source: 'user' })
   }
   if (scope === 'project' || scope === 'both') {
-    addRoot({ dir: options.projectAgentsDir ?? join(options.cwd, '.pi', 'agents'), source: 'project' })
+    addRoot({
+      dir: options.projectAgentsDir ?? join(options.cwd, '.pi', 'agents'),
+      source: 'project'
+    })
   }
   return roots
 }

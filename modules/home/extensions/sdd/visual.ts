@@ -64,9 +64,16 @@ export async function runVisual(pi: ExtensionAPI, ctx: ExtensionCommandContext, 
 function scheduleOpenVisualArtifact(pi: ExtensionAPI, ctx: ExtensionCommandContext, outputFile: string): void {
   void deferToAgentEnd(pi, async () => {
     const opener = process.platform === 'darwin' ? 'open' : 'xdg-open'
-    const result = await pi.exec(opener, [outputFile], { cwd: ctx.cwd, timeout: 5000 })
+    const result = await pi.exec(opener, [outputFile], {
+      cwd: ctx.cwd,
+      timeout: 5000
+    })
     if (result.code === 0) ctx.ui.notify(`/spec:visual opened ${outputFile}`, 'info')
-    else ctx.ui.notify(`/spec:visual wrote ${outputFile}; open failed: ${result.stderr || `exit ${result.code}`}`, 'warning')
+    else
+      ctx.ui.notify(
+        `/spec:visual wrote ${outputFile}; open failed: ${result.stderr || `exit ${result.code}`}`,
+        'warning'
+      )
   })
 }
 
@@ -75,19 +82,32 @@ export function visualArtifactPath(cwd: string, slug: string): string {
 }
 
 function parseVisualArgs(args?: string): VisualArgs {
-  const parts = args?.split(/\s+/).map((part) => part.trim()).filter(Boolean) ?? []
+  const parts =
+    args
+      ?.split(/\s+/)
+      .map((part) => part.trim())
+      .filter(Boolean) ?? []
   let target: string | undefined
   let noOpen = false
   for (const part of parts) {
     if (part === '--no-open') noOpen = true
     else if (part.startsWith('--')) return { target, noOpen, error: `unknown option ${part}` }
     else if (!target) target = part
-    else return { target, noOpen, error: `multiple targets provided: ${target} and ${part}` }
+    else
+      return {
+        target,
+        noOpen,
+        error: `multiple targets provided: ${target} and ${part}`
+      }
   }
   return { target, noOpen }
 }
 
-async function resolveVisualSlug(pi: ExtensionAPI, ctx: ExtensionCommandContext, target?: string): Promise<string | undefined> {
+async function resolveVisualSlug(
+  pi: ExtensionAPI,
+  ctx: ExtensionCommandContext,
+  target?: string
+): Promise<string | undefined> {
   if (!target) {
     const active = getActiveSpec()
     if (active) {

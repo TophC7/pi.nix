@@ -22,4 +22,3 @@ export function setGuardMode(db: Database, enabled: boolean): Companion {
 export function formatModeResponse(companion: Companion): string {
   return 'Buddy voice mode: ' + companion.observerMode + '. Guard mode: ' + (companion.guardMode ? 'on' : 'off') + '.'
 }
-

@@ -6,11 +6,9 @@ const PI_TO_CLAUDE_EFFORT: Record<string, ClaudeEffort> = {
   medium: 'medium',
   high: 'high',
   xhigh: 'xhigh',
-  max: 'max',
+  max: 'max'
 }
 
-export function claudeEffort(
-  reasoning: string | undefined,
-): ClaudeEffort | undefined {
+export function claudeEffort(reasoning: string | undefined): ClaudeEffort | undefined {
   return reasoning ? PI_TO_CLAUDE_EFFORT[reasoning] : undefined
 }

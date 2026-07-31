@@ -19,8 +19,7 @@ type JsonRpcRequest = {
 }
 
 const [manifestPath, socketPath] = process.argv.slice(2)
-if (!manifestPath || !socketPath)
-  throw new Error('usage: mcp-process.ts <manifest> <socket>')
+if (!manifestPath || !socketPath) throw new Error('usage: mcp-process.ts <manifest> <socket>')
 
 const tools = JSON.parse(readFileSync(manifestPath, 'utf8')) as ToolDefinition[]
 const byName = new Map(tools.map((tool) => [tool.name, tool]))
@@ -75,7 +74,7 @@ async function handle(request: JsonRpcRequest): Promise<void> {
         await respond(request.id, {
           protocolVersion: request.params?.protocolVersion ?? '2025-06-18',
           capabilities: { tools: { listChanged: false } },
-          serverInfo: { name: 'pi-claude-tools', version: '1.0.0' },
+          serverInfo: { name: 'pi-claude-tools', version: '1.0.0' }
         })
         return
       case 'notifications/initialized':
@@ -90,8 +89,8 @@ async function handle(request: JsonRpcRequest): Promise<void> {
           tools: tools.map((tool) => ({
             name: tool.name,
             description: tool.description,
-            inputSchema: inputSchema(tool.inputSchema),
-          })),
+            inputSchema: inputSchema(tool.inputSchema)
+          }))
         })
         return
       case 'tools/call':
@@ -99,20 +98,12 @@ async function handle(request: JsonRpcRequest): Promise<void> {
         return
       default:
         if (request.id !== undefined) {
-          await respondError(
-            request.id,
-            -32601,
-            `Method not found: ${request.method}`,
-          )
+          await respondError(request.id, -32601, `Method not found: ${request.method}`)
         }
     }
   } catch (error) {
     if (request.id !== undefined) {
-      await respondError(
-        request.id,
-        -32603,
-        error instanceof Error ? error.message : String(error),
-      )
+      await respondError(request.id, -32603, error instanceof Error ? error.message : String(error))
     }
   }
 }
@@ -123,9 +114,7 @@ async function callTool(request: JsonRpcRequest): Promise<void> {
   if (!tool) throw new Error(`Unknown tool: ${String(name)}`)
   const toolCallId = request.params?._meta?.[TOOL_USE_ID_META]
   if (typeof toolCallId !== 'string') {
-    throw new Error(
-      `${tool.name}: tools/call missing _meta["${TOOL_USE_ID_META}"]`,
-    )
+    throw new Error(`${tool.name}: tools/call missing _meta["${TOOL_USE_ID_META}"]`)
   }
 
   const requestId = crypto.randomUUID()
@@ -134,13 +123,13 @@ async function callTool(request: JsonRpcRequest): Promise<void> {
     const message: McpToPiMessage = {
       type: 'call',
       requestId,
-      toolCallId,
+      toolCallId
     }
     socket.write(`${JSON.stringify(message)}\n`)
   })
   await respond(request.id, {
     content: result.content,
-    isError: result.isError,
+    isError: result.isError
   })
 }
 
@@ -161,11 +150,7 @@ function respond(id: JsonRpcRequest['id'], result: unknown): Promise<void> {
   return write({ jsonrpc: '2.0', id, result })
 }
 
-function respondError(
-  id: string | number,
-  code: number,
-  message: string,
-): Promise<void> {
+function respondError(id: string | number, code: number, message: string): Promise<void> {
   return write({ jsonrpc: '2.0', id, error: { code, message } })
 }
 

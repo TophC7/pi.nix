@@ -60,7 +60,9 @@ export async function runPromptCommand(
   try {
     const config = getCommandConfig(command)
     restore = hasRuntimeProfileSettings(config) ? captureMainRuntimeProfile(pi, ctx, `/${command}`) : undefined
-    await applyMainRuntimeProfile(pi, ctx, config, { source: `${CONFIG_PATH} /${command}` })
+    await applyMainRuntimeProfile(pi, ctx, config, {
+      source: `${CONFIG_PATH} /${command}`
+    })
   } catch (error) {
     ctx.ui.notify(formatRuntimeProfileError(error), 'error')
     return
@@ -113,7 +115,13 @@ async function collectCommitContext(pi: ExtensionAPI, ctx: ExtensionCommandConte
 
 async function collectPrContext(pi: ExtensionAPI, ctx: ExtensionCommandContext): Promise<string | undefined> {
   const [branch, status, upstream] = await Promise.all([
-    captureRawCommand(pi, ctx, 'git branch --show-current', ['git', 'branch', '--show-current'], MAX_COMMAND_CONTEXT_BYTES),
+    captureRawCommand(
+      pi,
+      ctx,
+      'git branch --show-current',
+      ['git', 'branch', '--show-current'],
+      MAX_COMMAND_CONTEXT_BYTES
+    ),
     captureOptimizedCommand(pi, ctx, 'git status --short', MAX_COMMAND_CONTEXT_BYTES),
     captureOptionalRawCommand(
       pi,
@@ -136,7 +144,13 @@ async function collectPrContext(pi: ExtensionAPI, ctx: ExtensionCommandContext):
   const baseRange = `${baseBranch}..HEAD`
   const diffRange = `${baseBranch}...HEAD`
   const [commitCount, commits, diffStat] = await Promise.all([
-    captureRawCommand(pi, ctx, `git rev-list --count ${baseRange}`, ['git', 'rev-list', '--count', baseRange], MAX_COMMAND_CONTEXT_BYTES),
+    captureRawCommand(
+      pi,
+      ctx,
+      `git rev-list --count ${baseRange}`,
+      ['git', 'rev-list', '--count', baseRange],
+      MAX_COMMAND_CONTEXT_BYTES
+    ),
     captureOptimizedCommand(pi, ctx, `git log --oneline ${quoteShellArg(baseRange)}`, MAX_COMMAND_CONTEXT_BYTES),
     captureOptimizedCommand(pi, ctx, `git diff ${quoteShellArg(diffRange)} --stat`, MAX_COMMAND_CONTEXT_BYTES)
   ])
@@ -158,7 +172,9 @@ async function collectPrContext(pi: ExtensionAPI, ctx: ExtensionCommandContext):
   return formatPreCollectedContext('/pr pre-collected branch context', [
     `Base branch: ${baseBranch}`,
     `${count} commit${count === 1 ? '' : 's'} exist between ${baseBranch} and HEAD. /pr verified this before starting the agent turn.`,
-    dirty ? 'Uncommitted changes are present; warn briefly but use committed context only.' : 'No uncommitted changes were reported.',
+    dirty
+      ? 'Uncommitted changes are present; warn briefly but use committed context only.'
+      : 'No uncommitted changes were reported.',
     branchName.startsWith('dev/')
       ? `Current branch is local-only dev branch. Suggested PR branch pointer: ${prBranch}`
       : `Use current branch as PR branch: ${prBranch}`,
@@ -187,7 +203,8 @@ async function resolvePrBaseBranch(
       timeout: 30_000
     })
     const configuredBase = (configured.stdout ?? '').trim()
-    if ((configured.code ?? 1) === 0 && configuredBase) return { label: 'PR base branch', output: configuredBase, notes: [] }
+    if ((configured.code ?? 1) === 0 && configuredBase)
+      return { label: 'PR base branch', output: configuredBase, notes: [] }
   }
 
   const originHead = await pi.exec('git', ['symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD'], {
@@ -196,7 +213,11 @@ async function resolvePrBaseBranch(
     timeout: 30_000
   })
   const defaultBranch = (originHead.stdout ?? '').trim().replace(/^origin\//, '')
-  return { label: 'PR base branch', output: (originHead.code ?? 1) === 0 && defaultBranch ? defaultBranch : 'main', notes: [] }
+  return {
+    label: 'PR base branch',
+    output: (originHead.code ?? 1) === 0 && defaultBranch ? defaultBranch : 'main',
+    notes: []
+  }
 }
 
 function captureOptimizedCommand(
@@ -222,10 +243,24 @@ async function captureRawCommand(
 ): Promise<CommandCapture> {
   const [command, ...args] = argv
   if (!command) return { label, output: '', error: 'empty command', notes: [] }
-  const result = await pi.exec(command, args, { cwd: ctx.cwd, signal: ctx.signal, timeout: 30_000 })
-  if ((result.code ?? 1) !== 0) return { label, output: '', error: result.stderr || `${label} failed with exit ${result.code}`, notes: [] }
+  const result = await pi.exec(command, args, {
+    cwd: ctx.cwd,
+    signal: ctx.signal,
+    timeout: 30_000
+  })
+  if ((result.code ?? 1) !== 0)
+    return {
+      label,
+      output: '',
+      error: result.stderr || `${label} failed with exit ${result.code}`,
+      notes: []
+    }
   const capped = headBytes(result.stdout ?? '', maxBytes, `[truncated at ${maxBytes} bytes]`)
-  return { label, output: capped.text, notes: capped.truncation ? [`${label} truncated at ${maxBytes} bytes.`] : [] }
+  return {
+    label,
+    output: capped.text,
+    notes: capped.truncation ? [`${label} truncated at ${maxBytes} bytes.`] : []
+  }
 }
 
 async function captureOptionalRawCommand(
@@ -238,7 +273,11 @@ async function captureOptionalRawCommand(
 ): Promise<CommandCapture> {
   const capture = await captureRawCommand(pi, ctx, label, argv, maxBytes)
   if (!capture.error) return capture
-  return { label, output: fallback, notes: [`${label} unavailable: ${capture.error}`] }
+  return {
+    label,
+    output: fallback,
+    notes: [`${label} unavailable: ${capture.error}`]
+  }
 }
 
 function formatPreCollectedContext(title: string, parts: readonly string[]): string {

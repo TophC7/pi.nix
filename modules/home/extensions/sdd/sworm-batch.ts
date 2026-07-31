@@ -78,10 +78,10 @@ async function firstShip(spec: Spec): Promise<ApplyResult> {
   } catch (error) {
     const rollbackFailures = await rollback(createdIssueIds, epicId)
     const rollbackText = rollbackFailures.length ? ` Rollback failures: ${rollbackFailures.join('; ')}` : ''
-    throw new SpecApplyError(
-      `spec.apply failed during first ship: ${formatError(error)}.${rollbackText}`,
-      { epicId, issueIds: {} }
-    )
+    throw new SpecApplyError(`spec.apply failed during first ship: ${formatError(error)}.${rollbackText}`, {
+      epicId,
+      issueIds: {}
+    })
   }
 }
 
@@ -113,7 +113,11 @@ async function reshipExisting(spec: Spec, epicId: string): Promise<ApplyResult> 
         return { kind: 'updated' as const, slug: task.slug, issueId: known.id }
       }
       const createdIssue = await createIssue(epicId, task)
-      return { kind: 'created' as const, slug: task.slug, issueId: createdIssue.id }
+      return {
+        kind: 'created' as const,
+        slug: task.slug,
+        issueId: createdIssue.id
+      }
     })
   )
   const failures: string[] = []

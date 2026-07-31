@@ -32,7 +32,11 @@ function usageCost(usage: UsageLike | undefined): number {
 
 function entryUsage(entry: unknown): UsageLike | undefined {
   if (!entry || typeof entry !== 'object') return undefined
-  const record = entry as { type?: unknown; message?: unknown; usage?: UsageLike }
+  const record = entry as {
+    type?: unknown
+    message?: unknown
+    usage?: UsageLike
+  }
   if (record.type === 'branch_summary' || record.type === 'compaction') return record.usage
   if (record.type !== 'message' || !record.message || typeof record.message !== 'object') return undefined
   const message = record.message as { role?: unknown; usage?: UsageLike }

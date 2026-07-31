@@ -81,7 +81,10 @@ export async function runCleanup(pi: ExtensionAPI, ctx: ExtensionCommandContext,
     try {
       startOperation(pi, 'cleanup', CLEANUP_TOOLS)
     } catch (error) {
-      ctx.ui.notify(`/cleanup cannot start apply turn: ${error instanceof Error ? error.message : String(error)}`, 'error')
+      ctx.ui.notify(
+        `/cleanup cannot start apply turn: ${error instanceof Error ? error.message : String(error)}`,
+        'error'
+      )
       return
     }
 
@@ -100,7 +103,10 @@ async function captureWorkingTreeDiff(pi: ExtensionAPI, ctx: ExtensionCommandCon
     signal: ctx.signal,
     maxBytes: MAX_CLEANUP_DIFF_BYTES
   })
-  return { text: result.output, ...(result.error ? { error: result.error } : {}) }
+  return {
+    text: result.output,
+    ...(result.error ? { error: result.error } : {})
+  }
 }
 
 export async function runCleanupQuick(pi: ExtensionAPI, ctx: ExtensionCommandContext): Promise<void> {

@@ -78,7 +78,8 @@ function parseFrontmatter(content: string): FrontmatterParse {
   const title = raw.title?.trim()
   const status = (raw.status?.trim() ?? 'draft') as SpecStatus
   if (!title) throw new SpecParseError('Spec frontmatter missing title.')
-  if (!isStatus(status)) throw new SpecParseError(`Spec frontmatter status must be draft | verified | shipped (got ${status}).`)
+  if (!isStatus(status))
+    throw new SpecParseError(`Spec frontmatter status must be draft | verified | shipped (got ${status}).`)
   return {
     frontmatter: {
       title,
@@ -185,7 +186,11 @@ function buildTask(title: string, block: string): SpecTask {
   }
   const meta = parseMetaLine(lines[metaIndex] ?? '')
   if (!meta.slug) throw new SpecParseError(`Task "${title}" meta line missing slug.`)
-  const remaining = lines.slice(0, metaIndex).concat(lines.slice(metaIndex + 1)).join('\n').trim()
+  const remaining = lines
+    .slice(0, metaIndex)
+    .concat(lines.slice(metaIndex + 1))
+    .join('\n')
+    .trim()
   const acceptance = extractAcceptance(remaining)
   return {
     slug: meta.slug,
@@ -216,7 +221,11 @@ function parseMetaLine(line: string): MetaParse {
     if (!key) continue
     if (key === 'slug') out.slug = value
     else if (key === 'id') out.id = value
-    else if (key === 'deps') out.deps = value.split(',').map((d) => d.trim()).filter(Boolean)
+    else if (key === 'deps')
+      out.deps = value
+        .split(',')
+        .map((d) => d.trim())
+        .filter(Boolean)
   }
   return out
 }
@@ -232,7 +241,11 @@ function extractAcceptance(body: string): AcceptanceExtract | undefined {
   if (index < 0) return undefined
   const match = lines[index]!.trim().match(ACCEPTANCE_LINE_RE)
   const raw = match?.[1]?.trim() ?? ''
-  const rest = lines.slice(0, index).concat(lines.slice(index + 1)).join('\n').trim()
+  const rest = lines
+    .slice(0, index)
+    .concat(lines.slice(index + 1))
+    .join('\n')
+    .trim()
   return { value: classifyAcceptance(raw), rest }
 }
 
@@ -249,20 +262,14 @@ export function serializeSpec(spec: Spec): string {
   const titleHeading = `# ${spec.frontmatter.title}`
   const goalBlock = spec.goal.trim() ? `## Goal\n\n${spec.goal.trim()}` : '## Goal\n'
   const tasksBlock = renderTasks(spec.tasks)
-  const extrasBlock = spec.extras
-    .map((section) => `## ${section.heading}\n\n${section.body.trim()}`)
-    .join('\n\n')
-  return [
-    frontmatter,
-    titleHeading,
-    goalBlock,
-    tasksBlock,
-    extrasBlock
-  ]
-    .filter((part) => part.trim().length > 0)
-    .join('\n\n')
-    .replace(/\n{3,}/g, '\n\n')
-    .trimEnd() + '\n'
+  const extrasBlock = spec.extras.map((section) => `## ${section.heading}\n\n${section.body.trim()}`).join('\n\n')
+  return (
+    [frontmatter, titleHeading, goalBlock, tasksBlock, extrasBlock]
+      .filter((part) => part.trim().length > 0)
+      .join('\n\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trimEnd() + '\n'
+  )
 }
 
 function renderFrontmatter(fm: SpecFrontmatter): string {

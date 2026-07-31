@@ -36,7 +36,9 @@ export async function runWork(pi: ExtensionAPI, ctx: ExtensionCommandContext, ar
     return
   }
   const path = specPath(ctx.cwd, slug)
-  pi.sendUserMessage(buildWorkPrompt(slug, path, epicId), { deliverAs: 'followUp' })
+  pi.sendUserMessage(buildWorkPrompt(slug, path, epicId), {
+    deliverAs: 'followUp'
+  })
   ctx.ui.notify(`/spec:work: handing off ${slug} (${epicId}) to agent for execution.`, 'info')
 }
 

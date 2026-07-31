@@ -60,9 +60,14 @@ function dispatch(parsed: ParsedCommand): BuddyActionResult {
     case 'unmute':
       return buddyUnmute()
     case 'mode':
-      return buddyMode({ mode: option(parsed, 'mode') ?? option(parsed, 'voice') ?? parsed.rest[0], guard: option(parsed, 'guard') ?? option(parsed, 'reasoning') })
+      return buddyMode({
+        mode: option(parsed, 'mode') ?? option(parsed, 'voice') ?? parsed.rest[0],
+        guard: option(parsed, 'guard') ?? option(parsed, 'reasoning')
+      })
     case 'guard':
-      return buddyMode({ guard: option(parsed, 'guard') ?? parsed.rest[0] ?? 'on' })
+      return buddyMode({
+        guard: option(parsed, 'guard') ?? parsed.rest[0] ?? 'on'
+      })
     case 'reasoning':
       return dispatchReasoning(parsed)
     case 'forget':
@@ -70,15 +75,25 @@ function dispatch(parsed: ParsedCommand): BuddyActionResult {
     case 'help':
       return buddyHelp()
     default:
-      return { text: 'Unknown /buddy action "' + parsed.action + '".\n\n' + buddyUsage(), isError: true }
+      return {
+        text: 'Unknown /buddy action "' + parsed.action + '".\n\n' + buddyUsage(),
+        isError: true
+      }
   }
 }
 
 function dispatchReasoning(parsed: ParsedCommand): BuddyActionResult {
   const subcommand = parsed.rest[0] ?? 'status'
   if (subcommand === 'status') return buddyReasoningStatus({ cwd: option(parsed, 'cwd') })
-  if (subcommand === 'purge') return buddyReasoningPurge({ scope: option(parsed, 'scope') ?? parsed.rest[1], session_id: option(parsed, 'session_id') ?? option(parsed, 'session') })
-  return { text: 'Unknown /buddy reasoning action "' + subcommand + '".\n\n' + buddyUsage(), isError: true }
+  if (subcommand === 'purge')
+    return buddyReasoningPurge({
+      scope: option(parsed, 'scope') ?? parsed.rest[1],
+      session_id: option(parsed, 'session_id') ?? option(parsed, 'session')
+    })
+  return {
+    text: 'Unknown /buddy reasoning action "' + subcommand + '".\n\n' + buddyUsage(),
+    isError: true
+  }
 }
 
 function parseBuddyCommand(args: string): ParsedCommand {
@@ -117,7 +132,9 @@ function numberOption(parsed: ParsedCommand, name: string): number | undefined {
   return Number.isFinite(number) ? number : undefined
 }
 
-function buddyHelp(): BuddyActionResult { return { text: buddyUsage() } }
+function buddyHelp(): BuddyActionResult {
+  return { text: buddyUsage() }
+}
 
 function buddyUsage(): string {
   return [
@@ -138,4 +155,3 @@ function buddyUsage(): string {
     '  respawn'
   ].join('\n')
 }
-

@@ -144,14 +144,23 @@ class ConfigDialog implements DialogContent {
     const sections = this.sections()
     const section = this.activeSection(sections)
     const rows = section ? getConfigSectionRows(section, this.ctx) : []
-    const header = renderDialogHeader({ title: 'Config', theme: this.theme, width })
+    const header = renderDialogHeader({
+      title: 'Config',
+      theme: this.theme,
+      width
+    })
     const tabs = renderTabs({
       tabs: sections.map((entry) => ({ id: entry.id, label: entry.title })),
       activeId: section?.id,
       width,
       theme: this.theme
     })
-    const footer = renderDialogFooter({ theme: this.theme, width, keys: FOOTER_KEYS, status: this.status })
+    const footer = renderDialogFooter({
+      theme: this.theme,
+      width,
+      keys: FOOTER_KEYS,
+      status: this.status
+    })
     const bodyRows = rowBudget()
     const visibleBudget = Math.max(8, bodyRows - 6)
     const safeIndex = clamp(this.selectedRowIndex, 0, Math.max(0, rows.length - 1))
@@ -198,7 +207,12 @@ class ConfigDialog implements DialogContent {
       renderDialogDivider({ theme: this.theme, width }),
       ...padRows(rows, bodyRows, width),
       renderDialogDivider({ theme: this.theme, width }),
-      renderDialogFooter({ theme: this.theme, width, keys: MODEL_PICKER_FOOTER, status })
+      renderDialogFooter({
+        theme: this.theme,
+        width,
+        keys: MODEL_PICKER_FOOTER,
+        status
+      })
     ]
   }
 
@@ -207,18 +221,30 @@ class ConfigDialog implements DialogContent {
     const inputWidth = Math.max(12, width - 2)
     const renderedInput = mode.input.render(inputWidth)[0] ?? '> '
     const rows = [
-      this.theme.fg('muted', padLine(fitLine(mode.row.description ?? 'Enter a value, or leave empty to clear.', width), width)),
+      this.theme.fg(
+        'muted',
+        padLine(fitLine(mode.row.description ?? 'Enter a value, or leave empty to clear.', width), width)
+      ),
       mode.row.detail ? this.theme.fg('dim', padLine(fitLine(mode.row.detail, width), width)) : '',
       '',
       this.theme.fg('accent', padLine(fitLine(` ${mode.row.fieldLabel ?? 'Value'}`, width), width)),
       padLine(fitLine(renderedInput, width), width)
     ]
     return [
-      renderDialogHeader({ title: `${mode.row.label} ${mode.row.fieldLabel ?? 'value'}`, theme: this.theme, width }),
+      renderDialogHeader({
+        title: `${mode.row.label} ${mode.row.fieldLabel ?? 'value'}`,
+        theme: this.theme,
+        width
+      }),
       renderDialogDivider({ theme: this.theme, width }),
       ...padRows(rows, bodyRows, width),
       renderDialogDivider({ theme: this.theme, width }),
-      renderDialogFooter({ theme: this.theme, width, keys: TEXT_FOOTER, status: mode.error ?? 'Enter saves, Esc backs out' })
+      renderDialogFooter({
+        theme: this.theme,
+        width,
+        keys: TEXT_FOOTER,
+        status: mode.error ?? 'Enter saves, Esc backs out'
+      })
     ]
   }
 
@@ -371,7 +397,13 @@ class ConfigDialog implements DialogContent {
         input,
         selectedIndex: 0,
         currentValue,
-        choices: [{ value: 'default', label: 'default', detail: 'use current session model' }],
+        choices: [
+          {
+            value: 'default',
+            label: 'default',
+            detail: 'use current session model'
+          }
+        ],
         error: formatRuntimeProfileError(error)
       }
     }
@@ -389,13 +421,19 @@ class ConfigDialog implements DialogContent {
   private initialModelIndex(currentValue: string | undefined, choices: readonly ModelChoice[]): number {
     const current = currentValue ?? 'default'
     if (current === 'default') return 0
-    return Math.max(0, choices.findIndex((choice) => choice.value === current))
+    return Math.max(
+      0,
+      choices.findIndex((choice) => choice.value === current)
+    )
   }
 
   private moveModelSelection(mode: Extract<DialogMode, { kind: 'model' }>, delta: number): void {
     const choices = this.filteredModelChoices(mode)
     if (choices.length === 0) return
-    this.mode = { ...mode, selectedIndex: clamp(mode.selectedIndex + delta, 0, choices.length - 1) }
+    this.mode = {
+      ...mode,
+      selectedIndex: clamp(mode.selectedIndex + delta, 0, choices.length - 1)
+    }
     this.tui.requestRender()
   }
 
@@ -417,7 +455,12 @@ class ConfigDialog implements DialogContent {
     if (!trimmed || trimmed === 'default' || trimmed === 'unset' || trimmed === 'clear') {
       const result = this.saveRow(row, undefined)
       if (!result.ok) {
-        this.mode = { kind: 'text', row, input: this.mode.kind === 'text' ? this.mode.input : new Input(), error: result.error }
+        this.mode = {
+          kind: 'text',
+          row,
+          input: this.mode.kind === 'text' ? this.mode.input : new Input(),
+          error: result.error
+        }
         this.tui.requestRender()
         return
       }
@@ -429,14 +472,24 @@ class ConfigDialog implements DialogContent {
 
     const error = row.validate?.(trimmed)
     if (error) {
-      this.mode = { kind: 'text', row, input: this.mode.kind === 'text' ? this.mode.input : new Input(), error }
+      this.mode = {
+        kind: 'text',
+        row,
+        input: this.mode.kind === 'text' ? this.mode.input : new Input(),
+        error
+      }
       this.tui.requestRender()
       return
     }
 
     const result = this.saveRow(row, trimmed)
     if (!result.ok) {
-      this.mode = { kind: 'text', row, input: this.mode.kind === 'text' ? this.mode.input : new Input(), error: result.error }
+      this.mode = {
+        kind: 'text',
+        row,
+        input: this.mode.kind === 'text' ? this.mode.input : new Input(),
+        error: result.error
+      }
       this.tui.requestRender()
       return
     }
@@ -458,7 +511,9 @@ class ConfigDialog implements DialogContent {
     const row = this.activeRows()[this.selectedRowIndex]
     if (!row) return
     const result = this.saveRow(row, undefined)
-    this.status = result.ok ? `${row.label} ${fieldLabel(row)} → ${row.kind === 'text' ? row.unsetLabel ?? 'unset' : 'default'}` : result.error
+    this.status = result.ok
+      ? `${row.label} ${fieldLabel(row)} → ${row.kind === 'text' ? (row.unsetLabel ?? 'unset') : 'default'}`
+      : result.error
     this.tui.requestRender()
   }
 
@@ -493,7 +548,12 @@ class ConfigDialog implements DialogContent {
 
   private detailLines(row: ConfigRegistryRow, width: number): string[] {
     const source = configRowSource(row, this.ctx)
-    const action = row.kind === 'model' ? 'Enter opens searchable model list.' : row.kind === 'thinking' ? 'Enter cycles thinking level.' : 'Enter edits value.'
+    const action =
+      row.kind === 'model'
+        ? 'Enter opens searchable model list.'
+        : row.kind === 'thinking'
+          ? 'Enter cycles thinking level.'
+          : 'Enter edits value.'
     const lines = [
       this.theme.fg('accent', padLine(fitLine(` [ ${row.label} ${fieldLabel(row)} ]`, width), width)),
       this.theme.fg('muted', padLine(fitLine(` ${row.description ?? 'Registered extension setting.'}`, width), width)),
@@ -515,7 +575,12 @@ class ConfigDialog implements DialogContent {
     ].filter(Boolean)
   }
 
-  private modelChoiceLine(choice: ModelChoice, selected: boolean, currentValue: string | undefined, width: number): string {
+  private modelChoiceLine(
+    choice: ModelChoice,
+    selected: boolean,
+    currentValue: string | undefined,
+    width: number
+  ): string {
     const current = choice.value === (currentValue ?? 'default')
     const cursor = selected ? this.theme.fg('accent', this.theme.bold('>')) : ' '
     const flag = current ? this.theme.fg('success', '*') : ' '
@@ -555,14 +620,15 @@ function fieldLabel(row: ConfigRegistryRow): string {
 }
 
 function rowValueLabel(row: ConfigRegistryRow, value: string | undefined): string {
-  if (!value) return row.kind === 'text' ? row.unsetLabel ?? 'unset' : 'default'
+  if (!value) return row.kind === 'text' ? (row.unsetLabel ?? 'unset') : 'default'
   if (row.kind !== 'model') return value
   const slash = value.indexOf('/')
   return slash >= 0 ? value.slice(slash + 1) : value
 }
 
 function rowBudget(): number {
-  const rows = typeof process.stdout.rows === 'number' && Number.isFinite(process.stdout.rows) ? process.stdout.rows : 36
+  const rows =
+    typeof process.stdout.rows === 'number' && Number.isFinite(process.stdout.rows) ? process.stdout.rows : 36
   return clamp(Math.floor(rows * 0.55), 12, 26)
 }
 
@@ -577,7 +643,10 @@ function padRows(lines: readonly string[], rowCount: number, width: number): str
 }
 
 function scrollWindow<T>(items: readonly T[], selectedIndex: number, visibleRows: number): readonly T[] {
-  return items.slice(windowStart(items.length, selectedIndex, visibleRows), windowStart(items.length, selectedIndex, visibleRows) + visibleRows)
+  return items.slice(
+    windowStart(items.length, selectedIndex, visibleRows),
+    windowStart(items.length, selectedIndex, visibleRows) + visibleRows
+  )
 }
 
 function windowStart(itemCount: number, selectedIndex: number, visibleRows: number): number {

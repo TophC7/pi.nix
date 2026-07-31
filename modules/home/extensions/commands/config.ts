@@ -18,7 +18,10 @@ export function getCommandConfig(command: ManagedCommand): CommandModelConfig {
 }
 
 export function saveCommandConfig(command: ManagedCommand, commandConfig: CommandModelConfig): void {
-  const next: ConfigFile = { ...readConfig(), [command]: readCommandProfile(commandConfig, `${CONFIG_PATH} /${command}`) }
+  const next: ConfigFile = {
+    ...readConfig(),
+    [command]: readCommandProfile(commandConfig, `${CONFIG_PATH} /${command}`)
+  }
   writeConfig(next)
 }
 

@@ -2,11 +2,26 @@ import { getDumpStat, getPeakStat, STAT_NAMES, type CompanionBones, type StatNam
 import { type Species } from './species.ts'
 
 const STAT_TRAIT: Record<StatName, { readonly strength: string; readonly weakness: string }> = {
-  DEBUGGING: { strength: 'an uncanny nose for bugs', weakness: 'missing the obvious bugs right in front of it' },
-  PATIENCE: { strength: 'the patience of a geological epoch', weakness: 'the patience of a caffeinated squirrel' },
-  CHAOS: { strength: 'a gift for creative destruction', weakness: 'an alarming tendency toward creative destruction' },
-  WISDOM: { strength: 'deep architectural insight', weakness: 'overthinking everything into paralysis' },
-  SNARK: { strength: 'devastatingly precise feedback', weakness: 'roasting your code when it should be helping' }
+  DEBUGGING: {
+    strength: 'an uncanny nose for bugs',
+    weakness: 'missing the obvious bugs right in front of it'
+  },
+  PATIENCE: {
+    strength: 'the patience of a geological epoch',
+    weakness: 'the patience of a caffeinated squirrel'
+  },
+  CHAOS: {
+    strength: 'a gift for creative destruction',
+    weakness: 'an alarming tendency toward creative destruction'
+  },
+  WISDOM: {
+    strength: 'deep architectural insight',
+    weakness: 'overthinking everything into paralysis'
+  },
+  SNARK: {
+    strength: 'devastatingly precise feedback',
+    weakness: 'roasting your code when it should be helping'
+  }
 }
 
 export interface SpeciesPersonality {
@@ -23,7 +38,9 @@ const DEFAULT_PERSONALITY: SpeciesPersonality = {
 
 const SPECIES_DATA: Partial<Record<Species, SpeciesPersonality>> = {
   'Void Cat': {
-    bios: ['A small void with {peak_trait}, mostly concerned with whether your abstractions deserve to exist despite {dump_weakness}.'],
+    bios: [
+      'A small void with {peak_trait}, mostly concerned with whether your abstractions deserve to exist despite {dump_weakness}.'
+    ],
     voice: 'Dry, spare, slightly haunted. Compliments are rare but precise.',
     never: ['Never sound sunny', 'Never explain the joke']
   },
@@ -33,7 +50,9 @@ const SPECIES_DATA: Partial<Record<Species, SpeciesPersonality>> = {
     never: ['Never be vague about what smelled wrong', 'Never overcomplicate a simple trail']
   },
   'Data Drake': {
-    bios: ['A little data dragon with {peak_trait}, prone to hoarding useful facts and occasionally slowed by {dump_weakness}.'],
+    bios: [
+      'A little data dragon with {peak_trait}, prone to hoarding useful facts and occasionally slowed by {dump_weakness}.'
+    ],
     voice: 'Grand but concise. Treats good evidence like treasure.',
     never: ['Never pretend guesses are data', 'Never ramble']
   },
@@ -77,9 +96,10 @@ export function generateBio(bones: CompanionBones): string {
   const dump = getDumpStat(bones.stats)
   const personality = lookupSpecies(bones.species)
   const index = bones.stats[peak] % personality.bios.length
-  const bio = personality.bios[index]!
-    .replaceAll('{peak_trait}', STAT_TRAIT[peak].strength)
-    .replaceAll('{dump_weakness}', STAT_TRAIT[dump].weakness)
+  const bio = personality.bios[index]!.replaceAll('{peak_trait}', STAT_TRAIT[peak].strength).replaceAll(
+    '{dump_weakness}',
+    STAT_TRAIT[dump].weakness
+  )
   const flavor = RARITY_FLAVOR[bones.rarity]
 
   return flavor ? `${bio} ${flavor}` : bio

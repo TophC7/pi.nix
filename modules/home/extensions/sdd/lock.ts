@@ -77,16 +77,7 @@ function checkDraftBlock(toolName: string, input: unknown): string | undefined {
 // Keep these tight. The smallest viable set is what guards us against the
 // agent reaching for unrelated tools mid-operation.
 
-export const CHECK_TOOLS: readonly string[] = [
-  'read',
-  'grep',
-  'find',
-  'ls',
-  'bash',
-  'subagent',
-  'ask_user',
-  'write'
-]
+export const CHECK_TOOLS: readonly string[] = ['read', 'grep', 'find', 'ls', 'bash', 'subagent', 'ask_user', 'write']
 
 export const WORK_TOOLS: readonly string[] = [
   'read',

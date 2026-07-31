@@ -73,7 +73,8 @@ export async function runRtkOptimizedCommand(
   const config = readRtkConfig()
   const notes: string[] = [`RTK config: ${RTK_CONFIG_PATH}`]
   if (!config.enabled) return disabledResult(command, 'RTK optimizer is disabled in config.', notes)
-  if (config.mode !== 'rewrite') return disabledResult(command, `RTK optimizer mode is ${config.mode}; rewrite mode required.`, notes)
+  if (config.mode !== 'rewrite')
+    return disabledResult(command, `RTK optimizer mode is ${config.mode}; rewrite mode required.`, notes)
 
   const rtk = await resolveRtk(pi, options)
   if (!rtk) return disabledResult(command, 'RTK executable was not found.', notes)
@@ -87,7 +88,11 @@ export async function runRtkOptimizedCommand(
   const rewrittenCommand = rewritten.stdout.trim()
   if ((rewritten.code !== 0 && rewritten.code !== 3) || !rewrittenCommand || rewrittenCommand === command) {
     const detail = [rewritten.stderr.trim(), rewritten.stdout.trim()].filter(Boolean).join(' ')
-    return disabledResult(command, detail || `RTK rewrite did not produce an optimized command (exit ${rewritten.code}).`, notes)
+    return disabledResult(
+      command,
+      detail || `RTK rewrite did not produce an optimized command (exit ${rewritten.code}).`,
+      notes
+    )
   }
   notes.push(`RTK rewrite: ${command} -> ${rewrittenCommand}`)
 
@@ -141,7 +146,11 @@ export async function captureOptimizedCommand(
     return {
       label: rtk.command,
       output: rtk.stdout,
-      ...(rtk.code === 0 ? {} : { error: rtk.stderr || `${rtk.command} failed with exit ${rtk.code}` }),
+      ...(rtk.code === 0
+        ? {}
+        : {
+            error: rtk.stderr || `${rtk.command} failed with exit ${rtk.code}`
+          }),
       notes: rtk.truncated ? [`${rtk.command} truncated at ${options.maxBytes} bytes.`] : []
     }
   }
@@ -153,7 +162,12 @@ export async function captureOptimizedCommand(
     timeout
   })
   if ((fallback.code ?? 1) !== 0) {
-    return { label: command, output: '', error: fallback.stderr || `${command} failed`, notes: [] }
+    return {
+      label: command,
+      output: '',
+      error: fallback.stderr || `${command} failed`,
+      notes: []
+    }
   }
   return {
     label: command,
@@ -192,8 +206,18 @@ function errorCode(error: unknown): string | undefined {
 
 async function resolveRtk(pi: RtkExecHost, options: RtkCommandOptions): Promise<string | undefined> {
   if (cachedRtkPath !== undefined) return cachedRtkPath ?? undefined
-  const result = await pi.exec('which', ['rtk'], { cwd: options.cwd, signal: options.signal, timeout: 1000 })
-  cachedRtkPath = result.code === 0 ? result.stdout.split(/\r?\n/).map((line) => line.trim()).find(Boolean) ?? null : null
+  const result = await pi.exec('which', ['rtk'], {
+    cwd: options.cwd,
+    signal: options.signal,
+    timeout: 1000
+  })
+  cachedRtkPath =
+    result.code === 0
+      ? (result.stdout
+          .split(/\r?\n/)
+          .map((line) => line.trim())
+          .find(Boolean) ?? null)
+      : null
   return cachedRtkPath ?? undefined
 }
 
@@ -229,7 +253,10 @@ function withStdoutLimit(command: string, maxBytes: number | undefined): string 
   ].join('; ')
 }
 
-function capStdout(stdout: string, maxBytes: number | undefined): { readonly stdout: string; readonly truncated: boolean } {
+function capStdout(
+  stdout: string,
+  maxBytes: number | undefined
+): { readonly stdout: string; readonly truncated: boolean } {
   if (!maxBytes) return { stdout, truncated: false }
   const capped = headBytes(stdout, maxBytes, `[truncated at ${maxBytes} bytes]`)
   return { stdout: capped.text, truncated: Boolean(capped.truncation) }

@@ -6,7 +6,15 @@ import { XP_REWARDS, levelBar, levelFromXp } from './leveling.ts'
 import { generateBio } from './personality.ts'
 import { roll, seededIndex } from './rng.ts'
 import { sanitizeMemory, sanitizeName } from './sanitize.ts'
-import { SPECIES_LIST, calculateMood, generateName, getReaction, isSpecies, renderSprite, type Mood } from './species.ts'
+import {
+  SPECIES_LIST,
+  calculateMood,
+  generateName,
+  getReaction,
+  isSpecies,
+  renderSprite,
+  type Mood
+} from './species.ts'
 import { STAT_NAMES, type Companion, type StatName } from './types.ts'
 import { renderMarkdownBubble, renderSpeechBubble } from './bubble.ts'
 
@@ -176,10 +184,20 @@ export function rememberCompanion(db: Database, content: string, importance = 1)
 
   const id = randomUUID()
   const boundedImportance = Math.max(1, Math.min(5, Math.round(importance)))
-  db.query('INSERT INTO memories (id, companion_id, content, importance, tag) VALUES (?, ?, ?, ?, ?)')
-    .run(id, companion.id, cleanContent, boundedImportance, 'raw')
+  db.query('INSERT INTO memories (id, companion_id, content, importance, tag) VALUES (?, ?, ?, ?, ?)').run(
+    id,
+    companion.id,
+    cleanContent,
+    boundedImportance,
+    'raw'
+  )
 
-  return { id, companionId: companion.id, content: cleanContent, importance: boundedImportance }
+  return {
+    id,
+    companionId: companion.id,
+    content: cleanContent,
+    importance: boundedImportance
+  }
 }
 
 export function petCompanion(db: Database): PetResult {
@@ -215,9 +233,7 @@ export function observeCompanion(db: Database, summary: string, mode?: string): 
   const companion = refreshMood(db, row.id, xp.leveledUp)
   const voiceMode = isVoiceMode(mode) ? mode : isVoiceMode(row.observer_mode) ? row.observer_mode : 'both'
   const baseReaction = getReaction(companion.species, 'xp', toMood(companion.mood), `${cleanSummary}:${companion.xp}`)
-  const reaction = xp.leveledUp
-    ? `✨ ${companion.name} leveled up to ${xp.newLevel}! ${baseReaction}`
-    : baseReaction
+  const reaction = xp.leveledUp ? `✨ ${companion.name} leveled up to ${xp.newLevel}! ${baseReaction}` : baseReaction
   storeReaction(
     db,
     companion,
@@ -281,7 +297,9 @@ export function forgetCompanionData(db: Database, scope: ForgetScope = 'memories
   if (scope === 'progress') {
     const deletedEvents = db.query('DELETE FROM xp_events WHERE companion_id = ?').run(row.id).changes
     const deletedEvolution = db.query('DELETE FROM evolution_history WHERE companion_id = ?').run(row.id).changes
-    db.query("UPDATE companions SET xp = 0, level = 1, mood = 'happy', stat_points_available = 0 WHERE id = ?").run(row.id)
+    db.query("UPDATE companions SET xp = 0, level = 1, mood = 'happy', stat_points_available = 0 WHERE id = ?").run(
+      row.id
+    )
     return deletedEvents + deletedEvolution
   }
 
@@ -324,10 +342,17 @@ export function loadCompanion(db: Database, row: CompanionRow | null, userIdOver
 export function awardXp(db: Database, companionId: string, eventType: string): XpResult {
   const xpGained = XP_REWARDS[eventType] ?? 1
   const eventId = randomUUID()
-  db.query('INSERT INTO xp_events (id, companion_id, event_type, xp_gained) VALUES (?, ?, ?, ?)')
-    .run(eventId, companionId, eventType, xpGained)
+  db.query('INSERT INTO xp_events (id, companion_id, event_type, xp_gained) VALUES (?, ?, ?, ?)').run(
+    eventId,
+    companionId,
+    eventType,
+    xpGained
+  )
 
-  const row = db.query('SELECT xp, level FROM companions WHERE id = ?').get(companionId) as { xp?: number; level?: number } | null
+  const row = db.query('SELECT xp, level FROM companions WHERE id = ?').get(companionId) as {
+    xp?: number
+    level?: number
+  } | null
   const newXp = (row?.xp ?? 0) + xpGained
   const newLevel = levelFromXp(newXp)
   const leveledUp = newLevel > (row?.level ?? 1)
@@ -337,7 +362,10 @@ export function awardXp(db: Database, companionId: string, eventType: string): X
 }
 
 function canAwardPetXp(db: Database, companionId: string): boolean {
-  const row = db.query("SELECT 1 FROM xp_events WHERE companion_id = ? AND event_type = 'pet' AND created_at > datetime('now', '-1 hour') LIMIT 1")
+  const row = db
+    .query(
+      "SELECT 1 FROM xp_events WHERE companion_id = ? AND event_type = 'pet' AND created_at > datetime('now', '-1 hour') LIMIT 1"
+    )
     .get(companionId) as Record<string, unknown> | null
   return row === null
 }
@@ -345,14 +373,22 @@ function canAwardPetXp(db: Database, companionId: string): boolean {
 function currentXpResult(row: CompanionRow): XpResult {
   const newXp = row.xp ?? 0
   const newLevel = levelFromXp(newXp)
-  return { xpGained: 0, newXp, newLevel, leveledUp: false, levelInfo: levelBar(newXp) }
+  return {
+    xpGained: 0,
+    newXp,
+    newLevel,
+    leveledUp: false,
+    levelInfo: levelBar(newXp)
+  }
 }
 
 export function recalculateMood(db: Database, companionId: string, leveledUp = false): string {
   if (leveledUp) return 'happy'
-  const xpCount = db.query("SELECT count(*) AS count FROM xp_events WHERE companion_id = ? AND created_at > datetime('now', '-1 hour')")
+  const xpCount = db
+    .query("SELECT count(*) AS count FROM xp_events WHERE companion_id = ? AND created_at > datetime('now', '-1 hour')")
     .get(companionId) as { count?: number } | null
-  const memoryCount = db.query("SELECT count(*) AS count FROM memories WHERE companion_id = ? AND created_at > datetime('now', '-1 hour')")
+  const memoryCount = db
+    .query("SELECT count(*) AS count FROM memories WHERE companion_id = ? AND created_at > datetime('now', '-1 hour')")
     .get(companionId) as { count?: number } | null
 
   return calculateMood(new Array(xpCount?.count ?? 0), memoryCount?.count ?? 0)
@@ -369,7 +405,15 @@ function refreshMood(db: Database, companionId: string, leveledUp: boolean): Com
 }
 
 function toMood(value: string): Mood {
-  if (value === 'happy' || value === 'content' || value === 'neutral' || value === 'curious' || value === 'grumpy' || value === 'exhausted') return value
+  if (
+    value === 'happy' ||
+    value === 'content' ||
+    value === 'neutral' ||
+    value === 'curious' ||
+    value === 'grumpy' ||
+    value === 'exhausted'
+  )
+    return value
   return 'neutral'
 }
 

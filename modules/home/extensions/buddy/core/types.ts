@@ -25,16 +25,17 @@ export interface CompanionSoul {
   readonly personalityBio: string
 }
 
-export type Companion = CompanionBones & CompanionSoul & {
-  readonly id: string
-  readonly level: number
-  readonly xp: number
-  readonly mood: string
-  readonly availablePoints: number
-  readonly hatchedAt: number
-  readonly observerMode: string
-  readonly guardMode: boolean
-}
+export type Companion = CompanionBones &
+  CompanionSoul & {
+    readonly id: string
+    readonly level: number
+    readonly xp: number
+    readonly mood: string
+    readonly availablePoints: number
+    readonly hatchedAt: number
+    readonly observerMode: string
+    readonly guardMode: boolean
+  }
 
 export const RARITY_WEIGHTS: Record<Rarity, number> = {
   common: 60,

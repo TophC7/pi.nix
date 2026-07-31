@@ -19,7 +19,7 @@ export type PersistedSessionState =
 const EMPTY_CONTEXT_HASH = digestText('claude-context-v2')
 
 export function restoredSessionState(
-  entries: Array<{ type: string; customType?: string; data?: unknown }>,
+  entries: Array<{ type: string; customType?: string; data?: unknown }>
 ): PersistedSessionState | undefined {
   let latest: unknown
   for (let index = entries.length - 1; index >= 0; index--) {
@@ -32,17 +32,13 @@ export function restoredSessionState(
   return isPersistedState(latest) ? latest : undefined
 }
 
-export function priorMessages(
-  messages: Context['messages'],
-): Context['messages'] {
+export function priorMessages(messages: Context['messages']): Context['messages'] {
   return messages.slice(0, currentTurnStart(messages))
 }
 
 export function currentPrompt(messages: Context['messages']): InputContent[] {
   const blocks: InputContent[] = []
-  for (const message of messages.slice(
-    currentTurnStart(messages),
-  ) as UserMessage[]) {
+  for (const message of messages.slice(currentTurnStart(messages)) as UserMessage[]) {
     appendUserContent(blocks, message)
   }
   return blocks
@@ -56,8 +52,8 @@ export function bootstrapPrompt(messages: Context['messages']): InputContent[] {
       text:
         'Continue this Pi-managed conversation. The JSON transcript below is authoritative prior context. ' +
         'Do not describe the transcript; respond to its final user turn.\n\n' +
-        `<pi_transcript>\n${JSON.stringify(transcript)}\n</pi_transcript>`,
-    },
+        `<pi_transcript>\n${JSON.stringify(transcript)}\n</pi_transcript>`
+    }
   ]
   const current = messages.slice(currentTurnStart(messages)) as UserMessage[]
   for (const message of current) {
@@ -69,8 +65,8 @@ export function bootstrapPrompt(messages: Context['messages']): InputContent[] {
         source: {
           type: 'base64',
           media_type: block.mimeType,
-          data: block.data,
-        },
+          data: block.data
+        }
       })
     }
   }
@@ -78,25 +74,17 @@ export function bootstrapPrompt(messages: Context['messages']): InputContent[] {
 }
 
 export function contextDigest(messages: Context['messages']): ContextDigest {
-  return extendContextDigest(
-    { contextHash: EMPTY_CONTEXT_HASH, messageCount: 0 },
-    messages,
-  )
+  return extendContextDigest({ contextHash: EMPTY_CONTEXT_HASH, messageCount: 0 }, messages)
 }
 
-export function extendContextDigest(
-  prefix: ContextDigest,
-  messages: Context['messages'],
-): ContextDigest {
+export function extendContextDigest(prefix: ContextDigest, messages: Context['messages']): ContextDigest {
   let contextHash = prefix.contextHash
   for (const message of messages) {
-    contextHash = digestText(
-      `${contextHash}\u0000${JSON.stringify(hashMessage(message))}`,
-    )
+    contextHash = digestText(`${contextHash}\u0000${JSON.stringify(hashMessage(message))}`)
   }
   return {
     contextHash,
-    messageCount: prefix.messageCount + messages.length,
+    messageCount: prefix.messageCount + messages.length
   }
 }
 
@@ -112,16 +100,15 @@ function appendUserContent(blocks: InputContent[], message: UserMessage): void {
     return
   }
   for (const block of message.content) {
-    if (block.type === 'text' && block.text)
-      blocks.push({ type: 'text', text: block.text })
+    if (block.type === 'text' && block.text) blocks.push({ type: 'text', text: block.text })
     else if (block.type === 'image') {
       blocks.push({
         type: 'image',
         source: {
           type: 'base64',
           media_type: block.mimeType,
-          data: block.data,
-        },
+          data: block.data
+        }
       })
     }
   }
@@ -136,8 +123,7 @@ function hashMessage(message: unknown): unknown {
 }
 
 function transform(value: unknown, omitImageData: boolean): unknown {
-  if (Array.isArray(value))
-    return value.map((item) => transform(item, omitImageData))
+  if (Array.isArray(value)) return value.map((item) => transform(item, omitImageData))
   if (!value || typeof value !== 'object') return value
   const source = value as Record<string, unknown>
   const result: Record<string, unknown> = {}

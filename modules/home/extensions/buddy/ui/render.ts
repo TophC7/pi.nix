@@ -54,7 +54,10 @@ export function renderBuddyPetTop(context: BuddyRenderContext): readonly string[
   if (!cachedCompanion) return []
   const reaction = activeReaction(cachedCompanion)
   if (reaction?.source !== 'pet') return []
-  const spriteWidth = Math.max(...renderBuddyInputSprite(cachedCompanion, { maxWidth: context.width }).map((line) => visibleWidth(line)), 1)
+  const spriteWidth = Math.max(
+    ...renderBuddyInputSprite(cachedCompanion, { maxWidth: context.width }).map((line) => visibleWidth(line)),
+    1
+  )
   const hearts = ['♥   ♥', ' ♥ ♥ ', '♥ ♥ ♥']
   return [centerPlain(hearts[(context.tick ?? 0) % hearts.length]!, Math.min(context.width, spriteWidth))]
 }
@@ -64,14 +67,12 @@ export function renderBuddyFooter(context: BuddyRenderContext): readonly string[
 
   const reaction = activeReaction(cachedCompanion)
   const eye = (reaction?.eyeOverride as Eye | undefined) || cachedCompanion.eye
-  const compactFace = context.width < FOOTER_BUDDY_MAX_TERMINAL_WIDTH ? ` ${renderFace({ ...cachedCompanion, eye })}` : ''
+  const compactFace =
+    context.width < FOOTER_BUDDY_MAX_TERMINAL_WIDTH ? ` ${renderFace({ ...cachedCompanion, eye })}` : ''
   return [fitPlain(`${cachedCompanion.name}${compactFace}`, context.width)]
 }
 
-export function renderBuddyInputSprite(
-  companion: Companion,
-  options: BuddyInputSpriteOptions = {}
-): readonly string[] {
+export function renderBuddyInputSprite(companion: Companion, options: BuddyInputSpriteOptions = {}): readonly string[] {
   const sprite = rawSpriteLines(companion, options)
   if (sprite.length === 0) return []
   return normalizeLines(sprite, options.maxWidth)
@@ -86,14 +87,16 @@ export function renderBuddyPresenceSprite(
 
   const includeName = options.includeName ?? false
   const normalized = normalizeLines(sprite, options.maxWidth, includeName ? companion.name : undefined)
-  const namedSprite = includeName ? insertNameBeforeFeet(normalized, companion.name, visibleWidth(normalized[0] ?? '')) : normalized
+  const namedSprite = includeName
+    ? insertNameBeforeFeet(normalized, companion.name, visibleWidth(normalized[0] ?? ''))
+    : normalized
   return options.shiftDown ? ['', ...namedSprite] : namedSprite
 }
 
 function rawSpriteLines(companion: Companion, options: BuddyPresenceSpriteOptions | BuddyInputSpriteOptions): string[] {
   const eye = options.eye || companion.eye
   const lines = renderSprite({ ...companion, eye }, options.frame ?? 0)
-    .map((line) => options.blink && eye ? line.replaceAll(eye, '-') : line)
+    .map((line) => (options.blink && eye ? line.replaceAll(eye, '-') : line))
     .map((line) => line.trimEnd())
     .filter((line) => line.length > 0)
   return cropSpriteCanvas(lines)

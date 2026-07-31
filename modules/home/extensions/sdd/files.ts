@@ -67,7 +67,11 @@ export function writeSpec(cwd: string, slug: string, spec: Spec): WriteSpecResul
   const candidateHash = hashContent(candidate)
   let clearedVerified = false
   if (next.frontmatter.status === 'verified' && spec.hash && spec.hash !== candidateHash) {
-    next.frontmatter = { ...next.frontmatter, status: 'draft', verifiedAt: undefined }
+    next.frontmatter = {
+      ...next.frontmatter,
+      status: 'draft',
+      verifiedAt: undefined
+    }
     clearedVerified = true
   }
   const finalContent = clearedVerified ? serializeSpec(next) : candidate

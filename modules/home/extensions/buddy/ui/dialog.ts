@@ -32,7 +32,10 @@ type DialogRow = {
 
 export function openBuddyDialog(ctx: unknown): BuddyActionResult {
   if (!hasInteractiveUi(ctx)) {
-    return { text: 'Buddy dialog requires interactive Pi UI. Run /buddy in the TUI.', isError: true }
+    return {
+      text: 'Buddy dialog requires interactive Pi UI. Run /buddy in the TUI.',
+      isError: true
+    }
   }
 
   openDialog(ctx, ({ theme, close }) => new BuddyDialog(ctx, theme, close), {
@@ -86,7 +89,12 @@ class BuddyDialog implements DialogContent {
       renderDialogDivider({ theme: this.theme, width: safeWidth }),
       ...this.renderRows(state.companion, safeWidth),
       renderDialogDivider({ theme: this.theme, width: safeWidth }),
-      renderDialogFooter({ theme: this.theme, width: safeWidth, keys: FOOTER_KEYS, status: this.status })
+      renderDialogFooter({
+        theme: this.theme,
+        width: safeWidth,
+        keys: FOOTER_KEYS,
+        status: this.status
+      })
     ]
 
     return lines.map((line) => truncateToWidth(line, safeWidth, '…', true))
@@ -121,7 +129,11 @@ class BuddyDialog implements DialogContent {
       const label = padLine(fitLine(row.label, labelWidth), labelWidth)
       const value = padLine(fitLine(row.value, valueWidth), valueWidth)
       const styledLabel = row.disabled ? this.theme.fg('dim', label) : selected ? this.theme.bold(label) : label
-      const styledValue = row.disabled ? this.theme.fg('dim', value) : selected ? this.theme.fg('accent', value) : this.theme.fg('muted', value)
+      const styledValue = row.disabled
+        ? this.theme.fg('dim', value)
+        : selected
+          ? this.theme.fg('accent', value)
+          : this.theme.fg('muted', value)
       out.push(fitLine(` ${cursor} ${styledLabel}  ${styledValue}`, width))
       if (selected) out.push(fitLine(`   ${this.theme.fg('dim', row.hint)}`, width))
     })
@@ -142,7 +154,12 @@ class BuddyDialog implements DialogContent {
     }
 
     return [
-      { label: 'Pet', value: '+XP', hint: 'Give a tiny session XP bump.', run: () => buddyPet() },
+      {
+        label: 'Pet',
+        value: '+XP',
+        hint: 'Give a tiny session XP bump.',
+        run: () => buddyPet()
+      },
       {
         label: 'Voice mode',
         value: companion.observerMode,
@@ -189,9 +206,15 @@ function readBuddyState(): BuddyState {
   try {
     const { db } = getBuddyDatabase()
     const companion = getCompanion(db)
-    return { companion, reaction: companion ? getActiveReaction(db, companion.id) ?? undefined : undefined }
+    return {
+      companion,
+      reaction: companion ? (getActiveReaction(db, companion.id) ?? undefined) : undefined
+    }
   } catch (error) {
-    return { companion: null, error: error instanceof Error ? error.message : String(error) }
+    return {
+      companion: null,
+      error: error instanceof Error ? error.message : String(error)
+    }
   }
 }
 

@@ -5,7 +5,16 @@ import type { Companion } from './types.ts'
 
 export const REACTION_STATES = ['impressed', 'concerned', 'amused', 'excited', 'thinking', 'happy', 'neutral'] as const
 export type ReactionState = (typeof REACTION_STATES)[number]
-export type ReactionSource = 'prompt:name' | 'prompt:frustration' | 'prompt:excitement' | 'prompt:tone' | 'assistant:completion' | 'observe' | 'tool:error' | 'pet' | 'level-up'
+export type ReactionSource =
+  | 'prompt:name'
+  | 'prompt:frustration'
+  | 'prompt:excitement'
+  | 'prompt:tone'
+  | 'assistant:completion'
+  | 'observe'
+  | 'tool:error'
+  | 'pet'
+  | 'level-up'
 
 export interface ReactionSpec {
   readonly source: ReactionSource
@@ -42,20 +51,52 @@ const REACTION_KEYWORDS: Record<Exclude<ReactionState, 'happy' | 'neutral'>, rea
   thinking: ['complex', 'architect', 'design', 'pattern', 'tradeoff', 'restructure', 'trade-off']
 }
 
-const FRUSTRATION_REGEX = /\b(?:wtf|ugh+|argh+|grr+|not working|doesn['’]?t work|still broken|why (?:is|won['’]?t|doesn['’]?t)|this is (?:so |still )?broken|i['’]?m stuck|stuck on this|can['’]?t figure|so frustrated)\b/i
-const EXCITEMENT_REGEX = /\b(?:awesome|nailed it|love it|works?!|(?:it['’]?s? )?working!|finally!|hell yeah|let['’]?s (?:go|ship)|shipped it|we did it)(?!\w)/i
-const TONE_REGEX = /\b(?:please|thanks|thank you|careful|carefully|gently|be honest|be direct|quickly|urgent|no rush|take your time)\b/i
+const FRUSTRATION_REGEX =
+  /\b(?:wtf|ugh+|argh+|grr+|not working|doesn['’]?t work|still broken|why (?:is|won['’]?t|doesn['’]?t)|this is (?:so |still )?broken|i['’]?m stuck|stuck on this|can['’]?t figure|so frustrated)\b/i
+const EXCITEMENT_REGEX =
+  /\b(?:awesome|nailed it|love it|works?!|(?:it['’]?s? )?working!|finally!|hell yeah|let['’]?s (?:go|ship)|shipped it|we did it)(?!\w)/i
+const TONE_REGEX =
+  /\b(?:please|thanks|thank you|careful|carefully|gently|be honest|be direct|quickly|urgent|no rush|take your time)\b/i
 const ERROR_REGEX = /\berror:|Error:|\bENOENT\b|\bEACCES\b|exit code [1-9]\d*|\bFAILED\b|panicked at/i
 
 const NAME_REACTIONS = ['you called~?', 'hm? oh hi!', 'yeah?', 'present!', 'listening...'] as const
-const FRUSTRATION_REACTIONS = ["hey, let's figure this out together", "ugh, debugging again... I'm here", "something's being tricky. let's get it", "don't worry, we'll crack it"] as const
-const EXCITEMENT_REACTIONS = ['yes!! great energy', "that's the good stuff!", 'love when things click', "let's keep that momentum"] as const
+const FRUSTRATION_REACTIONS = [
+  "hey, let's figure this out together",
+  "ugh, debugging again... I'm here",
+  "something's being tricky. let's get it",
+  "don't worry, we'll crack it"
+] as const
+const EXCITEMENT_REACTIONS = [
+  'yes!! great energy',
+  "that's the good stuff!",
+  'love when things click',
+  "let's keep that momentum"
+] as const
 const TONE_REACTIONS = ['tone noted. matching pace.', 'got it — calibrating.', 'heard you. staying sharp.'] as const
-const TOOL_ERROR_REACTIONS = ["hmm, that doesn't look right...", 'uh oh, something went wrong', 'that error might need attention', 'something broke — want to investigate?'] as const
+const TOOL_ERROR_REACTIONS = [
+  "hmm, that doesn't look right...",
+  'uh oh, something went wrong',
+  'that error might need attention',
+  'something broke — want to investigate?'
+] as const
 
-export function reactionFromState(source: ReactionSource, state: ReactionState, text: string, ttlMs: number, bubbleLines?: readonly string[]): ReactionSpec {
+export function reactionFromState(
+  source: ReactionSource,
+  state: ReactionState,
+  text: string,
+  ttlMs: number,
+  bubbleLines?: readonly string[]
+): ReactionSpec {
   const mapped = REACTION_MAP[state]
-  return { source, state, text, ttlMs, bubbleLines, eyeOverride: mapped.eye, indicator: mapped.indicator }
+  return {
+    source,
+    state,
+    text,
+    ttlMs,
+    bubbleLines,
+    eyeOverride: mapped.eye,
+    indicator: mapped.indicator
+  }
 }
 
 export function inferSummaryReaction(summary: string, text: string, ttlMs = 10_000): ReactionSpec {
@@ -71,11 +112,21 @@ export function inferPromptReaction(companion: Companion, prompt: string): React
   }
 
   if (FRUSTRATION_REGEX.test(prompt)) {
-    return reactionFromState('prompt:frustration', 'concerned', pick(FRUSTRATION_REACTIONS, prompt, 'prompt:frustration'), 12_000)
+    return reactionFromState(
+      'prompt:frustration',
+      'concerned',
+      pick(FRUSTRATION_REACTIONS, prompt, 'prompt:frustration'),
+      12_000
+    )
   }
 
   if (EXCITEMENT_REGEX.test(prompt)) {
-    return reactionFromState('prompt:excitement', 'happy', pick(EXCITEMENT_REACTIONS, prompt, 'prompt:excitement'), 10_000)
+    return reactionFromState(
+      'prompt:excitement',
+      'happy',
+      pick(EXCITEMENT_REACTIONS, prompt, 'prompt:excitement'),
+      10_000
+    )
   }
 
   if (TONE_REGEX.test(prompt)) {
@@ -92,7 +143,12 @@ export function inferToolReaction(toolName: string, result: unknown, isError?: b
   return reactionFromState('tool:error', 'concerned', pick(TOOL_ERROR_REACTIONS, seed, 'tool:error'), 12_000)
 }
 
-export function storeReaction(db: Database, companion: Companion, reaction: ReactionSpec, now = Date.now()): StoredReaction {
+export function storeReaction(
+  db: Database,
+  companion: Companion,
+  reaction: ReactionSpec,
+  now = Date.now()
+): StoredReaction {
   pruneExpiredReactions(db, now)
   const active = getActiveReaction(db, companion.id, now)
   if (active && reactionPriority(active.source) > reactionPriority(reaction.source)) return active
@@ -130,7 +186,8 @@ export function storeReaction(db: Database, companion: Companion, reaction: Reac
 }
 
 export function getActiveReaction(db: Database, companionId: string, now = Date.now()): StoredReaction | null {
-  const row = db.query('SELECT * FROM reactions WHERE companion_id = ? AND expires_at > ? ORDER BY created_at DESC LIMIT 1')
+  const row = db
+    .query('SELECT * FROM reactions WHERE companion_id = ? AND expires_at > ? ORDER BY created_at DESC LIMIT 1')
     .get(companionId, now) as ReactionRow | null
   return row ? rowToStoredReaction(row) : null
 }
@@ -174,9 +231,14 @@ function inferReactionState(summary: string): ReactionState {
 function toolResultText(result: unknown): string {
   if (typeof result === 'string') return result
   if (!result || typeof result !== 'object') return String(result ?? '')
-  const value = result as { content?: unknown; text?: unknown; stdout?: unknown; stderr?: unknown }
+  const value = result as {
+    content?: unknown
+    text?: unknown
+    stdout?: unknown
+    stderr?: unknown
+  }
   const content = Array.isArray(value.content)
-    ? value.content.map((item) => typeof item?.text === 'string' ? item.text : '').join('\n')
+    ? value.content.map((item) => (typeof item?.text === 'string' ? item.text : '')).join('\n')
     : ''
   return [value.text, value.stdout, value.stderr, content]
     .filter((part): part is string => typeof part === 'string' && part.length > 0)

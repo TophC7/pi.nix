@@ -125,7 +125,14 @@ class SlabFooter implements Component {
   render(width: number): string[] {
     const caps = capabilities()
     const state = this.getState()
-    const rightWidgetLines = renderWidgetLines(this.widgetHost, state.snapshot.widgets, 'footerRight', width, caps, state.clock)
+    const rightWidgetLines = renderWidgetLines(
+      this.widgetHost,
+      state.snapshot.widgets,
+      'footerRight',
+      width,
+      caps,
+      state.clock
+    )
     return renderSlabFooterLines(
       this.footerData.getExtensionStatuses(),
       rightWidgetLines,

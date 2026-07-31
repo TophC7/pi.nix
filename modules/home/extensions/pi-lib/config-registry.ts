@@ -116,7 +116,10 @@ export function getConfigRows(ctx: ExtensionCommandContext): readonly ConfigRegi
   return getConfigSections().flatMap((section) => getConfigSectionRows(section, ctx))
 }
 
-export function getConfigSectionRows(section: ConfigRegistrySection, ctx: ExtensionCommandContext): readonly ConfigRegistryRow[] {
+export function getConfigSectionRows(
+  section: ConfigRegistrySection,
+  ctx: ExtensionCommandContext
+): readonly ConfigRegistryRow[] {
   return typeof section.rows === 'function' ? section.rows(ctx) : section.rows
 }
 

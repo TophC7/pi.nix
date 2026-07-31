@@ -80,7 +80,9 @@ export function isReviewCardHeaderLine(line: string): boolean {
   return line.startsWith('── #')
 }
 
-export function parseReviewCardHeader(line: string): { ok: true; header: ReviewCardHeader } | { ok: false; errors: string[] } {
+export function parseReviewCardHeader(
+  line: string
+): { ok: true; header: ReviewCardHeader } | { ok: false; errors: string[] } {
   const match = line.match(CARD_HEADER_RE)
   if (!match) return { ok: false, errors: [`Malformed review card header: ${line}`] }
 
@@ -92,7 +94,8 @@ export function parseReviewCardHeader(line: string): { ok: true; header: ReviewC
 
   if (!severity) errors.push(`Invalid review severity: ${severityText}`)
   if (!isReviewScope(scopeText)) errors.push(`Invalid review scope: ${scopeText}`)
-  if (!isAnchoredLocation(location)) errors.push(`Review finding must cite a file/range location: ${location || '<missing>'}`)
+  if (!isAnchoredLocation(location))
+    errors.push(`Review finding must cite a file/range location: ${location || '<missing>'}`)
   if (errors.length > 0 || !severity || !isReviewScope(scopeText)) return { ok: false, errors }
 
   return {
@@ -106,7 +109,9 @@ export function parseReviewCardHeader(line: string): { ok: true; header: ReviewC
   }
 }
 
-export function parseReviewCardField(line: string): { key: 'problem' | 'evidence' | 'fixDirection'; value: string } | undefined {
+export function parseReviewCardField(
+  line: string
+): { key: 'problem' | 'evidence' | 'fixDirection'; value: string } | undefined {
   const match = line.match(CARD_FIELD_RE)
   const label = match?.[1]?.trim()
   const value = match?.[2]?.trim() ?? ''
@@ -116,7 +121,10 @@ export function parseReviewCardField(line: string): { key: 'problem' | 'evidence
   return undefined
 }
 
-export function renderReviewCardHeader(index: number, card: Pick<ReviewCard, 'severity' | 'scope' | 'location'>): string {
+export function renderReviewCardHeader(
+  index: number,
+  card: Pick<ReviewCard, 'severity' | 'scope' | 'location'>
+): string {
   return `── #${index} · ${card.severity} · ${card.scope} · ${card.location} ─────────────────`
 }
 

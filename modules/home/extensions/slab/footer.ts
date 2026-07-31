@@ -25,14 +25,18 @@ export function renderSlabFooterLines(
   const railWidth = Math.max(0, rightRail.railWidth ?? 0)
   const requestedLeftWidth = Math.max(0, rightRail.leftWidth ?? 0)
   const canUseRightRail = Boolean(
-    rightRail.footerLine && railWidth > 0 && requestedLeftWidth > 0 && requestedLeftWidth + railGapWidth + railWidth <= safeWidth
+    rightRail.footerLine &&
+      railWidth > 0 &&
+      requestedLeftWidth > 0 &&
+      requestedLeftWidth + railGapWidth + railWidth <= safeWidth
   )
   const leftWidth = canUseRightRail ? requestedLeftWidth : safeWidth
   const innerLeftWidth = footerInnerWidth(leftWidth)
   const mcpLine = renderMcpFooterLine(extensionStatuses, capabilities, innerLeftWidth, mcpState)
   const leftLines = mcpLine ? [mcpLine] : []
-  const lines = renderFooterColumns(leftLines, rightWidgetLines, innerLeftWidth, capabilities)
-    .map((line) => padFooterSurface(line, leftWidth))
+  const lines = renderFooterColumns(leftLines, rightWidgetLines, innerLeftWidth, capabilities).map((line) =>
+    padFooterSurface(line, leftWidth)
+  )
   if (!canUseRightRail) return lines.map((line) => padLine(line, safeWidth))
 
   const rows = Math.max(1, lines.length)
@@ -66,9 +70,9 @@ export function renderMcpFooterLine(
   const connecting = parseConnecting(extensionStatuses.get('mcp'))
   if (mcpState) return renderStructuredMcpLine(mcpState, authServer, capabilities, width, connecting)
 
-  const statuses = MCP_STATUS_KEYS
-    .map((key) => normalizeMcpStatus(key, extensionStatuses.get(key)))
-    .filter((status): status is string => Boolean(status))
+  const statuses = MCP_STATUS_KEYS.map((key) => normalizeMcpStatus(key, extensionStatuses.get(key))).filter(
+    (status): status is string => Boolean(status)
+  )
 
   if (statuses.length === 0) return undefined
 
@@ -109,7 +113,8 @@ function renderStructuredMcpLine(
   }
 
   if (mode === 'tight') return `${label} ${icon.ok}${okCount}/${state.total}`
-  if (mode === 'medium') return `${label} ${icon.ok} ${okCount}/${state.total}${state.totalTools > 0 ? ` · ${state.totalTools}t` : ''}`
+  if (mode === 'medium')
+    return `${label} ${icon.ok} ${okCount}/${state.total}${state.totalTools > 0 ? ` · ${state.totalTools}t` : ''}`
   return `${label} ${icon.ok} ${serverCountText(state.total)}${state.totalTools > 0 ? `${separator(capabilities)}${state.totalTools} tools` : ''}`
 }
 
@@ -128,7 +133,11 @@ function serverCountText(count: number): string {
   return count === 1 ? '1 server' : `${count} servers`
 }
 
-function mcpIcons(capabilities: UiRenderCapabilities): { ok: string; warn: string; busy: string } {
+function mcpIcons(capabilities: UiRenderCapabilities): {
+  ok: string
+  warn: string
+  busy: string
+} {
   return capabilities.unicode ? { ok: '✓', warn: '⚠', busy: '…' } : { ok: 'ok ', warn: '!', busy: '...' }
 }
 
@@ -150,21 +159,30 @@ interface McpConnecting {
 // "MCP: connecting to 3 servers..." on startup or "MCP: connecting to ctx..."
 // for a single reconnect.
 function parseConnecting(raw: string | undefined): McpConnecting | undefined {
-  const text = stripControls(raw ?? '').replace(/\s+/g, ' ').replace(/\.{3}$/, '').trim()
+  const text = stripControls(raw ?? '')
+    .replace(/\s+/g, ' ')
+    .replace(/\.{3}$/, '')
+    .trim()
   const target = text.match(/connecting to\s+(.+)$/i)?.[1]?.trim()
   if (!target) return undefined
   return /^\d+ servers?$/i.test(target) ? {} : { serverName: target }
 }
 
 function parseAuthServer(raw: string | undefined): string | undefined {
-  const text = stripControls(raw ?? '').replace(/\s+/g, ' ').replace(/\.{3}$/, '').trim()
+  const text = stripControls(raw ?? '')
+    .replace(/\s+/g, ' ')
+    .replace(/\.{3}$/, '')
+    .trim()
   return text.match(/^Authenticating\s+(.+)$/i)?.[1]?.trim()
 }
 
 type McpStatusKey = (typeof MCP_STATUS_KEYS)[number]
 
 function normalizeMcpStatus(key: McpStatusKey, raw: string | undefined): string | undefined {
-  const text = stripControls(raw ?? '').replace(/\s+/g, ' ').replace(/\.{3}$/, '').trim()
+  const text = stripControls(raw ?? '')
+    .replace(/\s+/g, ' ')
+    .replace(/\.{3}$/, '')
+    .trim()
   if (!text) return undefined
 
   if (key === 'mcp-auth') return text.replace(/^Authenticating\s+/i, 'auth ')

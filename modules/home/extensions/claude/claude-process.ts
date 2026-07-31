@@ -21,16 +21,14 @@ export class ClaudeProcess implements AsyncIterable<ClaudeMessage> {
     onStderr?: (data: string) => void
   }) {
     const env = Object.fromEntries(
-      Object.entries(options.env).filter(
-        (entry): entry is [string, string] => entry[1] !== undefined,
-      ),
+      Object.entries(options.env).filter((entry): entry is [string, string] => entry[1] !== undefined)
     )
     this.child = Bun.spawn([options.executable, ...options.args], {
       cwd: options.cwd,
       env,
       stdin: 'pipe',
       stdout: 'pipe',
-      stderr: 'pipe',
+      stderr: 'pipe'
     })
     this.input = this.child.stdin
     void this.captureStderr(options.onStderr).catch((error) => {
@@ -82,20 +80,13 @@ export class ClaudeProcess implements AsyncIterable<ClaudeMessage> {
     if (buffer.trim()) yield this.parseLine(buffer)
     const exitCode = await this.child.exited
     if (exitCode !== 0) {
-      throw (
-        this.closeError ??
-        new Error(
-          this.stderr.trim() || `Claude Code exited with status ${exitCode}`,
-        )
-      )
+      throw this.closeError ?? new Error(this.stderr.trim() || `Claude Code exited with status ${exitCode}`)
     }
   }
 
   private assertLineSize(line: string): void {
     if (line.length <= MAX_NDJSON_LINE_LENGTH) return
-    const error = new Error(
-      `Claude Code emitted an NDJSON line exceeding ${MAX_NDJSON_LINE_LENGTH} characters`,
-    )
+    const error = new Error(`Claude Code emitted an NDJSON line exceeding ${MAX_NDJSON_LINE_LENGTH} characters`)
     this.close(error)
     throw error
   }
@@ -108,9 +99,7 @@ export class ClaudeProcess implements AsyncIterable<ClaudeMessage> {
     }
   }
 
-  private async captureStderr(
-    onStderr?: (data: string) => void,
-  ): Promise<void> {
+  private async captureStderr(onStderr?: (data: string) => void): Promise<void> {
     const reader = this.child.stderr.getReader()
     const decoder = new TextDecoder()
     while (true) {

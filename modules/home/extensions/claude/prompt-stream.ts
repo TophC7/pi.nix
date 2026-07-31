@@ -37,9 +37,7 @@ export function makePromptStream(): PromptStream {
       item.reject(new Error('prompt stream is not attached'))
       return
     }
-    chain = chain
-      .then(() => attachedProcess.send(item.message))
-      .then(item.resolve, item.reject)
+    chain = chain.then(() => attachedProcess.send(item.message)).then(item.resolve, item.reject)
   }
 
   return {
@@ -50,8 +48,7 @@ export function makePromptStream(): PromptStream {
       if (closed) void chain.finally(() => process?.endInput())
     },
     push(message) {
-      if (failure || closed)
-        return Promise.reject(failure ?? new Error('prompt stream closed'))
+      if (failure || closed) return Promise.reject(failure ?? new Error('prompt stream closed'))
       return new Promise<void>((resolve, reject) => {
         const item = { message, resolve, reject }
         if (process) schedule(item)
@@ -66,18 +63,15 @@ export function makePromptStream(): PromptStream {
       failure = error
       for (const item of pending.splice(0)) item.reject(error)
       process?.close(error)
-    },
+    }
   }
 }
 
-export function userMessage(
-  content: InputContent[],
-  priority?: 'next',
-): ClaudeMessage {
+export function userMessage(content: InputContent[], priority?: 'next'): ClaudeMessage {
   return {
     type: 'user',
     message: { role: 'user', content },
     parent_tool_use_id: null,
-    ...(priority ? { priority } : {}),
+    ...(priority ? { priority } : {})
   }
 }

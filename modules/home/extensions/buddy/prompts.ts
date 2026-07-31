@@ -11,7 +11,9 @@ export function buildBuddyContext(companion: Companion): string {
     ].join('\n')
   }
 
-  const neverRules = getNever(companion.species).map((rule) => `- ${rule}`).join('\n')
+  const neverRules = getNever(companion.species)
+    .map((rule) => `- ${rule}`)
+    .join('\n')
   const guardInstructions = companion.guardMode
     ? [
         'Guard mode on: when calling buddy_observe, include claims and edges from the turn when directly evidenced.',
@@ -29,5 +31,7 @@ export function buildBuddyContext(companion: Companion): string {
     neverRules ? `Species rules:\n${neverRules}` : '',
     guardInstructions,
     '</buddy-context>'
-  ].filter(Boolean).join('\n')
+  ]
+    .filter(Boolean)
+    .join('\n')
 }

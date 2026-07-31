@@ -303,11 +303,7 @@ export class SelectionEditor extends CustomEditor {
 
     for (let index = 0; index < visibleVisualLines.length; index++) {
       const visualLine = visibleVisualLines[index]!
-      const span = rangeOnVisualLine(
-        range,
-        visualLine,
-        internals.state.lines[visualLine.logicalLine]?.length ?? 0
-      )
+      const span = rangeOnVisualLine(range, visualLine, internals.state.lines[visualLine.logicalLine]?.length ?? 0)
       if (!span) continue
       const rawIndex = index + 1
       result[rawIndex] = styleTextRange(result[rawIndex] ?? '', span, this.styleSelection)

@@ -1,10 +1,18 @@
 import type { Database as BunDatabase } from 'bun:sqlite'
-import { ensureBuddyStateDir, resolveBuddyStatePaths, type BuddyStatePathOptions, type BuddyStatePaths } from './paths.ts'
+import {
+  ensureBuddyStateDir,
+  resolveBuddyStatePaths,
+  type BuddyStatePathOptions,
+  type BuddyStatePaths
+} from './paths.ts'
 import { initBuddySchema } from './schema.ts'
 
 declare const require: ((id: string) => unknown) | undefined
 
-type DatabaseConstructor = new (path: string, options?: { readonly?: boolean; readwrite?: boolean; create?: boolean }) => BunDatabase
+type DatabaseConstructor = new (
+  path: string,
+  options?: { readonly?: boolean; readwrite?: boolean; create?: boolean }
+) => BunDatabase
 
 export interface BuddyDatabaseState {
   readonly db: BunDatabase
@@ -62,12 +70,16 @@ function loadBunSqliteDatabase(): DatabaseConstructor {
   try {
     const requireFn = getRequire()
     if (!requireFn) throw new Error('CommonJS require is unavailable')
-    const module = requireFn('bun:sqlite') as { Database?: DatabaseConstructor }
+    const module = requireFn('bun:sqlite') as {
+      Database?: DatabaseConstructor
+    }
     if (typeof module.Database !== 'function') throw new Error('bun:sqlite did not expose Database')
     databaseConstructor = module.Database
     return databaseConstructor
   } catch (error) {
-    throw new Error('Buddy requires the Pi command to run under Bun; bun:sqlite is unavailable in this runtime: ' + formatError(error))
+    throw new Error(
+      'Buddy requires the Pi command to run under Bun; bun:sqlite is unavailable in this runtime: ' + formatError(error)
+    )
   }
 }
 
@@ -91,4 +103,3 @@ function formatError(error: unknown): string {
 
 export { resolveBuddyStatePaths, ensureBuddyStateDir }
 export type { BuddyStatePathOptions, BuddyStatePaths }
-

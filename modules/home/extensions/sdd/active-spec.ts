@@ -69,15 +69,15 @@ export function clearActiveSpec(): void {
 // fires at turn start, which misses mid-conversation switches. Prompt body
 // must not lead with slash-command-shaped text or Pi's command parser will
 // hijack the first token.
-function postSpecAnchor(
-  pi: ExtensionAPI,
-  ctx: ExtensionCommandContext,
-  slug: string,
-  status: string
-): void {
+function postSpecAnchor(pi: ExtensionAPI, ctx: ExtensionCommandContext, slug: string, status: string): void {
   if (typeof pi.sendUserMessage !== 'function') return
   const path = specPath(ctx.cwd, slug)
-  const anchor = buildActiveSpecPrompt({ slug, path, status, surface: 'followUp' })
+  const anchor = buildActiveSpecPrompt({
+    slug,
+    path,
+    status,
+    surface: 'followUp'
+  })
   try {
     pi.sendUserMessage(anchor, { deliverAs: 'followUp' })
   } catch {

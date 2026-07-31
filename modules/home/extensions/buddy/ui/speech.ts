@@ -26,8 +26,9 @@ export function publishBuddySpeech(result: BuddyActionResult): void {
 
 function speechText(result: BuddyActionResult): string {
   const details = result.details as { reaction?: unknown; levelUp?: unknown } | undefined
-  const lines = [details?.levelUp, details?.reaction]
-    .filter((line): line is string => typeof line === 'string' && line.trim().length > 0)
+  const lines = [details?.levelUp, details?.reaction].filter(
+    (line): line is string => typeof line === 'string' && line.trim().length > 0
+  )
   if (lines.length > 0) return lines.join('\n')
   return ''
 }
@@ -40,5 +41,7 @@ function renderSpeechBubble(text: string, width: number): readonly string[] {
   const innerWidth = Math.max(...rawLines.map((line) => visibleWidth(line)), 1)
   const top = `╭${'─'.repeat(innerWidth + 2)}╮`
   const bottom = `╰${'─'.repeat(innerWidth + 2)}╯`
-  return [top, ...rawLines.map((line) => `│ ${padLine(line, innerWidth)} │`), bottom].map((line) => fitLine(line, width))
+  return [top, ...rawLines.map((line) => `│ ${padLine(line, innerWidth)} │`), bottom].map((line) =>
+    fitLine(line, width)
+  )
 }

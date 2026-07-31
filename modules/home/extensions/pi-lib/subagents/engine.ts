@@ -379,7 +379,10 @@ async function disposeRunnerSession(session: RunnerSession | undefined): Promise
   try {
     const runner = session.extensionRunner
     if (runner?.emit && (!runner.hasHandlers || runner.hasHandlers('session_shutdown'))) {
-      await runner.emit({ type: 'session_shutdown', reason: 'subagent_dispose' })
+      await runner.emit({
+        type: 'session_shutdown',
+        reason: 'subagent_dispose'
+      })
     }
   } finally {
     await session.dispose()
