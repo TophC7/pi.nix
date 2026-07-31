@@ -11,7 +11,10 @@ import type {
   ExtensionAPI,
   ExtensionContext,
 } from '@earendil-works/pi-coding-agent'
-import { claudeArguments } from './claude-command.js'
+import {
+  claudeArguments,
+  claudeEnvironment,
+} from './claude-command.js'
 import { ClaudeProcess } from './claude-process.js'
 import { claudeEffort } from './effort.js'
 import {
@@ -171,7 +174,7 @@ function streamClaudeCore(
         maxTurns: isolated ? 1 : undefined,
       }),
       cwd,
-      env: transportEnvironment(),
+      env: claudeEnvironment(),
     })
     if (bridge) {
       void bridge.ready
@@ -415,40 +418,6 @@ function failedStream(
   const turn = new ClaudeTurn(model, stream, new Map())
   queueMicrotask(() => turn.fail(error))
   return stream
-}
-
-function transportEnvironment(): Record<string, string | undefined> {
-  const environment: Record<string, string | undefined> = {
-    ...process.env,
-    CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS: '1',
-    CLAUDE_CODE_AUTO_CONNECT_IDE: 'false',
-    CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1',
-    CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: '1',
-    CLAUDE_CODE_DISABLE_BUNDLED_SKILLS: '1',
-    CLAUDE_CODE_DISABLE_CLAUDE_MDS: '1',
-    CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
-    CLAUDE_CODE_DISABLE_TERMINAL_TITLE: '1',
-    CLAUDE_CODE_DISABLE_WORKFLOWS: '1',
-    DISABLE_AUTO_COMPACT: '1',
-    ENABLE_CLAUDEAI_MCP_SERVERS: '0',
-  }
-  for (const variable of [
-    'ANTHROPIC_API_KEY',
-    'ANTHROPIC_AUTH_TOKEN',
-    'ANTHROPIC_BASE_URL',
-    'CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST',
-    'CLAUDE_CODE_SAFE_MODE',
-    'CLAUDE_CODE_SIMPLE',
-    'CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT',
-    'CLAUDE_CODE_USE_ANTHROPIC_AWS',
-    'CLAUDE_CODE_USE_BEDROCK',
-    'CLAUDE_CODE_USE_FOUNDRY',
-    'CLAUDE_CODE_USE_MANTLE',
-    'CLAUDE_CODE_USE_VERTEX',
-  ]) {
-    delete environment[variable]
-  }
-  return environment
 }
 
 function asError(error: unknown): Error {
