@@ -1,4 +1,5 @@
 {
+  lib,
   pkgs,
   inputs,
   b2n,
@@ -6,9 +7,19 @@
   ...
 }:
 
+let
+  versionLine = lib.findFirst (line: lib.hasPrefix "version: " line) null (
+    lib.splitString "\n" (builtins.readFile (inputs.impeccable + "/.pi/skills/impeccable/SKILL.md"))
+  );
+  version =
+    if versionLine == null then
+      throw "impeccable skill metadata has no version"
+    else
+      lib.removePrefix "version: " versionLine;
+in
 pkgs.stdenv.mkDerivation {
   pname = "impeccable";
-  version = "4.0.2";
+  inherit version;
   src = inputs.impeccable;
 
   nativeBuildInputs = [

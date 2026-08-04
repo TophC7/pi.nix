@@ -67,6 +67,11 @@
     }@inputs:
     let
       lib = mix-nix.lib;
+      supportedSystems = [
+        "x86_64-linux"
+        "aarch64-linux"
+      ];
+      forAllSystems = nixpkgs.lib.genAttrs supportedSystems;
     in
     {
       homeManagerModules = {
@@ -76,7 +81,7 @@
         default = self.homeManagerModules.pi;
       };
 
-      packages = nixpkgs.lib.genAttrs nixpkgs.lib.systems.flakeExposed (
+      packages = forAllSystems (
         system:
         let
           pkgs = import nixpkgs { inherit system; };
@@ -95,6 +100,42 @@
         piPackages
         // {
           default = piPackages.pi-web-access;
+        }
+      );
+
+      apps = forAllSystems (
+        system:
+        let
+          pkgs = import nixpkgs { inherit system; };
+          bun2nix = inputs.bun2nix.packages.${system}.default;
+          update = pkgs.writeScriptBin "pi-update" ''
+            #!${pkgs.fish}/bin/fish
+            set -gx PATH ${
+              lib.makeBinPath [
+                pkgs.coreutils
+                pkgs.curl
+                pkgs.diffutils
+                pkgs.gitMinimal
+                pkgs.jq
+                pkgs.nix
+              ]
+            } $PATH
+            set -gx PI_BUN ${pkgs.bun}/bin/bun
+            set -gx PI_BUN2NIX ${bun2nix}/bin/bun2nix
+            set -gx PI_SOURCE_CONTEXT_MODE ${inputs.context-mode}
+            set -gx PI_SOURCE_IMPECCABLE ${inputs.impeccable}
+            set -gx PI_SOURCE_MCP_ADAPTER ${inputs.pi-mcp-adapter}
+            set -gx PI_SOURCE_WEB_ACCESS ${inputs.pi-web-access}
+            set -gx PI_SYSTEM ${system}
+            exec ${pkgs.fish}/bin/fish ${./scripts/update.fish} $argv
+          '';
+        in
+        {
+          update = {
+            type = "app";
+            program = "${update}/bin/pi-update";
+            meta.description = "Update and validate all pinned pi.nix software";
+          };
         }
       );
     };

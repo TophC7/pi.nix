@@ -12,28 +12,6 @@ let
   system = pkgs.stdenv.hostPlatform.system;
   b2n = inputs.bun2nix.packages.${system}.default;
   lock = lib.fs.relativeTo ../../locks;
-  piNodePackage = inputs.llm-agents.packages.${system}.pi;
-  claudeCodePackage = inputs.llm-agents.packages.${system}.claude-code;
-  piBunPackage = piNodePackage.overrideAttrs (old: {
-    nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [
-      pkgs.makeWrapper
-      pkgs.patch
-    ];
-
-    # llm-agents now builds Pi as a standalone Bun binary. Apply our source
-    # patches before that compile step so the patched behavior is embedded in
-    # the binary, then wrap the resulting launcher with repo runtime defaults.
-    preInstall = ''
-      patch -p1 < ${./patches/pi-ai-discard-failed-tool-continuations.patch}
-      patch -p1 < ${./patches/pi-tui-incremental-input-render.patch}
-    '' + (old.preInstall or "");
-
-    postInstall = (old.postInstall or "") + ''
-      wrapProgram $out/bin/pi \
-        --prefix PATH : ${lib.makeBinPath [ pkgs.bun pkgs.fd pkgs.ripgrep claudeCodePackage ]} \
-        --set IMPECCABLE_NO_UPDATE_CHECK 1
-    '';
-  });
   localPackageDeclarations = {
     caveman.source = ./extensions/caveman.ts;
     cd.source = ./extensions/cd.ts;
@@ -50,8 +28,8 @@ let
       entry = "index.ts";
     };
 
-    # Runtime support modules are linked beside extension packages but are not
-    # registered as extension entrypoints.
+    # Runtime support modules stay inside the generated bundle and are not
+    # exposed as extension entrypoints.
     pi-lib = {
       source = ./extensions/pi-lib;
       supportOnly = true;
@@ -136,7 +114,7 @@ in
 
     package = lib.mkOption {
       type = lib.types.package;
-      default = piBunPackage;
+      default = piPackages.pi;
       description = "Pi coding agent package to install.";
     };
 

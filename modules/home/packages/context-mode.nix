@@ -1,4 +1,5 @@
 {
+  lib,
   pkgs,
   inputs,
   b2n,
@@ -8,7 +9,7 @@
 
 pkgs.stdenv.mkDerivation {
   pname = "context-mode";
-  version = "1.0.169";
+  version = (lib.importJSON (inputs.context-mode + "/package.json")).version;
   src = inputs.context-mode;
 
   nativeBuildInputs = [
@@ -30,8 +31,8 @@ pkgs.stdenv.mkDerivation {
   ];
 
   postPatch = ''
-    # v1.0.127's package.json lists better-sqlite3 as a dependency, while
-    # bun.lock pins it as optional. Keep package.json aligned with bun.lock so
+    # package.json lists better-sqlite3 as a dependency, while bun.lock pins it
+    # as optional. Keep package.json aligned with bun.lock so
     # Bun does not try to re-resolve the package manifest inside the Nix sandbox.
     bun -e '
       const fs = require("fs");

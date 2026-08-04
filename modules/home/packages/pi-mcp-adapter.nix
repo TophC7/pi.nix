@@ -1,4 +1,5 @@
 {
+  lib,
   pkgs,
   inputs,
   b2n,
@@ -19,7 +20,7 @@
 # the bun2nix nix expression are generated together and must stay paired.
 pkgs.stdenv.mkDerivation {
   pname = "pi-mcp-adapter";
-  version = "2.15.0";
+  version = (lib.importJSON (inputs.pi-mcp-adapter + "/package.json")).version;
   src = inputs.pi-mcp-adapter;
 
   nativeBuildInputs = [

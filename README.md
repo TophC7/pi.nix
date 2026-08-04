@@ -31,11 +31,7 @@ Import the Home Manager module:
 {
   imports = [ inputs.pi-nix.homeManagerModules.default ];
 
-  programs.pi = {
-    enable = true;
-    provider = "openai-codex";
-    model = "gpt-5.5";
-  };
+  programs.pi.enable = true;
 }
 ```
 
@@ -46,7 +42,7 @@ Available options are intentionally small:
 | `programs.pi.enable` | `false` | Install and configure Pi. |
 | `programs.pi.package` | repo-patched Pi | Override Pi package if needed. |
 | `programs.pi.provider` | `openai-codex` | Default provider written to Pi settings. |
-| `programs.pi.model` | `gpt-5.5` | Default model written to Pi settings. |
+| `programs.pi.model` | `gpt-5.6-sol` | Default model written to Pi settings. |
 
 ## How it works
 
@@ -56,6 +52,7 @@ flake.nix
     → patched Bun-wrapped Pi package
     → modules/home/lib/pi-extension-system.nix
       → ~/.pi/agent/extensions/*
+      → internal @pi/lib support bundle
       → ~/.pi/agent/packages/*
       → ~/.pi/agent/settings.json
     → ~/.pi/agent/AGENTS.md
@@ -78,7 +75,7 @@ flake.nix
 - external packages land under `~/.pi/agent/packages`;
 - `settings.json.extensions` and `settings.json.packages` are generated from those declarations;
 - directory extensions point at their `index.ts` entrypoint;
-- support-only packages, especially `pi-lib`, can be linked without being registered as user-facing extensions.
+- support-only packages, especially `pi-lib`, stay internal to the bundle and out of Pi's extension discovery.
 
 ## Local extensions
 
@@ -160,14 +157,17 @@ External packages are pinned through Nix:
 
 | Package file | Package |
 | --- | --- |
-| `modules/home/packages/context-mode.nix` | `context-mode` 1.0.169 |
-| `modules/home/packages/impeccable.nix` | Impeccable skill 4.0.2 |
-| `modules/home/packages/pi-agentsmd.nix` | `pi-agentsmd` 0.1.3 |
-| `modules/home/packages/pi-mcp-adapter.nix` | `pi-mcp-adapter` 2.15.0 |
-| `modules/home/packages/pi-web-access.nix` | `pi-web-access` 0.14.0 |
-| `modules/home/packages/rtk.nix` | RTK 0.44.0 |
+| `modules/home/packages/context-mode.nix` | `context-mode` |
+| `modules/home/packages/impeccable.nix` | Impeccable skill |
+| `modules/home/packages/pi.nix` | patched Pi runtime |
+| `modules/home/packages/pi-agentsmd.nix` | `pi-agentsmd` |
+| `modules/home/packages/pi-mcp-adapter.nix` | `pi-mcp-adapter` |
+| `modules/home/packages/pi-web-access.nix` | `pi-web-access` |
+| `modules/home/packages/rtk/` | RTK prebuilt release |
 
-Version is owned by the flake inputs. `pi-ask-user`, `pi-rtk-optimizer`, and `pi-tool-display` have no runtime deps and load `./index.ts` directly, so they are consumed as raw source inputs with no package file; `nix flake update` bumps them.
+Source revisions are pinned by `flake.lock`. Package versions come from pinned source metadata. RTK's upstream release version and Linux asset hashes live in `modules/home/packages/rtk/version.json`. `pi-ask-user`, `pi-rtk-optimizer`, and `pi-tool-display` have no runtime deps and load `./index.ts` directly, so they are consumed as raw source inputs with no package file.
+
+`nix run .#update` updates all flake inputs, RTK release metadata, and generated Bun locks, then evaluates both Linux systems and builds every package for the current system. It leaves the resulting diff for review and never commits. `nix run .#update -- --check` validates current generated state and builds without checking upstream; `nix run .#update -- --resume` continues after an interrupted update.
 
 ## RTK and shell policy
 
@@ -200,7 +200,7 @@ Local patches adapt upstream behavior:
 
 ## Quirks worth knowing
 
-- `pi-lib` is support-only, but it also has a no-op extension entry so Pi's loader tolerates it.
+- `pi-lib` stays internal to the generated extension bundle; resolver links expose it as `@pi/lib` without placing it in Pi's auto-discovered extension namespace.
 - Directory extensions get `node_modules/@pi/lib` symlinks. This works around Node/Jiti realpath resolution when local extensions import `@pi/lib`.
 - The subagent extension registers its model-facing tool only if another active `subagent` tool is not already present.
 - Slab is the shared UI host. Other extensions publish statuses/widgets through `@pi/lib/ui/status-store`; Slab renders them.
@@ -219,7 +219,7 @@ modules/home/themes/terminal.json terminal theme
 modules/home/lib/                 extension-system Nix helpers
 modules/home/packages/            Nix package definitions for Pi add-ons
 modules/home/patches/             local upstream patches
-modules/home/extensions/pi-lib/   shared extension library
+modules/home/extensions/pi-lib/   shared runtime library
 modules/home/extensions/claude/   direct Claude provider
 modules/home/extensions/slab/     terminal UI surface
 modules/home/extensions/buddy/    companion, memory, reasoning, widgets
@@ -229,6 +229,7 @@ modules/home/extensions/cleanup/  cleanup workflow
 modules/home/extensions/commands/ commit/PR/config commands
 modules/home/extensions/burden/   token attribution explorer
 modules/home/extensions/*.ts      small standalone extensions
+scripts/update.fish                full repository update transaction
 .sworm/sdd/                       local spec docs and visuals
 ```
 

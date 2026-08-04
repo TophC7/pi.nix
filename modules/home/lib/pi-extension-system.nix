@@ -22,7 +22,7 @@ let
       supportOnly = mkOption {
         type = types.bool;
         default = false;
-        description = "Link source into the runtime tree without registering it as a Pi extension.";
+        description = "Bundle support code for extension imports without exposing an extension entrypoint.";
       };
     };
   });
@@ -86,7 +86,9 @@ let
     value.source = "${extensionBundle}/${record.bundleName}";
   };
 
-  extensionLinks = builtins.listToAttrs (map extensionLink packageRecords);
+  extensionLinks = builtins.listToAttrs (
+    map extensionLink (builtins.filter (record: !record.package.supportOnly) packageRecords)
+  );
 
   topLevelPiLibResolverLink = lib.optionalAttrs hasPiLib {
     ".pi/agent/extensions/node_modules/@pi/lib".source = "${extensionBundle}/pi-lib";
@@ -119,10 +121,10 @@ in
       type = types.attrsOf packageModule;
       default = { };
       description = ''
-        Declarative local Pi package/source registry. Directory packages are linked
+        Declarative local Pi package/source registry. Extension packages are linked
         under ~/.pi/agent/extensions/<name>; single-file packages preserve their
-        source basename. `supportOnly = true` links runtime support code without
-        adding an extension entry to settings.json.
+        source basename. `supportOnly = true` keeps code internal to the generated
+        bundle for resolver links without exposing it to Pi's extension discovery.
       '';
     };
 

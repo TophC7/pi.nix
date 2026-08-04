@@ -1,4 +1,5 @@
 {
+  lib,
   pkgs,
   inputs,
   b2n,
@@ -8,7 +9,7 @@
 
 pkgs.stdenv.mkDerivation {
   pname = "pi-web-access";
-  version = "0.14.0";
+  version = (lib.importJSON (inputs.pi-web-access + "/package.json")).version;
   src = inputs.pi-web-access;
 
   nativeBuildInputs = [
