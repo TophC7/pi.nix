@@ -1,7 +1,7 @@
 // Code-economy prompt, distilled from https://github.com/DietrichGebert/ponytail.
 // SOUL.md chooses the solution; Ponytail minimizes its implementation.
 
-import { definePromptToggle } from './pi-lib/prompt-toggle.ts'
+import { definePromptToggle } from '@pi/lib/prompt-toggle'
 
 const PROMPT = `# Ponytail
 

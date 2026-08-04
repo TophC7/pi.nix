@@ -1,7 +1,7 @@
 // Prose-efficiency prompt, derived from https://github.com/JuliusBrussee/caveman.
 // Compresses communication only; SOUL.md and Ponytail own judgment and code.
 
-import { definePromptToggle } from './pi-lib/prompt-toggle.ts'
+import { definePromptToggle } from '@pi/lib/prompt-toggle'
 
 const PROMPT = `# Caveman
 
