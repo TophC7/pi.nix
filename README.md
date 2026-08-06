@@ -2,11 +2,11 @@
 
 A Nix-owned Pi distribution: package, runtime, prompt, tools, UI, workflow system, and all the little opinions that make Pi feel like Toph's Pi.
 
-This repo started as a Home Manager module. It has grown into a full agent workbench. Nix pins the upstream Pi build, wraps it with Bun, installs local extensions, bridges MCP servers into Pi tools, owns the global agent prompt, and keeps the whole setup reproducible without global npm installs.
+This repo started as a Home Manager module. It has grown into a full agent workbench. Nix pins Toph's Pi source fork directly, adds personal runtime policy and extensions, bridges MCP servers into Pi tools, owns the global agent prompt, and keeps the whole setup reproducible without global npm installs.
 
 ## What this provides
 
-- **A patched Pi runtime** built from the pinned `llm-agents` input and wrapped to run under Bun.
+- **An owned Pi runtime** built from the directly pinned Bun/Nix source fork.
 - **Home Manager integration** through `inputs.pi-nix.homeManagerModules.default`.
 - **Local Pi extensions** for review, cleanup, spec-driven development, Buddy, Slab UI, Sworm issues, shell policy, and more.
 - **External Pi packages** pinned and installed through Nix: ask-user, RTK optimizer, tool display, web access, MCP adapter, context-mode.
@@ -40,7 +40,7 @@ Available options are intentionally small:
 | Option | Default | Purpose |
 | --- | --- | --- |
 | `programs.pi.enable` | `false` | Install and configure Pi. |
-| `programs.pi.package` | repo-patched Pi | Override Pi package if needed. |
+| `programs.pi.package` | owned Pi source package | Override Pi package if needed. |
 | `programs.pi.provider` | `openai-codex` | Default provider written to Pi settings. |
 | `programs.pi.model` | `gpt-5.6-sol` | Default model written to Pi settings. |
 
@@ -49,7 +49,7 @@ Available options are intentionally small:
 ```text
 flake.nix
   → modules/home/default.nix
-    → patched Bun-wrapped Pi package
+    → directly pinned Bun-native Pi source package
     → modules/home/lib/pi-extension-system.nix
       → ~/.pi/agent/extensions/*
       → internal @pi/lib support bundle
@@ -62,10 +62,9 @@ flake.nix
 
 `modules/home/default.nix` owns main shape:
 
-- wraps upstream Pi with `${pkgs.bun}/bin/bun`;
+- consumes the owned Pi fork's package directly;
 - disables version checks and telemetry;
 - puts Bun, `fd`, and `ripgrep` on Pi's runtime `PATH`;
-- applies local upstream patches from `modules/home/patches/`;
 - installs support packages like RTK, `libnotify`, and `pandoc`;
 - writes Pi settings with `defaultThinkingLevel = "high"`, `theme = "terminal"`, and `quietStartup = true`.
 
@@ -159,7 +158,7 @@ External packages are pinned through Nix:
 | --- | --- |
 | `modules/home/packages/context-mode.nix` | `context-mode` |
 | `modules/home/packages/impeccable.nix` | Impeccable skill |
-| `modules/home/packages/pi.nix` | patched Pi runtime |
+| `modules/home/packages/pi.nix` | wrapper around the owned Pi source package |
 | `modules/home/packages/pi-agentsmd.nix` | `pi-agentsmd` |
 | `modules/home/packages/pi-mcp-adapter.nix` | `pi-mcp-adapter` |
 | `modules/home/packages/pi-web-access.nix` | `pi-web-access` |
@@ -167,7 +166,7 @@ External packages are pinned through Nix:
 
 Source revisions are pinned by `flake.lock`. Package versions come from pinned source metadata. RTK's upstream release version and Linux asset hashes live in `modules/home/packages/rtk/version.json`. `pi-ask-user`, `pi-rtk-optimizer`, and `pi-tool-display` have no runtime deps and load `./index.ts` directly, so they are consumed as raw source inputs with no package file.
 
-`nix run .#update` updates all flake inputs, RTK release metadata, and generated Bun locks, then evaluates both Linux systems and builds every package for the current system. It leaves the resulting diff for review and never commits. `nix run .#update -- --check` validates current generated state and builds without checking upstream; `nix run .#update -- --resume` continues after an interrupted update.
+`nix run .#update` updates all flake inputs, x86_64 RTK release metadata, and generated Bun locks, then evaluates `x86_64-linux` and builds every package. It leaves the resulting diff for review and never commits. `nix run .#update -- --check` validates current generated state and builds without checking upstream; `nix run .#update -- --resume` continues after an interrupted update.
 
 ## RTK and shell policy
 
@@ -189,14 +188,9 @@ Heavy JavaScript packages are built or linked through Nix:
 
 Runtime command paths in `mcp.json` point into the Nix store. No `npx`, global npm, or runtime package fetch is needed for the default MCP stack.
 
-## Patches
+## Owned source
 
-Local patches adapt upstream behavior:
-
-| Patch | Intent |
-| --- | --- |
-| `pi-ai-discard-failed-tool-continuations.patch` | Avoid carrying failed tool continuations forward. |
-| `pi-tui-incremental-input-render.patch` | Reuse settled TUI sections during editor input and cache session-derived footer work. |
+Fork behavior now lives as tested source commits in [`toph/pi`](ssh://git@git.ryot.foo:222/toph/pi.git). `pi.nix` carries no behavioral source patches.
 
 ## Quirks worth knowing
 
@@ -218,7 +212,6 @@ modules/home/SOUL.md              global Pi agent prompt
 modules/home/themes/terminal.json terminal theme
 modules/home/lib/                 extension-system Nix helpers
 modules/home/packages/            Nix package definitions for Pi add-ons
-modules/home/patches/             local upstream patches
 modules/home/extensions/pi-lib/   shared runtime library
 modules/home/extensions/claude/   direct Claude provider
 modules/home/extensions/slab/     terminal UI surface

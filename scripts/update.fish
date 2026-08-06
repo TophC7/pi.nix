@@ -71,23 +71,17 @@ function update_rtk --argument-names versionFile outputFile
 
     echo "Updating RTK $currentVersion -> $latestVersion..."
     set -l x86Name rtk-x86_64-unknown-linux-musl.tar.gz
-    set -l armName rtk-aarch64-unknown-linux-gnu.tar.gz
     set -l baseUrl "https://github.com/rtk-ai/rtk/releases/download/$tag"
 
     nix store prefetch-file --json "$baseUrl/$x86Name" >"$outputFile.x86"
     or return 1
-    nix store prefetch-file --json "$baseUrl/$armName" >"$outputFile.arm"
-    or return 1
 
     set -l x86Hash (jq -r .hash <"$outputFile.x86")
-    set -l armHash (jq -r .hash <"$outputFile.arm")
     jq -n \
         --arg version "$latestVersion" \
         --arg x86Name "$x86Name" \
         --arg x86Hash "$x86Hash" \
-        --arg armName "$armName" \
-        --arg armHash "$armHash" \
-        '{version: $version, assets: {"x86_64-linux": {name: $x86Name, hash: $x86Hash}, "aarch64-linux": {name: $armName, hash: $armHash}}}' \
+        '{version: $version, assets: {"x86_64-linux": {name: $x86Name, hash: $x86Hash}}}' \
         >$outputFile
     or return 1
 
@@ -138,8 +132,8 @@ function verify_local_lock --argument-names name source --inherit-variable root 
 end
 
 function validate --argument-names root --inherit-variable tmp
-    echo 'Evaluating both Linux systems...'
-    nix flake check "path:$root" --no-build --all-systems
+    echo 'Evaluating x86_64-linux...'
+    nix flake check "path:$root" --no-build
     or return 1
 
     set -l packageNamesFile "$tmp/package-names.json"

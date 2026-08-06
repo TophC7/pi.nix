@@ -4,10 +4,6 @@
     "x86_64-linux": {
       "name": "rtk-x86_64-unknown-linux-musl.tar.gz",
       "hash": "sha256-2UzCo+V/pTSJK1I1pybn7rdSPyBaX49I+FO/yue+fjM="
-    },
-    "aarch64-linux": {
-      "name": "rtk-aarch64-unknown-linux-gnu.tar.gz",
-      "hash": "sha256-XNP3+iaX+vnlt3oQzk5pkAbgLUdS15LwZVBpfrS46Kk="
     }
   }
 }

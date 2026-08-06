@@ -6,21 +6,11 @@
 }:
 let
   system = pkgs.stdenv.hostPlatform.system;
-  pi = inputs.llm-agents.packages.${system}.pi;
+  pi = inputs.pi-source.packages.${system}.pi;
   claudeCode = inputs.llm-agents.packages.${system}.claude-code;
 in
 pi.overrideAttrs (old: {
-  nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [
-    pkgs.makeWrapper
-    pkgs.patch
-  ];
-
-  # Apply source patches before llm-agents compiles Pi's standalone Bun binary.
-  preInstall = ''
-    patch -p1 < ${../patches/pi-ai-discard-failed-tool-continuations.patch}
-    patch -p1 < ${../patches/pi-tui-incremental-input-render.patch}
-  ''
-  + (old.preInstall or "");
+  nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [ pkgs.makeWrapper ];
 
   postInstall = (old.postInstall or "") + ''
     wrapProgram $out/bin/pi \

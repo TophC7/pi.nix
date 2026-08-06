@@ -13,13 +13,13 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
-    # Intentionally NOT following our nixpkgs. llm-agents pins its own, newer
-    # nixpkgs; forcing our older mix.nix one breaks eval of its package set
-    # (e.g. vessel-browser wants electron_42). Pi is a JS tool we rewrap against
-    # our own Bun, so its runtime closure is unaffected.
+    # Retained for unrelated packaged agents, currently Claude Code. Pi itself
+    # comes directly from the owned source fork below.
     llm-agents.url = "github:numtide/llm-agents.nix";
 
     bun2nix.follows = "llm-agents/bun2nix";
+
+    pi-source.url = "git+file:///repo/pi";
 
     # ---------------------------------------------------------
     # Pi Package Inputs
@@ -67,10 +67,7 @@
     }@inputs:
     let
       lib = mix-nix.lib;
-      supportedSystems = [
-        "x86_64-linux"
-        "aarch64-linux"
-      ];
+      supportedSystems = [ "x86_64-linux" ];
       forAllSystems = nixpkgs.lib.genAttrs supportedSystems;
     in
     {

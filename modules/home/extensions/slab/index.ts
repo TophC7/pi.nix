@@ -366,7 +366,6 @@ export default function slab(pi: ExtensionAPI): void {
           thinkingTonePainter?.paint(ctx.ui.theme, thinking, text) ?? ctx.ui.theme.getThinkingBorderColor('off')(text),
         onTextChange: onEditorTextChange
       })
-      tui.setInputRenderScope(editor, () => (slabFooter ? [editor, slabFooter] : [editor]))
       requestRender = () => tui.requestRenderFor(editor)
       return editor
     })
