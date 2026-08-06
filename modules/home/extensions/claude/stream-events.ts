@@ -41,7 +41,9 @@ export class ClaudeTurn {
     if (message.type !== 'result') return false
     if (message.subtype !== 'success') throw new Error(resultError(message))
 
-    if (message.usage) updateUsage(this.message, message.usage, this.model)
+    // Result usage aggregates every API call in the query. Stream events already
+    // hold this message's request usage, which Pi uses for compaction thresholds.
+    if (!this.sawStreamEvent && message.usage) updateUsage(this.message, message.usage, this.model)
     if (!this.sawStreamEvent && message.result) this.emitFallbackText(message.result)
     this.finish(this.message.stopReason === 'length' ? 'length' : 'stop')
     return true
