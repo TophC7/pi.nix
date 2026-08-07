@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type { ThinkingLevel } from '@earendil-works/pi-agent-core'
@@ -40,6 +41,7 @@ interface PiRuntimeModule {
   }
   DefaultResourceLoader: new (options: Record<string, unknown>) => { reload(): Promise<void> }
   SessionManager: { inMemory(cwd: string): unknown }
+  SettingsManager: { inMemory(): unknown }
   createAgentSession(options: Record<string, unknown>): Promise<{ session: RunnerSession }>
 }
 
@@ -53,7 +55,13 @@ async function loadPiRuntime(): Promise<PiRuntimeModule> {
 function asPiRuntime(value: unknown): PiRuntimeModule {
   if (!value || typeof value !== 'object')
     throw new Error('@earendil-works/pi-coding-agent did not export a module object.')
-  const requiredMembers = ['ModelRuntime', 'DefaultResourceLoader', 'SessionManager', 'createAgentSession'] as const
+  const requiredMembers = [
+    'ModelRuntime',
+    'DefaultResourceLoader',
+    'SessionManager',
+    'SettingsManager',
+    'createAgentSession'
+  ] as const
   for (const member of requiredMembers) {
     if (!(member in value)) throw new Error(`@earendil-works/pi-coding-agent missing member: ${member}`)
   }
@@ -68,6 +76,7 @@ export interface RunnerSession {
   subscribe(listener: SessionListener): () => void
   abort(): Promise<void> | void
   dispose(): Promise<void> | void
+  setModel?(model: unknown): Promise<void>
   getActiveToolNames?(): string[]
   bindExtensions?(bindings: Record<string, unknown>): Promise<void>
   extensionRunner?: {
@@ -336,9 +345,16 @@ async function createRunnerSession(
   const tools = resolveToolNames(agent)
   if (factory) return factory({ agent, cwd, agentDir, tools, signal })
   const pi = await loadPiRuntime()
+  const modelRuntime = await pi.ModelRuntime.create({
+    authPath: join(agentDir, 'auth.json'),
+    modelsPath: join(agentDir, 'models.json')
+  })
+  const model = resolveModel(agent, modelRuntime)
+  const needsExtensionModel = Boolean(agent.model && !model)
   const loader = new pi.DefaultResourceLoader({
     cwd,
     agentDir,
+    additionalExtensionPaths: needsExtensionModel ? providerExtensionPaths(agent.model!, agentDir) : [],
     noExtensions:
       tools !== undefined && tools.every((tool) => BUILTIN_TOOLS.includes(tool as (typeof BUILTIN_TOOLS)[number])),
     noSkills: agent.inheritSkills === false,
@@ -347,26 +363,31 @@ async function createRunnerSession(
     appendSystemPromptOverride: (base: unknown[]) =>
       agent.systemPromptMode === 'append' ? [...base, agent.systemPrompt] : base
   })
-  const [modelRuntime] = await Promise.all([
-    pi.ModelRuntime.create({
-      authPath: join(agentDir, 'auth.json'),
-      modelsPath: join(agentDir, 'models.json')
-    }),
-    loader.reload()
-  ])
-  const model = resolveModel(agent, modelRuntime)
+  await loader.reload()
   const created = await pi.createAgentSession({
     cwd,
     agentDir,
     sessionManager: pi.SessionManager.inMemory(cwd),
+    settingsManager: needsExtensionModel ? pi.SettingsManager.inMemory() : undefined,
     modelRuntime,
     model,
     thinkingLevel: parseThinking(agent.thinking),
     tools,
     resourceLoader: loader
   })
-  await bindRunnerSessionExtensions(created.session)
-  return created.session
+  try {
+    await bindRunnerSessionExtensions(created.session)
+    if (needsExtensionModel) {
+      const extensionModel = resolveModel(agent, modelRuntime)
+      if (!extensionModel) throw new Error(`Unknown model: ${agent.model}`)
+      if (!created.session.setModel) throw new Error('Runner session cannot select an extension-provided model')
+      await created.session.setModel(extensionModel)
+    }
+    return created.session
+  } catch (error) {
+    await disposeRunnerSession(created.session)
+    throw error
+  }
 }
 
 async function bindRunnerSessionExtensions(session: RunnerSession): Promise<void> {
@@ -394,6 +415,19 @@ function resolveModel(agent: DiscoveredAgent, modelRuntime: { getModel(provider:
   const [provider, ...rest] = agent.model.split('/')
   const modelId = rest.join('/')
   return provider && modelId ? modelRuntime.getModel(provider, modelId) : undefined
+}
+
+function providerExtensionPaths(model: string, agentDir: string): string[] {
+  const separator = model.indexOf('/')
+  if (separator <= 0) return []
+  const provider = model.slice(0, separator)
+  const root = join(agentDir, 'extensions')
+  return [
+    join(root, provider, 'index.ts'),
+    join(root, provider, 'index.js'),
+    join(root, `${provider}.ts`),
+    join(root, `${provider}.js`)
+  ].filter(existsSync)
 }
 
 function resolveToolNames(agent: DiscoveredAgent): string[] | undefined {

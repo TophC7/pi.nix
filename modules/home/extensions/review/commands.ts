@@ -123,12 +123,14 @@ async function runReviewPipeline(pi: ExtensionAPI, ctx: ExtensionCommandContext,
       'info'
     )
 
+    const model = ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : undefined
     const response = await runSubagent(
       pi,
       ctx,
       {
         tasks: REVIEW_AGENT_REGISTRY.map(({ agent, scope }) => ({
           agent,
+          model,
           task: reviewScoutTask({
             scope,
             context: args.context.content,
