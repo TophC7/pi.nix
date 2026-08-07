@@ -515,11 +515,11 @@
         "nixpkgs": "nixpkgs_4"
       },
       "locked": {
-        "lastModified": 1786124844,
-        "narHash": "sha256-a6htN7njTMBrymoekg7jwIEu2osanVs68j8TgCDhrkc=",
+        "lastModified": 1786127992,
+        "narHash": "sha256-V6TbKoh1P1lCxu/L/bYyh4JljrC88SOcChmp3wYAS2k=",
         "ref": "refs/heads/main",
-        "rev": "a44f4e952764dcbf10dd231b8822e01c1285d548",
-        "revCount": 5572,
+        "rev": "526b273052a26128e617b9eebd79b76e0c538fed",
+        "revCount": 5573,
         "type": "git",
         "url": "ssh://git@git.ryot.foo:222/toph/pi.git"
       },
