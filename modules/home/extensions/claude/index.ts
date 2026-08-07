@@ -1,6 +1,12 @@
 import type { AssistantMessageEventStream, Context, Model, SimpleStreamOptions, Tool } from '@earendil-works/pi-ai'
 import { getModels } from '@earendil-works/pi-ai/compat'
 import { newAssistantMessageEventStream } from '@pi/lib/provider/messages'
+import {
+  alignSessionHistory,
+  persistSessionState,
+  type ContextDigest,
+  type SessionStateRuntime
+} from '@pi/lib/provider/session-state'
 import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent'
 import { claudeArguments, claudeEnvironment } from './claude-command.js'
 import { ClaudeProcess } from './claude-process.js'
@@ -15,42 +21,28 @@ import {
   bootstrapPrompt,
   contextDigest,
   currentPrompt,
-  extendContextDigest,
   priorMessages,
   restoredSessionState,
   SESSION_ENTRY_TYPE,
-  type ContextDigest,
   type PersistedSessionState
 } from './session-state.js'
 import { ClaudeTurn } from './stream-events.js'
 
 const PROVIDER_ID = 'claude'
-const RUNTIME_KEY = Symbol.for('claude:runtime-v2')
 
 type SessionBinding = {
   append: (state: PersistedSessionState) => void
   cwd: string
 }
-type SessionRuntime = {
+type SessionRuntime = SessionStateRuntime<PersistedSessionState, SessionBinding> & {
   active?: QueryContext
-  persisted?: PersistedSessionState
-  validated?: ContextDigest
-  binding?: SessionBinding
 }
 type ProviderRuntime = {
+  activeQueries: Set<QueryContext>
   activeSessionId?: string
   isolateNextStream: boolean
   sessions: Map<string, SessionRuntime>
 }
-type Runtime = {
-  activeQueries: Set<QueryContext>
-}
-
-const globalState = globalThis as Record<symbol, unknown>
-const runtime = (globalState[RUNTIME_KEY] as Runtime | undefined) ?? {
-  activeQueries: new Set<QueryContext>()
-}
-if (!globalState[RUNTIME_KEY]) globalState[RUNTIME_KEY] = runtime
 
 const models = buildModels(getModels('anthropic'))
 
@@ -64,7 +56,7 @@ function streamClaudeCore(
   const piSessionId = provider.activeSessionId
 
   const results = toolResults(context)
-  const owner = results.length > 0 ? queryForResults(results) : undefined
+  const owner = results.length > 0 ? queryForResults(provider, results) : undefined
   if (owner) {
     owner.latestMessages = context.messages
     owner.turn = new ClaudeTurn(model, stream, owner.toolNames)
@@ -84,30 +76,10 @@ function streamClaudeCore(
   }
 
   const history = priorMessages(context.messages)
-  const state = session.persisted
-  const candidate =
-    !isolated &&
-    state !== undefined &&
-    !('reset' in state) &&
-    state.modelId === model.id &&
-    state.messageCount === history.length
-  let historyDigest: ContextDigest
-  let aligned = false
-  if (candidate && !('reset' in state)) {
-    const cached = session.validated
-    if (cached?.messageCount === state.messageCount && cached.contextHash === state.contextHash) {
-      historyDigest = cached
-      aligned = true
-    } else {
-      historyDigest = contextDigest(history)
-      aligned = historyDigest.contextHash === state.contextHash
-      if (aligned) session.validated = historyDigest
-    }
-  } else {
-    historyDigest = contextDigest(history)
-  }
-  const resume = aligned && state && !('reset' in state) ? state.claudeSessionId : undefined
-  const prompt = aligned || history.length === 0 ? currentPrompt(context.messages) : bootstrapPrompt(context.messages)
+  const alignment = alignSessionHistory(session, model.id, history, isolated, contextDigest)
+  const resume = alignment.state?.claudeSessionId
+  const prompt =
+    alignment.aligned || history.length === 0 ? currentPrompt(context.messages) : bootstrapPrompt(context.messages)
   if (prompt.length === 0) return failedStream(stream, model, new Error('Claude prompt is empty'))
 
   const query = new QueryContext()
@@ -164,7 +136,7 @@ function streamClaudeCore(
     query.pendingResults.clear()
     bridge?.close()
     claude.close()
-    runtime.activeQueries.delete(query)
+    provider.activeQueries.delete(query)
     if (!isolated && session.active === query) session.active = undefined
   }
   const abort = () => {
@@ -177,7 +149,7 @@ function streamClaudeCore(
   query.cleanup = abort
   if (!isolated) {
     session.active = query
-    runtime.activeQueries.add(query)
+    provider.activeQueries.add(query)
   }
   if (options?.signal) {
     if (options.signal.aborted) abort()
@@ -190,12 +162,14 @@ function streamClaudeCore(
     query,
     () => aborted,
     () => {
-      if (!isolated && !aborted && piSessionId)
-        persistCompletedSession(provider, piSessionId, model, query, historyDigest)
+      if (!alignment.isolated && !aborted && piSessionId)
+        persistCompletedSession(provider, piSessionId, model, query, alignment.historyDigest)
     }
   )
     .catch((error) => {
-      if (!isolated && piSessionId) invalidateSession(provider, piSessionId, true)
+      if (!isolated && piSessionId && provider.sessions.get(piSessionId)?.active === query) {
+        invalidateSession(provider, piSessionId, true)
+      }
       query.turn?.fail(asError(error), aborted)
     })
     .finally(() => {
@@ -234,19 +208,16 @@ function persistCompletedSession(
   historyDigest: ContextDigest
 ): void {
   if (!query.claudeSessionId || !query.turn) return
+  const claudeSessionId = query.claudeSessionId
   const appendedMessages = [...query.latestMessages.slice(historyDigest.messageCount), query.turn.message]
-  const digest = extendContextDigest(historyDigest, appendedMessages)
-  const state: PersistedSessionState = {
+  const session = provider.sessions.get(piSessionId) ?? {}
+  persistSessionState(session, historyDigest, appendedMessages, (digest): PersistedSessionState => ({
     version: 2,
-    claudeSessionId: query.claudeSessionId,
+    claudeSessionId,
     modelId: model.id,
     ...digest
-  }
-  const session = provider.sessions.get(piSessionId) ?? {}
-  session.persisted = state
-  session.validated = digest
+  }))
   provider.sessions.set(piSessionId, session)
-  session.binding?.append(state)
 }
 
 function invalidateSession(provider: ProviderRuntime, piSessionId: string, persistReset: boolean): void {
@@ -298,10 +269,10 @@ function toolResults(context: Context): McpResult[] {
   )
 }
 
-function queryForResults(results: McpResult[]): QueryContext | undefined {
+function queryForResults(provider: ProviderRuntime, results: McpResult[]): QueryContext | undefined {
   for (const result of results) {
     if (!result.toolCallId) continue
-    for (const query of runtime.activeQueries) {
+    for (const query of provider.activeQueries) {
       if (
         query.pendingToolCalls.has(result.toolCallId) ||
         query.pendingResults.has(result.toolCallId) ||
@@ -359,8 +330,8 @@ function errorMessage(error: unknown): string {
 }
 
 export default function claude(pi: ExtensionAPI): void {
-  process.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = '1'
   const provider: ProviderRuntime = {
+    activeQueries: new Set<QueryContext>(),
     isolateNextStream: false,
     sessions: new Map<string, SessionRuntime>()
   }

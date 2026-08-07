@@ -1,11 +1,12 @@
 import type { Tool } from '@earendil-works/pi-ai'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { NdjsonLineBuffer } from '@pi/lib/provider/ndjson'
+import type { McpResult } from '@pi/lib/provider/tool-results'
+import { mkdtempSync, rmSync } from 'node:fs'
 import { createServer, type Socket } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import type { McpToPiMessage, PiToMcpMessage } from './bridge-protocol.js'
-import type { McpResult } from '@pi/lib/provider/tool-results'
+import type { McpToPiMessage, PiToMcpMessage, ToolDefinition } from './bridge-protocol.js'
 import { MCP_SERVER_NAME } from './mcp-names.js'
 import type { QueryContext } from './query-state.js'
 
@@ -24,14 +25,12 @@ export function createToolBridge(
 
   const directory = mkdtempSync(join(tmpdir(), 'pi-claude-tools-'))
   const socketPath = join(directory, 'bridge.sock')
-  const manifestPath = join(directory, 'tools.json')
   const processPath = fileURLToPath(new URL('./mcp-process.ts', import.meta.url))
-  const manifest = tools.map((tool) => ({
+  const catalogue: ToolDefinition[] = tools.map((tool) => ({
     name: tool.name,
     description: tool.description,
     inputSchema: tool.parameters
   }))
-  writeFileSync(manifestPath, JSON.stringify(manifest))
 
   const sockets = new Set<Socket>()
   let closed = false
@@ -81,25 +80,34 @@ export function createToolBridge(
 
   const server = createServer((socket) => {
     sockets.add(socket)
-    let buffer = ''
-    socket.setEncoding('utf8')
-    socket.on('data', (chunk) => {
-      buffer += chunk
-      const lines = buffer.split('\n')
-      buffer = lines.pop() ?? ''
-      for (const line of lines) {
-        if (!line.trim()) continue
-        let message: McpToPiMessage
-        try {
-          message = JSON.parse(line) as McpToPiMessage
-        } catch {
-          fail(new Error(`Claude MCP bridge emitted invalid JSON: ${line.slice(0, 500)}`))
-          return
-        }
-        if (message.type === 'ready') markReady()
-        else handleCall(message, socket, queryContext)
+    const lines = new NdjsonLineBuffer('Claude MCP bridge')
+    const write = (message: PiToMcpMessage) => socket.write(`${JSON.stringify(message)}\n`)
+    const handleLine = (line: string) => {
+      if (!line.trim()) return
+      let message: McpToPiMessage
+      try {
+        message = JSON.parse(line) as McpToPiMessage
+      } catch {
+        throw new Error(`Claude MCP bridge emitted invalid JSON: ${line.slice(0, 500)}`)
       }
-    })
+      if (message.type === 'hello') write({ type: 'tools', tools: catalogue })
+      else if (message.type === 'ready') markReady()
+      else handleCall(message, socket, queryContext)
+    }
+    const receive = (chunk: string, final = false) => {
+      try {
+        for (const line of lines.push(chunk)) handleLine(line)
+        const tail = final ? lines.finish() : undefined
+        if (tail !== undefined) handleLine(tail)
+      } catch (error) {
+        fail(error instanceof Error ? error : new Error(String(error)))
+        socket.destroy()
+      }
+    }
+
+    socket.setEncoding('utf8')
+    socket.on('data', (chunk) => receive(String(chunk)))
+    socket.on('end', () => receive('', true))
     socket.on('error', (error) => fail(error))
     socket.on('close', () => {
       sockets.delete(socket)
@@ -113,7 +121,7 @@ export function createToolBridge(
     mcpServers: {
       [MCP_SERVER_NAME]: {
         command: bunExecutable,
-        args: [processPath, manifestPath, socketPath]
+        args: [processPath, socketPath]
       }
     }
   })
@@ -126,7 +134,8 @@ export function createToolBridge(
       closed = true
       rejectReady(new Error('Claude MCP tool bridge closed before becoming ready'))
       for (const socket of sockets) socket.destroy()
-      server.close(() => rmSync(directory, { recursive: true, force: true }))
+      server.close(() => undefined)
+      rmSync(directory, { recursive: true, force: true })
     }
   }
 }

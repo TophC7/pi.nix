@@ -10,6 +10,31 @@ export type ContextDigest = {
   messageCount: number
 }
 
+export type SessionStateBinding<State> = {
+  append: (state: State) => void
+}
+
+export type SessionStateRuntime<
+  State,
+  Binding extends SessionStateBinding<State> = SessionStateBinding<State>
+> = {
+  persisted?: State
+  validated?: ContextDigest
+  binding?: Binding
+}
+
+type ResumableSessionState = { modelId: string } & ContextDigest
+type ProviderSessionState = { reset: true } | ResumableSessionState
+
+type SessionAlignment<State extends ResumableSessionState> =
+  | { isolated: true; aligned: false; state?: undefined }
+  | {
+      isolated: false
+      aligned: boolean
+      historyDigest: ContextDigest
+      state?: State
+    }
+
 /**
  * Latest persisted provider entry from a session branch, validated against
  * the common state shape: `{ version, reset: true }` or
@@ -52,6 +77,34 @@ export function priorMessages(messages: Context['messages']): Context['messages'
   return messages.slice(0, currentTurnStart(messages))
 }
 
+/** Validates whether persisted provider state still matches Pi's history. */
+export function alignSessionHistory<State extends ProviderSessionState>(
+  session: Pick<SessionStateRuntime<State>, 'persisted' | 'validated'>,
+  modelId: string,
+  history: Context['messages'],
+  isolated: boolean,
+  digest: (messages: Context['messages']) => ContextDigest
+): SessionAlignment<Exclude<State, { reset: true }>> {
+  if (isolated) return { isolated: true, aligned: false }
+
+  const persisted = session.persisted
+  const state =
+    persisted && !('reset' in persisted) ? (persisted as Exclude<State, { reset: true }>) : undefined
+  if (!state || state.modelId !== modelId || state.messageCount !== history.length) {
+    return { isolated: false, aligned: false, historyDigest: digest(history) }
+  }
+
+  const cached = session.validated
+  if (cached?.messageCount === state.messageCount && cached.contextHash === state.contextHash) {
+    return { isolated: false, aligned: true, historyDigest: cached, state }
+  }
+
+  const historyDigest = digest(history)
+  const aligned = historyDigest.contextHash === state.contextHash
+  if (aligned) session.validated = historyDigest
+  return { isolated: false, aligned, historyDigest, state: aligned ? state : undefined }
+}
+
 /**
  * Normalizes a message for hashing or transcript embedding: drops fields that
  * vary without changing meaning, and never inlines image bytes. Hashing keeps
@@ -81,10 +134,27 @@ export function contextDigest(seed: string, messages: Context['messages']): Cont
 
 export function extendContextDigest(prefix: ContextDigest, messages: Context['messages']): ContextDigest {
   let contextHash = prefix.contextHash
+  const hasher = new Bun.CryptoHasher('sha256')
   for (const message of messages) {
-    contextHash = digestText(`${contextHash}\u0000${JSON.stringify(transformMessage(message))}`)
+    hasher.update(`${contextHash}\u0000${JSON.stringify(transformMessage(message))}`)
+    contextHash = hasher.digest('hex')
   }
   return { contextHash, messageCount: prefix.messageCount + messages.length }
+}
+
+/** Extends a validated history digest and publishes provider-specific state. */
+export function persistSessionState<State>(
+  session: SessionStateRuntime<State>,
+  prefix: ContextDigest,
+  messages: Context['messages'],
+  createState: (digest: ContextDigest) => State
+): State {
+  const digest = extendContextDigest(prefix, messages)
+  const state = createState(digest)
+  session.persisted = state
+  session.validated = digest
+  session.binding?.append(state)
+  return state
 }
 
 function digestText(value: string): string {

@@ -68,8 +68,8 @@ export class ClaudeTurn {
       this.start()
       const block = event.content_block
       const contentIndex = this.message.content.length
-      this.blockIndices.set(event.index, contentIndex)
       if (block?.type === 'text') {
+        this.blockIndices.set(event.index, contentIndex)
         this.message.content.push({ type: 'text', text: '' })
         this.stream.push({
           type: 'text_start',
@@ -77,6 +77,7 @@ export class ClaudeTurn {
           partial: this.message
         })
       } else if (block?.type === 'thinking') {
+        this.blockIndices.set(event.index, contentIndex)
         this.message.content.push({
           type: 'thinking',
           thinking: '',
@@ -88,6 +89,7 @@ export class ClaudeTurn {
           partial: this.message
         })
       } else if (block?.type === 'tool_use') {
+        this.blockIndices.set(event.index, contentIndex)
         this.sawToolCall = true
         this.toolCallIds.push(block.id)
         this.message.content.push({
@@ -110,6 +112,7 @@ export class ClaudeTurn {
       const contentIndex = this.blockIndices.get(event.index)
       if (contentIndex === undefined) return
       const block = this.message.content[contentIndex] as any
+      if (!block) return
       if (event.delta?.type === 'text_delta' && block.type === 'text') {
         block.text += event.delta.text
         this.stream.push({
@@ -143,7 +146,9 @@ export class ClaudeTurn {
     if (event?.type === 'content_block_stop') {
       const contentIndex = this.blockIndices.get(event.index)
       if (contentIndex === undefined) return
+      this.blockIndices.delete(event.index)
       const block = this.message.content[contentIndex] as any
+      if (!block) return
       if (block.type === 'text') {
         this.stream.push({
           type: 'text_end',

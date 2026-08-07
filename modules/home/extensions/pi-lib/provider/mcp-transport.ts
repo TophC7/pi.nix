@@ -7,11 +7,31 @@ export class McpOutput {
   private chain = Promise.resolve()
 
   write(message: unknown): Promise<void> {
-    this.chain = this.chain.then(async () => {
+    const write = this.chain.then(async () => {
       await Bun.write(Bun.stdout, `${JSON.stringify(message)}\n`)
     })
-    return this.chain
+    this.chain = write.catch(() => undefined)
+    return write
   }
+}
+
+/** Parses one framed request, reporting malformed JSON without killing the MCP process. */
+export function dispatchJsonRpcLine<Request>(
+  line: string,
+  output: McpOutput,
+  handle: (request: Request) => Promise<void>
+): void {
+  if (!line.trim()) return
+  let request: Request
+  try {
+    request = JSON.parse(line) as Request
+  } catch {
+    void output
+      .write({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error' } })
+      .catch(() => undefined)
+    return
+  }
+  void handle(request)
 }
 
 /**

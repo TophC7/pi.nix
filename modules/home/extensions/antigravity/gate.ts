@@ -131,7 +131,7 @@ export function isAllowedToolName(name: string): boolean {
 /** Fail closed if a tool completed despite falling outside Pi's gate policy. */
 export function assertCompletedToolAllowed(step: Record<string, any>, state: string): void {
   const name = String(step.tool_name ?? step.tool_info?.name ?? '')
-  if (!name || state !== 'DONE' || step.tool_info?.error) return
+  if (!name || state !== 'DONE') return
   if (name === 'call_mcp_tool' && mcpServerName(step.tool_info?.parameters) !== hostPolicy.serverName) {
     throw new Error('agy executed call_mcp_tool against a non-Pi server; refusing to continue')
   }

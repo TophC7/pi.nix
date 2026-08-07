@@ -50,7 +50,7 @@ export function createToolBridge(options: {
 
     socket.on('data', (chunk) => {
       try {
-        for (const line of lines.push(chunk)) {
+        for (const line of lines.push(String(chunk))) {
           if (!line.trim()) continue
           let message: McpToPi
           try {
@@ -109,7 +109,8 @@ export function createToolBridge(options: {
       if (closed) return
       closed = true
       for (const socket of sockets) socket.destroy()
-      server.close(() => rmSync(directory, { recursive: true, force: true }))
+      server.close(() => undefined)
+      rmSync(directory, { recursive: true, force: true })
     }
   }
 }

@@ -1,6 +1,12 @@
 import type { AssistantMessageEventStream, Context, Model, SimpleStreamOptions } from '@earendil-works/pi-ai'
 import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent'
 import { newAssistantMessageEventStream } from '@pi/lib/provider/messages'
+import {
+  alignSessionHistory,
+  persistSessionState,
+  type ContextDigest,
+  type SessionStateRuntime
+} from '@pi/lib/provider/session-state'
 import { agyArguments, agyEnvironment } from './agy-command.js'
 import { AgyProcess } from './agy-process.js'
 import { assertHostConfiguration } from './gate.js'
@@ -11,11 +17,9 @@ import {
   bootstrapPrompt,
   contextDigest,
   currentPrompt,
-  extendContextDigest,
   priorMessages,
   restoredSessionState,
   SESSION_ENTRY_TYPE,
-  type ContextDigest,
   type PersistedSessionState
 } from './session-state.js'
 import { AgyTurn } from './stream-events.js'
@@ -23,29 +27,20 @@ import { prepareAgyWorkspace, removeAgyWorkspace } from './workspace.js'
 import { extractAllToolResults, type McpResult } from '@pi/lib/provider/tool-results'
 
 const PROVIDER_ID = 'antigravity'
-const RUNTIME_KEY = Symbol.for('antigravity:runtime-v1')
 const PRINT_TIMEOUT = '30m'
 
 type SessionBinding = { append: (state: PersistedSessionState) => void; workspace?: string }
-type SessionRuntime = {
+type SessionRuntime = SessionStateRuntime<PersistedSessionState, SessionBinding> & {
   active?: AgyQuery
-  persisted?: PersistedSessionState
-  validated?: ContextDigest
-  binding?: SessionBinding
 }
 type ProviderRuntime = {
+  activeQueries: Set<AgyQuery>
   activeSessionId?: string
   fallbackWorkspace?: string
   fallbackWorkspaceId: string
   isolateNextStream: boolean
   sessions: Map<string, SessionRuntime>
 }
-
-const globalState = globalThis as Record<symbol, unknown>
-const runtime = (globalState[RUNTIME_KEY] as { activeQueries: Set<AgyQuery> } | undefined) ?? {
-  activeQueries: new Set<AgyQuery>()
-}
-if (!globalState[RUNTIME_KEY]) globalState[RUNTIME_KEY] = runtime
 
 function streamAntigravityCore(
   provider: ProviderRuntime,
@@ -60,7 +55,7 @@ function streamAntigravityCore(
   // running and blocked on the matching MCP call. Attach a new turn to it
   // rather than starting anything.
   const results = toolResults(context)
-  const owner = results.length > 0 ? queryForResults(results) : undefined
+  const owner = results.length > 0 ? queryForResults(provider, results) : undefined
   if (owner) {
     owner.latestMessages = context.messages
     owner.attach(new AgyTurn(model, stream))
@@ -78,32 +73,10 @@ function streamAntigravityCore(
   }
 
   const history = priorMessages(context.messages)
-  const state = session.persisted
-  const candidate =
-    !isolated &&
-    state !== undefined &&
-    !('reset' in state) &&
-    state.modelId === model.id &&
-    state.messageCount === history.length
-
-  let historyDigest: ContextDigest
-  let aligned = false
-  if (candidate && state && !('reset' in state)) {
-    const cached = session.validated
-    if (cached?.messageCount === state.messageCount && cached.contextHash === state.contextHash) {
-      historyDigest = cached
-      aligned = true
-    } else {
-      historyDigest = contextDigest(history)
-      aligned = historyDigest.contextHash === state.contextHash
-      if (aligned) session.validated = historyDigest
-    }
-  } else {
-    historyDigest = contextDigest(history)
-  }
-
-  const conversation = aligned && state && !('reset' in state) ? state.conversationId : undefined
-  const prompt = aligned || history.length === 0 ? currentPrompt(context.messages) : bootstrapPrompt(context.messages)
+  const alignment = alignSessionHistory(session, model.id, history, isolated, contextDigest)
+  const conversation = alignment.state?.conversationId
+  const prompt =
+    alignment.aligned || history.length === 0 ? currentPrompt(context.messages) : bootstrapPrompt(context.messages)
   if (!prompt) return failedStream(stream, model, new Error('Antigravity prompt is empty'))
 
   let query: AgyQuery
@@ -133,7 +106,7 @@ function streamAntigravityCore(
     query.releasePending('Pi ended the turn before this tool call completed.')
     query.bridge.close()
     query.process.close()
-    runtime.activeQueries.delete(query)
+    provider.activeQueries.delete(query)
     if (!isolated && session.active === query) session.active = undefined
   }
   const abort = () => {
@@ -147,7 +120,7 @@ function streamAntigravityCore(
 
   if (!isolated) {
     session.active = query
-    runtime.activeQueries.add(query)
+    provider.activeQueries.add(query)
   }
   if (options?.signal) {
     if (options.signal.aborted) abort()
@@ -156,8 +129,8 @@ function streamAntigravityCore(
 
   void consume(query, () => aborted)
     .then((reachedTerminal) => {
-      if (reachedTerminal && !isolated && !aborted && piSessionId) {
-        persistCompletedSession(provider, piSessionId, model, query, historyDigest)
+      if (reachedTerminal && !alignment.isolated && !aborted && piSessionId) {
+        persistCompletedSession(provider, piSessionId, model, query, alignment.historyDigest)
       }
     })
     .catch((error: unknown) => {
@@ -253,19 +226,16 @@ function persistCompletedSession(
   historyDigest: ContextDigest
 ): void {
   if (!query.conversationId || !query.turn) return
+  const conversationId = query.conversationId
   const appended = [...query.latestMessages.slice(historyDigest.messageCount), query.turn.message]
-  const digest = extendContextDigest(historyDigest, appended)
-  const state: PersistedSessionState = {
+  const session = provider.sessions.get(piSessionId) ?? {}
+  persistSessionState(session, historyDigest, appended, (digest): PersistedSessionState => ({
     version: 1,
-    conversationId: query.conversationId,
+    conversationId,
     modelId: model.id,
     ...digest
-  }
-  const session = provider.sessions.get(piSessionId) ?? {}
-  session.persisted = state
-  session.validated = digest
+  }))
   provider.sessions.set(piSessionId, session)
-  session.binding?.append(state)
 }
 
 function invalidateSession(provider: ProviderRuntime, piSessionId: string, persistReset: boolean): void {
@@ -313,10 +283,10 @@ function toolResults(context: Context): McpResult[] {
   )
 }
 
-function queryForResults(results: McpResult[]): AgyQuery | undefined {
+function queryForResults(provider: ProviderRuntime, results: McpResult[]): AgyQuery | undefined {
   for (const result of results) {
     if (!result.toolCallId) continue
-    for (const query of runtime.activeQueries) {
+    for (const query of provider.activeQueries) {
       if (query.owns(result.toolCallId)) return query
     }
   }
@@ -345,6 +315,7 @@ function asError(error: unknown): Error {
 
 export default function antigravity(pi: ExtensionAPI): void {
   const provider: ProviderRuntime = {
+    activeQueries: new Set<AgyQuery>(),
     fallbackWorkspaceId: `unbound-${crypto.randomUUID()}`,
     isolateNextStream: false,
     sessions: new Map<string, SessionRuntime>()

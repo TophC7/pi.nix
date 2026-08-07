@@ -5,7 +5,12 @@
 // Launched by ~/.gemini/config/mcp_config.json with a fixed argv, so the
 // per-session socket path arrives through the environment instead.
 
-import { connectUnixSocket, mcpInputSchema, McpOutput } from '@pi/lib/provider/mcp-transport'
+import {
+  connectUnixSocket,
+  dispatchJsonRpcLine,
+  mcpInputSchema,
+  McpOutput
+} from '@pi/lib/provider/mcp-transport'
 import { NdjsonLineBuffer } from '@pi/lib/provider/ndjson'
 import { SOCKET_ENVIRONMENT_VARIABLE, type McpToPi, type PiToMcp, type ToolDefinition } from './bridge-protocol.js'
 
@@ -40,7 +45,7 @@ const socketLines = new NdjsonLineBuffer('Pi tool bridge')
 socket.setEncoding('utf8')
 socket.on('data', (chunk) => {
   try {
-    for (const line of socketLines.push(chunk)) {
+    for (const line of socketLines.push(String(chunk))) {
       if (!line.trim()) continue
       const message = JSON.parse(line) as PiToMcp
       if (message.type === 'tools') {
@@ -69,12 +74,12 @@ const decoder = new TextDecoder()
 const stdinLines = new NdjsonLineBuffer('AGY MCP input')
 for await (const chunk of Bun.stdin.stream()) {
   for (const line of stdinLines.push(decoder.decode(chunk, { stream: true }))) {
-    if (line.trim()) void handle(JSON.parse(line) as JsonRpcRequest)
+    dispatchJsonRpcLine(line, output, handle)
   }
 }
 stdinLines.push(decoder.decode())
 const stdinTail = stdinLines.finish()
-if (stdinTail?.trim()) void handle(JSON.parse(stdinTail) as JsonRpcRequest)
+if (stdinTail !== undefined) dispatchJsonRpcLine(stdinTail, output, handle)
 
 async function handle(request: JsonRpcRequest): Promise<void> {
   if (request.method === 'notifications/cancelled') {
