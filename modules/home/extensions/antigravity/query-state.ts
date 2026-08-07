@@ -7,6 +7,11 @@ import type { McpResult } from '@pi/lib/provider/tool-results'
 const MAX_BUFFERED_MESSAGES = 256
 const MAX_BUFFERED_BYTES = 4 * 1024 * 1024
 
+export type AgyRuntimeExpectation = {
+  cwd: string
+  model: string
+}
+
 /**
  * One AGY process and everything hanging off it, for the length of a Pi turn.
  *
@@ -25,11 +30,19 @@ export class AgyQuery {
   private readonly pending = new Map<string, (result: McpResult) => void>()
   private buffered: AgyMessage[] = []
   private bufferedBytes = 0
+  private initValidated = false
 
   constructor(
     readonly process: AgyProcess,
-    readonly bridge: ToolBridge
+    readonly bridge: ToolBridge,
+    private readonly expected: AgyRuntimeExpectation
   ) {}
+
+  assertReady(): void {
+    if (!this.initValidated) throw new Error('AGY produced model activity before a valid init event')
+    if (!this.bridge.helloReceived) throw new Error('AGY did not connect to Pi\'s MCP bridge before inference')
+    if (!this.bridge.promptServed) throw new Error('AGY did not request Pi\'s system prompt before inference')
+  }
 
   attach(turn: AgyTurn): void {
     this.turn = turn
@@ -39,8 +52,31 @@ export class AgyQuery {
     for (const message of buffered) turn.handle(message)
   }
 
-  /** Routes an AGY message to the live turn, or holds it until one attaches. */
+  private validateInit(init: Record<string, unknown>): void {
+    const permissionMode = init.permission_mode ?? init.permissionMode
+    const tools = Array.isArray(init.tools) ? init.tools : []
+    if (init.cwd !== this.expected.cwd) {
+      throw new Error(`AGY started in unexpected workspace: ${String(init.cwd)}`)
+    }
+    if (init.model !== this.expected.model) {
+      throw new Error(`AGY selected unexpected model: ${String(init.model)}`)
+    }
+    if (init.agent != null && init.agent !== '') {
+      throw new Error(`AGY selected unexpected custom agent: ${String(init.agent)}`)
+    }
+    if (permissionMode !== 'request-review') {
+      throw new Error(`AGY selected unsafe permission mode: ${String(permissionMode)}`)
+    }
+    if (!tools.includes('call_mcp_tool')) {
+      throw new Error('AGY did not expose call_mcp_tool')
+    }
+    this.initValidated = true
+  }
+
+  /** Validates and routes an AGY message, or holds it until one attaches. */
   route(message: AgyMessage): 'continue' | 'terminal' {
+    if (message.event === 'init') this.validateInit(message.init ?? {})
+    if (isInferenceActivity(message)) this.assertReady()
     if (!this.turn || this.turn.isFinished) {
       this.bufferedBytes += JSON.stringify(message).length
       if (this.buffered.length >= MAX_BUFFERED_MESSAGES || this.bufferedBytes > MAX_BUFFERED_BYTES) {
@@ -79,4 +115,10 @@ export class AgyQuery {
     }
     this.pending.clear()
   }
+}
+
+function isInferenceActivity(message: AgyMessage): boolean {
+  if (message.event === 'result') return true
+  if (message.event !== 'step_update') return false
+  return message.step_update?.step_type === 'agent_response' || message.step_update?.step_type === 'tool'
 }

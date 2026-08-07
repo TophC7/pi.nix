@@ -1,7 +1,7 @@
 import { calculateCost, type AssistantMessage, type AssistantMessageEventStream, type Model } from '@earendil-works/pi-ai'
 import { newAssistantMessage } from '@pi/lib/provider/messages'
 import type { AgyMessage } from './agy-process.js'
-import { isAllowedToolName } from './gate.js'
+import { assertCompletedToolAllowed } from './gate.js'
 
 export type TurnOutcome = 'continue' | 'terminal'
 
@@ -96,7 +96,7 @@ export class AgyTurn {
         if (state === 'DONE') this.closeText()
         return
       case 'tool':
-        this.assertToolAllowed(step, state)
+        assertCompletedToolAllowed(step, state)
         return
       default:
         // error_message, checkpoint, system_message, user_input, finish,
@@ -109,22 +109,6 @@ export class AgyTurn {
         // reported by the terminal result's status instead.
         return
     }
-  }
-
-  /**
-   * Last line of defence behind the gate. A denied built-in never reaches this
-   * path at all — it surfaces as an opaque error_message step and no `tool`
-   * step is emitted — so a completed `tool` step naming a built-in means the
-   * gate did not run and AGY is acting outside Pi.
-   */
-  private assertToolAllowed(step: Record<string, any>, state: string): void {
-    const name = String(step.tool_name ?? step.tool_info?.name ?? '')
-    if (!name || isAllowedToolName(name)) return
-    if (state !== 'DONE' || step.tool_info?.error) return
-    throw new Error(
-      `agy executed the built-in tool "${name}" outside Pi. The PreToolUse gate is not active; ` +
-        'refusing to continue.'
-    )
   }
 
   private appendText(stepIndex: number, delta: string): void {

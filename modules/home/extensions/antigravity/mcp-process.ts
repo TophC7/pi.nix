@@ -47,6 +47,7 @@ socket.on('data', (chunk) => {
         announceTools(message.tools)
         continue
       }
+      if (message.type !== 'result') continue
       const request = pending.get(message.requestId)
       if (!request) continue
       pending.delete(message.requestId)

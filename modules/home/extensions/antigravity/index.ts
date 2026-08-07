@@ -3,7 +3,7 @@ import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-a
 import { newAssistantMessageEventStream } from '@pi/lib/provider/messages'
 import { agyArguments, agyEnvironment } from './agy-command.js'
 import { AgyProcess } from './agy-process.js'
-import { assertGateInstalled } from './gate.js'
+import { assertHostConfiguration } from './gate.js'
 import { createToolBridge } from './mcp-bridge.js'
 import { agyModelSlug, buildModels } from './models.js'
 import { AgyQuery } from './query-state.js'
@@ -19,13 +19,14 @@ import {
   type PersistedSessionState
 } from './session-state.js'
 import { AgyTurn } from './stream-events.js'
+import { prepareAgyWorkspace, removeAgyWorkspace } from './workspace.js'
 import { extractAllToolResults, type McpResult } from '@pi/lib/provider/tool-results'
 
 const PROVIDER_ID = 'antigravity'
 const RUNTIME_KEY = Symbol.for('antigravity:runtime-v1')
 const PRINT_TIMEOUT = '30m'
 
-type SessionBinding = { append: (state: PersistedSessionState) => void; cwd: string }
+type SessionBinding = { append: (state: PersistedSessionState) => void; workspace?: string }
 type SessionRuntime = {
   active?: AgyQuery
   persisted?: PersistedSessionState
@@ -34,6 +35,8 @@ type SessionRuntime = {
 }
 type ProviderRuntime = {
   activeSessionId?: string
+  fallbackWorkspace?: string
+  fallbackWorkspaceId: string
   isolateNextStream: boolean
   sessions: Map<string, SessionRuntime>
 }
@@ -105,14 +108,14 @@ function streamAntigravityCore(
 
   let query: AgyQuery
   try {
-    assertGateInstalled()
+    assertHostConfiguration()
     query = startQuery({
       model,
       context,
       options,
       prompt,
       conversation,
-      cwd: session.binding?.cwd ?? process.cwd(),
+      workspace: queryWorkspace(provider, session, piSessionId),
       isolated
     })
   } catch (error) {
@@ -177,17 +180,21 @@ function startQuery(options: {
   options: SimpleStreamOptions | undefined
   prompt: string
   conversation?: string
-  cwd: string
+  workspace: string
   isolated: boolean
 }): AgyQuery {
   // The bridge is created first so its socket path can be handed to the
   // process, but its callbacks only fire once the process is running, by which
   // point `query` is assigned.
   let query: AgyQuery | undefined
+  const modelSlug = agyModelSlug(options.model.id, options.options?.reasoning)
   const bridge = createToolBridge({
+    // Delivered by AGY's PreInvocation hook as a transient system message.
+    systemPrompt: options.context.systemPrompt,
     // An isolated stream (compaction, summarisation) must not be able to act.
     tools: options.isolated ? [] : (options.context.tools ?? []),
     onCall: async (name, args) => {
+      query?.assertReady()
       const turn = query?.turn
       if (!query || !turn || turn.isFinished) {
         throw new Error('Pi has no active turn for this tool call')
@@ -210,15 +217,15 @@ function startQuery(options: {
     const process = new AgyProcess({
       executable: 'agy',
       args: agyArguments({
-        model: agyModelSlug(options.model.id, options.options?.reasoning),
+        model: modelSlug,
         prompt: options.prompt,
         conversation: options.conversation,
         timeout: PRINT_TIMEOUT
       }),
-      cwd: options.cwd,
+      cwd: options.workspace,
       env: agyEnvironment(bridge.socketPath)
     })
-    query = new AgyQuery(process, bridge)
+    query = new AgyQuery(process, bridge, { cwd: options.workspace, model: modelSlug })
     return query
   } catch (error) {
     bridge.close()
@@ -277,11 +284,22 @@ function bindSession(pi: ExtensionAPI, ctx: ExtensionContext, provider: Provider
   provider.activeSessionId = piSessionId
   session.binding = {
     append: (state) => pi.appendEntry(SESSION_ENTRY_TYPE, state),
-    cwd: ctx.cwd
+    workspace: session.binding?.workspace
   }
   session.persisted = restoredSessionState(ctx.sessionManager.getBranch())
   session.validated = undefined
   provider.sessions.set(piSessionId, session)
+}
+
+function queryWorkspace(
+  provider: ProviderRuntime,
+  session: SessionRuntime,
+  piSessionId?: string
+): string {
+  if (session.binding && piSessionId) {
+    return (session.binding.workspace ??= prepareAgyWorkspace(piSessionId))
+  }
+  return (provider.fallbackWorkspace ??= prepareAgyWorkspace(provider.fallbackWorkspaceId))
 }
 
 function toolResults(context: Context): McpResult[] {
@@ -326,7 +344,11 @@ function asError(error: unknown): Error {
 }
 
 export default function antigravity(pi: ExtensionAPI): void {
-  const provider: ProviderRuntime = { isolateNextStream: false, sessions: new Map<string, SessionRuntime>() }
+  const provider: ProviderRuntime = {
+    fallbackWorkspaceId: `unbound-${crypto.randomUUID()}`,
+    isolateNextStream: false,
+    sessions: new Map<string, SessionRuntime>()
+  }
 
   pi.on('session_start', (event, ctx) => {
     bindSession(pi, ctx, provider)
@@ -352,7 +374,11 @@ export default function antigravity(pi: ExtensionAPI): void {
 
   pi.on('session_shutdown', (_event, ctx) => {
     const id = ctx.sessionManager.getSessionId()
-    provider.sessions.get(id)?.active?.cleanup?.()
+    const session = provider.sessions.get(id)
+    session?.active?.cleanup?.()
+    removeAgyWorkspace(session?.binding?.workspace)
+    removeAgyWorkspace(provider.fallbackWorkspace)
+    provider.fallbackWorkspace = undefined
     provider.sessions.delete(id)
     if (provider.activeSessionId === id) provider.activeSessionId = undefined
   })

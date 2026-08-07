@@ -10,10 +10,6 @@ export function agyArguments(options: { model: string; prompt: string; conversat
     '--model',
     options.model,
     '--disable-slash-commands',
-    // Safe only because the gate is verified live before every spawn: the
-    // PreToolUse hook denies every built-in, so this flag applies to nothing
-    // but Pi's own MCP calls. See gate.ts and AGY.md.
-    '--dangerously-skip-permissions',
     '--print-timeout',
     options.timeout
   ]

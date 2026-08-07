@@ -8,21 +8,25 @@ import type { McpToPi, PiToMcp, ToolDefinition } from './bridge-protocol.js'
 import type { McpResult } from '@pi/lib/provider/tool-results'
 
 export interface ToolBridge {
-  socketPath: string
+  readonly socketPath: string
+  readonly helloReceived: boolean
+  readonly promptServed: boolean
   close: () => void
 }
 
-// Pi side of the bridge: owns the unix socket, serves the tool catalogue, and
-// hands each tools/call to `onCall`. The returned promise is what holds AGY's
-// MCP request open while Pi executes the tool.
+// Pi side of the bridge: owns the unix socket, serves the system prompt and
+// tool catalogue, and hands each tools/call to `onCall`. The returned promise
+// holds AGY's MCP request open while Pi executes the tool.
 export function createToolBridge(options: {
+  systemPrompt: string
   tools: Tool[]
   onCall: (name: string, args: Record<string, unknown>) => Promise<McpResult>
   onError: (error: Error) => void
 }): ToolBridge {
-  const directory = mkdtempSync(join(tmpdir(), 'pi-agy-tools-'))
+  const { systemPrompt, tools, onCall, onError } = options
+  const directory = mkdtempSync(join(tmpdir(), 'pi-agy-bridge-'))
   const socketPath = join(directory, 'bridge.sock')
-  const catalogue: ToolDefinition[] = options.tools.map((tool) => ({
+  const catalogue: ToolDefinition[] = tools.map((tool) => ({
     name: tool.name,
     description: tool.description,
     inputSchema: tool.parameters
@@ -30,10 +34,12 @@ export function createToolBridge(options: {
 
   const sockets = new Set<Socket>()
   let closed = false
+  let helloReceived = false
+  let promptServed = false
 
   const fail = (error: Error) => {
     if (closed) return
-    options.onError(error)
+    onError(error)
   }
 
   const server = createServer((socket) => {
@@ -53,11 +59,16 @@ export function createToolBridge(options: {
             throw new Error(`Pi tool bridge received invalid JSON: ${line.slice(0, 500)}`)
           }
           if (message.type === 'hello') {
+            helloReceived = true
             write({ type: 'tools', tools: catalogue })
             continue
           }
-          void options
-            .onCall(message.name, message.arguments)
+          if (message.type === 'prompt') {
+            promptServed = true
+            write({ type: 'prompt', systemPrompt })
+            continue
+          }
+          void onCall(message.name, message.arguments)
             .then((result) =>
               write({
                 type: 'result',
@@ -88,6 +99,12 @@ export function createToolBridge(options: {
 
   return {
     socketPath,
+    get helloReceived() {
+      return helloReceived
+    },
+    get promptServed() {
+      return promptServed
+    },
     close() {
       if (closed) return
       closed = true

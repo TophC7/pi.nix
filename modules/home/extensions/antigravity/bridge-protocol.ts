@@ -1,7 +1,7 @@
 import type { McpContent } from '@pi/lib/provider/tool-results'
 
-// Line-delimited JSON over a unix socket, between Pi (server) and the MCP
-// process AGY spawns (client).
+// Line-delimited JSON over a unix socket, between Pi (server) and the MCP or
+// PreInvocation hook processes AGY spawns (clients).
 //
 // The tool catalogue travels over the socket rather than a manifest file
 // because AGY reads a *static* mcp_config.json: argv is fixed at Nix build
@@ -16,10 +16,12 @@ export type ToolDefinition = {
 
 export type McpToPi =
   | { type: 'hello' }
+  | { type: 'prompt' }
   | { type: 'call'; requestId: string; name: string; arguments: Record<string, unknown> }
 
 export type PiToMcp =
   | { type: 'tools'; tools: ToolDefinition[] }
+  | { type: 'prompt'; systemPrompt: string }
   | { type: 'result'; requestId: string; content: McpContent; isError?: boolean }
 
 export const SOCKET_ENVIRONMENT_VARIABLE = 'PI_AGY_BRIDGE_SOCKET'
