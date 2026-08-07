@@ -1,11 +1,11 @@
 import type { AssistantMessageEventStream, Context, Model, SimpleStreamOptions, Tool } from '@earendil-works/pi-ai'
-import * as piAi from '@earendil-works/pi-ai'
 import { getModels } from '@earendil-works/pi-ai/compat'
+import { newAssistantMessageEventStream } from '@pi/lib/provider/messages'
 import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent'
 import { claudeArguments, claudeEnvironment } from './claude-command.js'
 import { ClaudeProcess } from './claude-process.js'
 import { claudeEffort } from './effort.js'
-import { extractAllToolResults, type McpResult } from './extract-tool-results.js'
+import { extractAllToolResults, type McpResult } from '@pi/lib/provider/tool-results'
 import { createToolBridge, type ToolBridge } from './mcp-bridge.js'
 import { MCP_TOOL_PREFIX } from './mcp-names.js'
 import { applyLongContext, buildModels, claudeCodeModelId } from './models.js'
@@ -51,12 +51,6 @@ const runtime = (globalState[RUNTIME_KEY] as Runtime | undefined) ?? {
   activeQueries: new Set<QueryContext>()
 }
 if (!globalState[RUNTIME_KEY]) globalState[RUNTIME_KEY] = runtime
-
-const piAiCompat = piAi as any
-const newAssistantMessageEventStream: () => AssistantMessageEventStream =
-  typeof piAiCompat.createAssistantMessageEventStream === 'function'
-    ? piAiCompat.createAssistantMessageEventStream
-    : () => new piAiCompat.AssistantMessageEventStream()
 
 const models = buildModels(getModels('anthropic'))
 

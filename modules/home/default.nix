@@ -73,6 +73,12 @@ let
       source = ./extensions/claude;
       entry = "index.ts";
     };
+    # Provider backed by the `agy` CLI. Inert until programs.pi.antigravity is
+    # enabled: without the tool gate installed, every spawn refuses.
+    antigravity = {
+      source = ./extensions/antigravity;
+      entry = "index.ts";
+    };
   };
   piPackages = lib.fs.importAttrs ./packages {
     inherit
@@ -107,7 +113,10 @@ let
   ];
 in
 {
-  imports = [ ./lib/pi-extension-system.nix ];
+  imports = [
+    ./lib/pi-extension-system.nix
+    ./antigravity.nix
+  ];
 
   options.programs.pi = {
     enable = lib.mkEnableOption "Pi coding agent configuration";

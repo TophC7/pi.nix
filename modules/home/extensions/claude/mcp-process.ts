@@ -1,9 +1,9 @@
+import { connectUnixSocket, mcpInputSchema, McpOutput } from '@pi/lib/provider/mcp-transport'
+import { NdjsonLineBuffer } from '@pi/lib/provider/ndjson'
 import { readFileSync } from 'node:fs'
-import { createConnection, type Socket } from 'node:net'
 import type { McpToPiMessage, PiToMcpMessage } from './bridge-protocol.js'
 
 const TOOL_USE_ID_META = 'claudecode/toolUseId'
-const EMPTY_SCHEMA = { type: 'object', properties: {} }
 
 type ToolDefinition = {
   name: string
@@ -23,7 +23,8 @@ if (!manifestPath || !socketPath) throw new Error('usage: mcp-process.ts <manife
 
 const tools = JSON.parse(readFileSync(manifestPath, 'utf8')) as ToolDefinition[]
 const byName = new Map(tools.map((tool) => [tool.name, tool]))
-const socket = await connect(socketPath)
+const socket = await connectUnixSocket(socketPath)
+const output = new McpOutput()
 const pending = new Map<
   string,
   {
@@ -31,22 +32,22 @@ const pending = new Map<
     reject: (error: Error) => void
   }
 >()
-let socketBuffer = ''
 let announcedReady = false
-let outputChain = Promise.resolve()
+const socketLines = new NdjsonLineBuffer('Pi tool bridge')
 
 socket.setEncoding('utf8')
 socket.on('data', (chunk) => {
-  socketBuffer += chunk
-  const lines = socketBuffer.split('\n')
-  socketBuffer = lines.pop() ?? ''
-  for (const line of lines) {
-    if (!line.trim()) continue
-    const result = JSON.parse(line) as PiToMcpMessage
-    const request = pending.get(result.requestId)
-    if (!request) continue
-    pending.delete(result.requestId)
-    request.resolve(result)
+  try {
+    for (const line of socketLines.push(chunk)) {
+      if (!line.trim()) continue
+      const result = JSON.parse(line) as PiToMcpMessage
+      const request = pending.get(result.requestId)
+      if (!request) continue
+      pending.delete(result.requestId)
+      request.resolve(result)
+    }
+  } catch (error) {
+    socket.destroy(error instanceof Error ? error : new Error(String(error)))
   }
 })
 socket.on('error', (error) => rejectPending(error))
@@ -56,16 +57,15 @@ socket.on('close', () => {
 })
 
 const decoder = new TextDecoder()
-let stdinBuffer = ''
+const stdinLines = new NdjsonLineBuffer('Claude MCP input')
 for await (const chunk of Bun.stdin.stream()) {
-  stdinBuffer += decoder.decode(chunk, { stream: true })
-  const lines = stdinBuffer.split('\n')
-  stdinBuffer = lines.pop() ?? ''
-  for (const line of lines) {
-    if (!line.trim()) continue
-    void handle(JSON.parse(line) as JsonRpcRequest)
+  for (const line of stdinLines.push(decoder.decode(chunk, { stream: true }))) {
+    if (line.trim()) void handle(JSON.parse(line) as JsonRpcRequest)
   }
 }
+stdinLines.push(decoder.decode())
+const stdinTail = stdinLines.finish()
+if (stdinTail?.trim()) void handle(JSON.parse(stdinTail) as JsonRpcRequest)
 
 async function handle(request: JsonRpcRequest): Promise<void> {
   try {
@@ -89,7 +89,7 @@ async function handle(request: JsonRpcRequest): Promise<void> {
           tools: tools.map((tool) => ({
             name: tool.name,
             description: tool.description,
-            inputSchema: inputSchema(tool.inputSchema)
+            inputSchema: mcpInputSchema(tool.inputSchema)
           }))
         })
         return
@@ -147,36 +147,9 @@ function announceReady(): void {
 
 function respond(id: JsonRpcRequest['id'], result: unknown): Promise<void> {
   if (id === undefined) return Promise.resolve()
-  return write({ jsonrpc: '2.0', id, result })
+  return output.write({ jsonrpc: '2.0', id, result })
 }
 
 function respondError(id: string | number, code: number, message: string): Promise<void> {
-  return write({ jsonrpc: '2.0', id, error: { code, message } })
-}
-
-function write(message: unknown): Promise<void> {
-  outputChain = outputChain.then(async () => {
-    await Bun.write(Bun.stdout, `${JSON.stringify(message)}\n`)
-  })
-  return outputChain
-}
-
-function inputSchema(schema: unknown): Record<string, unknown> {
-  const value = schema as Record<string, unknown> | undefined
-  return value?.type === 'object' && value.properties ? value : EMPTY_SCHEMA
-}
-
-async function connect(path: string): Promise<Socket> {
-  for (let attempt = 0; attempt < 100; attempt++) {
-    try {
-      return await new Promise<Socket>((resolve, reject) => {
-        const candidate = createConnection(path)
-        candidate.once('connect', () => resolve(candidate))
-        candidate.once('error', reject)
-      })
-    } catch {
-      await Bun.sleep(20)
-    }
-  }
-  throw new Error(`Unable to connect to Pi tool bridge at ${path}`)
+  return output.write({ jsonrpc: '2.0', id, error: { code, message } })
 }

@@ -1,9 +1,5 @@
-import {
-  calculateCost,
-  type AssistantMessage,
-  type AssistantMessageEventStream,
-  type Model
-} from '@earendil-works/pi-ai'
+import { calculateCost, type AssistantMessage, type AssistantMessageEventStream, type Model } from '@earendil-works/pi-ai'
+import { newAssistantMessage } from '@pi/lib/provider/messages'
 import type { ClaudeMessage } from './claude-process.js'
 import { MCP_TOOL_PREFIX } from './mcp-names.js'
 
@@ -229,26 +225,6 @@ export class ClaudeTurn {
     const mapped = this.toolNames.get(name) ?? this.toolNames.get(name.toLowerCase())
     if (mapped) return mapped
     return name.toLowerCase().startsWith(MCP_TOOL_PREFIX) ? name.slice(MCP_TOOL_PREFIX.length) : name
-  }
-}
-
-function newAssistantMessage(model: Model<any>): AssistantMessage {
-  return {
-    role: 'assistant',
-    content: [],
-    api: model.api,
-    provider: model.provider,
-    model: model.id,
-    usage: {
-      input: 0,
-      output: 0,
-      cacheRead: 0,
-      cacheWrite: 0,
-      totalTokens: 0,
-      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }
-    },
-    stopReason: 'stop',
-    timestamp: Date.now()
   }
 }
 

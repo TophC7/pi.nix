@@ -1,5 +1,5 @@
 import type { Context } from '@earendil-works/pi-ai'
-import type { McpResult } from './extract-tool-results.js'
+import type { McpResult } from '@pi/lib/provider/tool-results'
 import type { PromptStream } from './prompt-stream.js'
 import type { ClaudeTurn } from './stream-events.js'
 

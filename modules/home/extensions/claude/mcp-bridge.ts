@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { McpToPiMessage, PiToMcpMessage } from './bridge-protocol.js'
-import type { McpResult } from './extract-tool-results.js'
+import type { McpResult } from '@pi/lib/provider/tool-results'
 import { MCP_SERVER_NAME } from './mcp-names.js'
 import type { QueryContext } from './query-state.js'
 

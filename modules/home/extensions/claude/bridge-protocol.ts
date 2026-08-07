@@ -1,4 +1,4 @@
-import type { McpResult } from './extract-tool-results.js'
+import type { McpResult } from '@pi/lib/provider/tool-results'
 
 export type McpToPiMessage =
   | { type: 'ready' }

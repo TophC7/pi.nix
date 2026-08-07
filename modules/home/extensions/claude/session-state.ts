@@ -1,12 +1,17 @@
 import type { Context, UserMessage } from '@earendil-works/pi-ai'
+import {
+  contextDigest as seededContextDigest,
+  currentTurnStart,
+  restoredSessionState as validatedSessionState,
+  transformMessage,
+  type ContextDigest
+} from '@pi/lib/provider/session-state'
 import type { InputContent } from './prompt-stream.js'
 
-export const SESSION_ENTRY_TYPE = 'claude-session'
+export { extendContextDigest, priorMessages } from '@pi/lib/provider/session-state'
+export type { ContextDigest } from '@pi/lib/provider/session-state'
 
-export type ContextDigest = {
-  contextHash: string
-  messageCount: number
-}
+export const SESSION_ENTRY_TYPE = 'claude-session'
 
 export type PersistedSessionState =
   | { version: 2; reset: true }
@@ -16,24 +21,12 @@ export type PersistedSessionState =
       modelId: string
     } & ContextDigest)
 
-const EMPTY_CONTEXT_HASH = digestText('claude-context-v2')
+const CONTEXT_SEED = 'claude-context-v2'
 
 export function restoredSessionState(
   entries: Array<{ type: string; customType?: string; data?: unknown }>
 ): PersistedSessionState | undefined {
-  let latest: unknown
-  for (let index = entries.length - 1; index >= 0; index--) {
-    const entry = entries[index]
-    if (entry.type === 'custom' && entry.customType === SESSION_ENTRY_TYPE) {
-      latest = entry.data
-      break
-    }
-  }
-  return isPersistedState(latest) ? latest : undefined
-}
-
-export function priorMessages(messages: Context['messages']): Context['messages'] {
-  return messages.slice(0, currentTurnStart(messages))
+  return validatedSessionState<PersistedSessionState>(entries, SESSION_ENTRY_TYPE, 2, 'claudeSessionId')
 }
 
 export function currentPrompt(messages: Context['messages']): InputContent[] {
@@ -45,7 +38,7 @@ export function currentPrompt(messages: Context['messages']): InputContent[] {
 }
 
 export function bootstrapPrompt(messages: Context['messages']): InputContent[] {
-  const transcript = messages.map(bootstrapMessage)
+  const transcript = messages.map((message) => transformMessage(message, '[image data attached separately when current]'))
   const blocks: InputContent[] = [
     {
       type: 'text',
@@ -74,24 +67,7 @@ export function bootstrapPrompt(messages: Context['messages']): InputContent[] {
 }
 
 export function contextDigest(messages: Context['messages']): ContextDigest {
-  return extendContextDigest({ contextHash: EMPTY_CONTEXT_HASH, messageCount: 0 }, messages)
-}
-
-export function extendContextDigest(prefix: ContextDigest, messages: Context['messages']): ContextDigest {
-  let contextHash = prefix.contextHash
-  for (const message of messages) {
-    contextHash = digestText(`${contextHash}\u0000${JSON.stringify(hashMessage(message))}`)
-  }
-  return {
-    contextHash,
-    messageCount: prefix.messageCount + messages.length
-  }
-}
-
-function currentTurnStart(messages: Context['messages']): number {
-  let start = messages.length
-  while (start > 0 && messages[start - 1].role === 'user') start--
-  return start
+  return seededContextDigest(CONTEXT_SEED, messages)
 }
 
 function appendUserContent(blocks: InputContent[], message: UserMessage): void {
@@ -112,50 +88,4 @@ function appendUserContent(blocks: InputContent[], message: UserMessage): void {
       })
     }
   }
-}
-
-function bootstrapMessage(message: unknown): unknown {
-  return transform(message, true)
-}
-
-function hashMessage(message: unknown): unknown {
-  return transform(message, false)
-}
-
-function transform(value: unknown, omitImageData: boolean): unknown {
-  if (Array.isArray(value)) return value.map((item) => transform(item, omitImageData))
-  if (!value || typeof value !== 'object') return value
-  const source = value as Record<string, unknown>
-  const result: Record<string, unknown> = {}
-  for (const key of Object.keys(source).sort()) {
-    if (key === 'timestamp' || key === 'usage' || key === 'cost') continue
-    if (key === 'data' && source.type === 'image') {
-      result.data = omitImageData
-        ? '[image data attached separately when current]'
-        : `[sha256:${digestText(String(source.data ?? ''))}]`
-      continue
-    }
-    result[key] = transform(source[key], omitImageData)
-  }
-  return result
-}
-
-function digestText(value: string): string {
-  const hasher = new Bun.CryptoHasher('sha256')
-  hasher.update(value)
-  return hasher.digest('hex')
-}
-
-function isPersistedState(value: unknown): value is PersistedSessionState {
-  if (!value || typeof value !== 'object') return false
-  const state = value as Record<string, unknown>
-  if (state.version !== 2) return false
-  if (state.reset === true) return true
-  return (
-    typeof state.claudeSessionId === 'string' &&
-    typeof state.modelId === 'string' &&
-    typeof state.contextHash === 'string' &&
-    Number.isInteger(state.messageCount) &&
-    Number(state.messageCount) >= 0
-  )
 }
